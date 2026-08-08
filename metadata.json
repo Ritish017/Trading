@@ -1,0 +1,6 @@
+{
+  "name": "Apex NSE/BSE Market Intelligence Terminal",
+  "description": "Production-quality Indian stock market intelligence terminal featuring real-time NSE/BSE stocks & indices, NIFTY 50 & BANKNIFTY data pipelines, FII/DII flow analytics, market depth, order flow, technical analysis, and Gemini AI market intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

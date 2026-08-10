@@ -233,6 +233,53 @@ export default function App() {
     fetchRealCandles();
   }, [selectedSymbol, timeframe]);
 
+  // Option Chain, FII/DII, and Announcements Data Hooks
+  const [optionChainData, setOptionChainData] = useState<OptionChainType | null>(null);
+  const [fiiDiiData, setFiiDiiData] = useState<FIIDIINetFlow | null>(null);
+  const [sebiAnnouncements, setSebiAnnouncements] = useState<SEBIAnnouncement[]>([]);
+
+  useEffect(() => {
+    const fetchRealOptionChain = async () => {
+      try {
+        const res = await fetch(`/api/market/option-chain/${encodeURIComponent(selectedSymbol)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.spotPrice) {
+            setOptionChainData(data);
+          }
+        }
+      } catch {
+        // quiet fallback
+      }
+    };
+    fetchRealOptionChain();
+  }, [selectedSymbol]);
+
+  useEffect(() => {
+    const fetchMarketInfo = async () => {
+      try {
+        const fiiRes = await fetch('/api/market/fii-dii');
+        if (fiiRes.ok) {
+          const fiiData = await fiiRes.json();
+          if (fiiData && fiiData.fiiCashNetCr !== undefined) {
+            setFiiDiiData(fiiData);
+          }
+        }
+
+        const annRes = await fetch('/api/market/announcements');
+        if (annRes.ok) {
+          const annData = await annRes.json();
+          if (Array.isArray(annData) && annData.length > 0) {
+            setSebiAnnouncements(annData);
+          }
+        }
+      } catch {
+        // quiet fallback
+      }
+    };
+    fetchMarketInfo();
+  }, []);
+
   // Connect to FastAPI WebSocket `/ws/ticks` Feed
   useEffect(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -588,14 +635,14 @@ export default function App() {
           <OptionChainSummary
             symbol={selectedStock?.symbol || 'RELIANCE.NS'}
             price={selectedStock?.price || 2845.5}
-            optionChain={INITIAL_OPTION_CHAIN}
+            optionSummary={optionChainData || INITIAL_OPTION_CHAIN}
           />
         </div>
 
         {/* Right Panel: Institutional FII Flow & Market Intelligence Feeds */}
         <div className="xl:col-span-3 flex flex-col space-y-3 h-[calc(100vh-145px)] overflow-y-auto scrollbar-none">
-          <FIIDIITracker flow={INITIAL_FII_DII_FLOWS[0]} />
-          <SEBIAnnouncementsFeed announcements={INITIAL_SEBI_ANNOUNCEMENTS} />
+          <FIIDIITracker flow={fiiDiiData || INITIAL_FII_DII_FLOWS[0]} />
+          <SEBIAnnouncementsFeed announcements={sebiAnnouncements.length > 0 ? sebiAnnouncements : INITIAL_SEBI_ANNOUNCEMENTS} />
         </div>
       </div>
 

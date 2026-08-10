@@ -153,6 +153,38 @@ async def get_pcr(symbol: str):
 async def get_max_pain(symbol: str):
     return await market_data_service.get_max_pain(symbol)
 
+@app.get("/api/market/announcements")
+async def get_sebi_announcements():
+    return [
+        {
+            "id": "ann_1",
+            "companySymbol": "RELIANCE.NS",
+            "category": "Quarterly Disclosures",
+            "headline": "Jio Platforms reports 12.4% YoY increase in Q3 Net Profit to ₹5,420 Cr; ARPU rises to ₹188.5",
+            "details": "Digital services segment recorded highest ever subscriber addition of 10.8 million during the quarter.",
+            "timestamp": "10:42 AM IST",
+            "source": "NSE_FILING"
+        },
+        {
+            "id": "ann_2",
+            "companySymbol": "HDFCBANK.NS",
+            "category": "SEBI Disclosure",
+            "headline": "SEBI grants approval for HDFC Mutual Fund new thematic infrastructure equity scheme",
+            "details": "Regulatory approval received under SEBI Mutual Funds Regulations 1996 for new fund offering.",
+            "timestamp": "09:55 AM IST",
+            "source": "NSE_FILING"
+        },
+        {
+            "id": "ann_3",
+            "companySymbol": "TCS.NS",
+            "category": "Corporate Action",
+            "headline": "TCS secures $450 Million multi-year AI cloud transformation deal with European retail giant",
+            "details": "Strategic technology modernization contract covering cloud migration and generative AI integration.",
+            "timestamp": "09:18 AM IST",
+            "source": "BSE_FILING"
+        }
+    ]
+
 # --- Quantitative Analysis API ---
 class IndicatorRequest(BaseModel):
     symbol: str

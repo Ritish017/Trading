@@ -12,6 +12,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { AICopilotDrawer } from './components/AICopilotDrawer';
 import { ApexLearnSection } from './components/ApexLearnSection';
 import { MarketReplayModal } from './components/MarketReplayModal';
+import { DataHealthBar } from './components/DataHealthBar';
 import { BookOpen, Bot, RotateCcw } from 'lucide-react';
 
 import { 
@@ -24,6 +25,8 @@ import {
   IndianMarketAIReport, 
   PaperPosition 
 } from './types/indianMarket';
+
+import { MarketQuote, MarketProvenance } from './types/marketQuote';
 
 import { 
   INITIAL_INDICES, 
@@ -39,6 +42,35 @@ import {
   IndianCandle, 
   generateLocalIndianAIReport 
 } from './utils/indianTechnicalAnalysis';
+
+function toMarketQuote(raw: any, isIndex = false): MarketQuote {
+  const ltp = raw.price ?? raw.value ?? raw.ltp ?? 0;
+  const prevClose = raw.prevClose ?? raw.previousClose ?? raw.previous_close ?? ltp;
+  const change = raw.change ?? Number((ltp - prevClose).toFixed(2));
+  const changePercent = raw.changePercent ?? raw.change_percent ?? (prevClose > 0 ? Number((((ltp - prevClose) / prevClose) * 100).toFixed(2)) : 0);
+
+  return {
+    symbol: raw.symbol,
+    displayName: raw.name || raw.displayName || raw.symbol,
+    exchange: raw.exchange || 'NSE',
+    instrumentKey: raw.instrumentKey || raw.instrument_key || raw.symbol,
+    instrumentType: isIndex ? 'INDEX' : 'EQUITY',
+    ltp: ltp,
+    previousClose: prevClose,
+    open: raw.open || ltp,
+    high: raw.high || ltp,
+    low: raw.low || ltp,
+    close: ltp,
+    change: change,
+    changePercent: changePercent,
+    volume: raw.volume || 0,
+    timestamp: Math.floor(Date.now() / 1000),
+    receivedAt: raw.receivedAt || Date.now(),
+    dataAgeMs: raw.receivedAt ? Math.max(0, Date.now() - raw.receivedAt) : 0,
+    source: (raw.source as MarketProvenance) || 'UPSTOX',
+    marketStatus: raw.marketStatus || 'LIVE'
+  };
+}
 
 export default function App() {
   // 1. Core State with robust localStorage validation
@@ -64,6 +96,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [timeframe, setTimeframe] = useState<'1m' | '5m' | '15m' | '1h' | '1D'>('5m');
   const [wsConnected, setWsConnected] = useState<boolean>(false);
+  const [restHealthy, setRestHealthy] = useState<boolean>(true);
+  const [lastTickTimeMs, setLastTickTimeMs] = useState<number>(Date.now());
   const [feedStatus, setFeedStatus] = useState<FeedStatusInfo>({
     status: 'INITIALIZING',
     mode: 'LIVE',
@@ -132,8 +166,12 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           setFeedStatus(data);
+          setRestHealthy(true);
+        } else {
+          setRestHealthy(false);
         }
       } catch {
+        setRestHealthy(false);
         setFeedStatus((prev) => ({
           ...prev,
           status: 'DISCONNECTED',
@@ -156,8 +194,12 @@ export default function App() {
           .join(',');
         const res = await fetch(`/api/market/quotes?symbols=${encodeURIComponent(symbolList)}`);
         if (res.ok) {
+          setRestHealthy(true);
           const quotes: Array<any> = await res.json();
           if (Array.isArray(quotes) && quotes.length > 0) {
+            const now = Date.now();
+            setLastTickTimeMs(now);
+
             setStocks((prev) =>
               (prev || []).map((stock) => {
                 const q = quotes.find((item) => item && (item.symbol === stock.symbol || item.instrument_key === stock.symbol));
@@ -183,21 +225,24 @@ export default function App() {
               (prev || []).map((idx) => {
                 const q = quotes.find((item) => item && (item.symbol === idx.symbol || item.instrument_key === idx.symbol));
                 if (!q || !q.ltp) return idx;
+                const newLtp = q.ltp;
+                const pClose = q.previous_close || idx.value || newLtp;
                 return {
                   ...idx,
-                  value: q.ltp,
-                  change: q.change ?? 0,
-                  changePercent: q.change_percent ?? 0,
+                  value: newLtp,
+                  change: q.change ?? Number((newLtp - pClose).toFixed(2)),
+                  changePercent: q.change_percent ?? Number((((newLtp - pClose) / pClose) * 100).toFixed(2)),
                 };
               })
             );
           }
+        } else {
+          setRestHealthy(false);
         }
       } catch {
-        // quiet fallback
+        setRestHealthy(false);
       }
     };
-
     fetchRealQuotes();
     const interval = setInterval(fetchRealQuotes, 6000);
     return () => clearInterval(interval);
@@ -217,7 +262,7 @@ export default function App() {
               high: c.high,
               low: c.low,
               close: c.close,
-              volume: c.volume || Math.floor(Math.random() * 5000) + 1000,
+              volume: c.volume || 5000,
               vwap: c.vwap || c.close,
             }));
             setCandles((prev) => ({
@@ -233,9 +278,10 @@ export default function App() {
     fetchRealCandles();
   }, [selectedSymbol, timeframe]);
 
-  // Option Chain, FII/DII, and Announcements Data Hooks
+  // Option Chain, FII/DII, Market Breadth, and Announcements Data Hooks
   const [optionChainData, setOptionChainData] = useState<OptionChainType | null>(null);
   const [fiiDiiData, setFiiDiiData] = useState<FIIDIINetFlow | null>(null);
+  const [marketBreadthData, setMarketBreadthData] = useState<MarketBreadth | null>(null);
   const [sebiAnnouncements, setSebiAnnouncements] = useState<SEBIAnnouncement[]>([]);
 
   useEffect(() => {
@@ -266,6 +312,14 @@ export default function App() {
           }
         }
 
+        const breadthRes = await fetch('/api/market/breadth');
+        if (breadthRes.ok) {
+          const bData = await breadthRes.json();
+          if (bData && bData.advances !== undefined) {
+            setMarketBreadthData(bData);
+          }
+        }
+
         const annRes = await fetch('/api/market/announcements');
         if (annRes.ok) {
           const annData = await annRes.json();
@@ -287,14 +341,12 @@ export default function App() {
     const wsUrl = `${wsProtocol}//${wsHost}/ws/ticks`;
     
     let ws: WebSocket | null = null;
-    let fallbackInterval: any = null;
 
     try {
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         setWsConnected(true);
-        if (fallbackInterval) clearInterval(fallbackInterval);
       };
 
       ws.onmessage = (event) => {
@@ -302,6 +354,8 @@ export default function App() {
           const payload = JSON.parse(event.data);
           if (payload.type === 'TICK' && payload.data) {
             const tick = payload.data;
+            setLastTickTimeMs(Date.now());
+
             setStocks((prev) =>
               (prev || []).map((s) => {
                 if (!s || !s.symbol) return s;
@@ -339,36 +393,10 @@ export default function App() {
       setWsConnected(false);
     }
 
-    // STRICT Fallback simulation rule: Only run client simulation if provider status is SIMULATED.
-    // NEVER run simulation silently if backend reports LIVE or DISCONNECTED.
-    fallbackInterval = setInterval(() => {
-      if (feedStatus.status === 'SIMULATED') {
-        setStocks((prevStocks) =>
-          (prevStocks || []).map((stock) => {
-            if (!stock || !stock.symbol) return stock;
-            const volatility = stock.price * 0.0015;
-            const delta = (Math.random() - 0.49) * volatility;
-            const newPrice = Number(Math.max(stock.price + delta, 1.0).toFixed(2));
-            const priceDiff = newPrice - stock.prevClose;
-            return {
-              ...stock,
-              price: newPrice,
-              change: Number((newPrice - stock.prevClose).toFixed(2)),
-              changePercent: Number(((priceDiff / stock.prevClose) * 100).toFixed(2)),
-              high: Math.max(stock.high, newPrice),
-              low: Math.min(stock.low, newPrice),
-              vwap: Number((stock.vwap * 0.9 + newPrice * 0.1).toFixed(2)),
-            };
-          })
-        );
-      }
-    }, 1200);
-
     return () => {
       if (ws) ws.close();
-      if (fallbackInterval) clearInterval(fallbackInterval);
     };
-  }, [feedStatus.status]);
+  }, []);
 
   // Sync Candlestick History and Positions PnL on Tick
   useEffect(() => {
@@ -389,7 +417,7 @@ export default function App() {
           high: currentPrice,
           low: currentPrice,
           close: currentPrice,
-          volume: Math.floor(Math.random() * 5000) + 1000,
+          volume: 5000,
           vwap: currentPrice,
         };
         return {
@@ -402,7 +430,7 @@ export default function App() {
           high: Math.max(lastCandle.high, currentPrice),
           low: Math.min(lastCandle.low, currentPrice),
           close: currentPrice,
-          vwap: Number(((lastCandle.vwap * 4 + currentPrice) / 5).toFixed(2)),
+          vwap: Number((lastCandle.vwap * 0.95 + currentPrice * 0.05).toFixed(2)),
         };
         return {
           ...prev,
@@ -412,16 +440,16 @@ export default function App() {
     });
 
     setPaperPositions((prev) =>
-      (prev || []).map((pos) => {
-        if (pos && pos.symbol === selectedSymbol) {
-          const diff = currentPrice - pos.entryPrice;
-          const pnl = pos.side === 'BUY' ? diff * pos.quantity : -diff * pos.quantity;
-          const pnlPct = (pnl / (pos.entryPrice * pos.quantity)) * 100;
+      prev.map((pos) => {
+        if (pos.symbol === selectedSymbol) {
+          const priceDiff = pos.side === 'BUY' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
+          const unPnL = Number((priceDiff * pos.quantity).toFixed(2));
+          const unPnLPct = Number(((priceDiff / pos.entryPrice) * 100).toFixed(2));
           return {
             ...pos,
-            currentPrice,
-            unrealizedPnL: Number(pnl.toFixed(2)),
-            unrealizedPnLPct: Number(pnlPct.toFixed(2)),
+            currentPrice: currentPrice,
+            unrealizedPnL: unPnL,
+            unrealizedPnLPercent: unPnLPct,
           };
         }
         return pos;
@@ -429,130 +457,91 @@ export default function App() {
     );
   }, [selectedStock?.price, selectedSymbol]);
 
+  // Handlers for AI, Paper Trading & Command Palette
   const handleGenerateAIReport = async (symbol: string) => {
-    const stockObj = (stocks && stocks.find((s) => s && s.symbol === symbol)) || selectedStock;
-    if (!stockObj) return;
     setIsAILoading(true);
     setIsAIModalOpen(true);
-
     try {
-      const res = await fetch('/api/indian-market-intelligence', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: stockObj.symbol,
-          name: stockObj.name,
-          sector: stockObj.sector,
-          price: stockObj.price,
-          change24h: stockObj.changePercent,
-          niftyPrice: indices[0]?.value || 24580,
-          fiiFlow: '+1,840.5',
-          diiFlow: '+1,210.8',
-          pcr: 1.18,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setAiReport(data);
-      } else {
-        setAiReport(generateLocalIndianAIReport(stockObj));
-      }
+      const targetStock = stocks.find((s) => s.symbol === symbol) || selectedStock;
+      const report = generateLocalIndianAIReport(targetStock);
+      setAiReport(report);
     } catch {
-      setAiReport(generateLocalIndianAIReport(stockObj));
+      // quiet fallback
     } finally {
       setIsAILoading(false);
     }
   };
 
-  const handlePlacePaperOrder = async (order: {
+  const handlePlacePaperOrder = (order: {
     symbol: string;
-    companyName: string;
     productType: 'CNC (Delivery)' | 'MIS (Intraday)';
     side: 'BUY' | 'SELL';
     quantity: number;
-    price: number;
     targetPrice?: number;
     stopLoss?: number;
   }) => {
-    try {
-      await fetch('/api/paper/order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(order),
-      });
-    } catch {
-      // Fallback local state handling
+    const targetStock = stocks.find((s) => s.symbol === order.symbol) || selectedStock;
+    const requiredCapital = targetStock.price * order.quantity;
+
+    if (order.side === 'BUY' && paperBalance < requiredCapital) {
+      alert('Insufficient Paper Trading Margin Balance!');
+      return;
     }
 
-    const marginRequired = order.productType === 'MIS (Intraday)' ? (order.quantity * order.price * 0.20) : (order.quantity * order.price);
-    setPaperBalance((prev) => prev - marginRequired);
-
-    const newPosition: PaperPosition = {
-      id: `pos_${Date.now()}`,
-      symbol: order.symbol,
-      companyName: order.companyName,
+    const newPos: PaperPosition = {
+      id: 'pos_' + Date.now(),
+      symbol: targetStock.symbol,
+      companyName: targetStock.name,
       productType: order.productType,
       side: order.side,
       quantity: order.quantity,
-      entryPrice: order.price,
-      currentPrice: order.price,
+      entryPrice: targetStock.price,
+      currentPrice: targetStock.price,
       unrealizedPnL: 0,
-      unrealizedPnLPct: 0,
+      unrealizedPnLPercent: 0,
       targetPrice: order.targetPrice,
       stopLoss: order.stopLoss,
       timestamp: Date.now(),
     };
-    setPaperPositions((prev) => [newPosition, ...prev]);
+
+    if (order.side === 'BUY') {
+      setPaperBalance((prev) => prev - requiredCapital);
+    }
+    setPaperPositions((prev) => [newPos, ...prev]);
   };
 
-  const handleClosePaperPosition = async (id: string) => {
-    setPaperPositions((prev) => {
-      const pos = (prev || []).find((p) => p && p.id === id);
-      if (!pos) return prev;
+  const handleClosePaperPosition = (id: string) => {
+    const pos = paperPositions.find((p) => p.id === id);
+    if (!pos) return;
 
-      const returnedMargin = pos.productType === 'MIS (Intraday)' ? (pos.quantity * pos.entryPrice * 0.20) : (pos.quantity * pos.entryPrice);
-      const netCapitalReturned = returnedMargin + pos.unrealizedPnL;
-
-      setPaperBalance((b) => b + netCapitalReturned);
-      return prev.filter((p) => p && p.id !== id);
-    });
+    const returnAmount = pos.quantity * pos.currentPrice + pos.unrealizedPnL;
+    setPaperBalance((prev) => prev + returnAmount);
+    setPaperPositions((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const handleCommandPaletteAction = (actionId: string, payload?: any) => {
-    if (actionId === 'TOGGLE_COMMAND_PALETTE') {
-      setIsCommandPaletteOpen((prev) => !prev);
-    } else if (actionId === 'SELECT_SYMBOL' && payload) {
-      setSelectedSymbol(payload);
-    } else if (actionId === 'ANALYZE_STOCK') {
-      handleGenerateAIReport(selectedSymbol);
-    } else if (actionId === 'OPEN_PAPER_TRADING') {
+  const handleCommandPaletteAction = (action: string, payload?: any) => {
+    if (action === 'SELECT_STOCK' && payload) {
+      setSelectedSymbol(payload.symbol);
+    } else if (action === 'AI_REPORT' && payload) {
+      handleGenerateAIReport(payload.symbol);
+    } else if (action === 'PAPER_TRADE') {
       setIsPaperModalOpen(true);
-    } else if (actionId === 'OPEN_REPLAY') {
-      setIsReplayOpen(true);
-    } else if (actionId === 'OPEN_LEARN') {
-      setIsLearnOpen(true);
-    } else if (actionId === 'OPEN_COPILOT') {
-      setIsCopilotOpen(true);
     }
   };
 
-  const filteredStocks = searchQuery
-    ? (stocks || []).filter(
-        (s) =>
-          s &&
-          s.symbol &&
-          (s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (s.name && s.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-            (s.sector && s.sector.toLowerCase().includes(searchQuery.toLowerCase())))
-      )
-    : stocks || [];
+  const filteredStocks = (stocks || []).filter((s) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.sector.toLowerCase().includes(q);
+  });
+
+  const indexQuotes: MarketQuote[] = (indices || []).map((idx) => toMarketQuote(idx, true));
 
   return (
     <div className="min-h-screen bg-[#0f1015] text-stone-100 flex flex-col font-sans selection:bg-amber-900 selection:text-amber-100">
       {/* 1. Top Live NSE/BSE Index Ticker Bar with Live Data Badge */}
       <IndexTickerBar
-        indices={indices}
+        indices={indexQuotes}
         feedStatus={feedStatus}
         onSelectIndex={() => {}}
       />
@@ -561,8 +550,8 @@ export default function App() {
       <TerminalHeader
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        fiiDiiFlow={INITIAL_FII_DII_FLOWS[0]}
-        breadth={INITIAL_MARKET_BREADTH}
+        fiiDiiFlow={fiiDiiData || INITIAL_FII_DII_FLOWS[0]}
+        breadth={marketBreadthData || INITIAL_MARKET_BREADTH}
         onOpenAIIntelligence={() => handleGenerateAIReport(selectedSymbol)}
         onOpenPaperTrading={() => setIsPaperModalOpen(true)}
       />
@@ -609,18 +598,18 @@ export default function App() {
       {/* Main Terminal Grid Dashboard */}
       <div className="flex-1 p-3 grid grid-cols-1 xl:grid-cols-12 gap-3 overflow-hidden">
         {/* Left Panel: Watchlist */}
-        <div className="xl:col-span-3 h-[calc(100vh-145px)] overflow-hidden">
+        <div className="xl:col-span-3 h-[calc(100vh-170px)] overflow-hidden">
           <NSEWatchlist
             stocks={filteredStocks}
             selectedStock={selectedStock}
-            onSelectStock={setSelectedSymbol ? ((st) => setSelectedSymbol(st?.symbol || 'RELIANCE.NS')) : () => {}}
-            onToggleFavorite={() => {}}
+            onSelectStock={(st) => setSelectedSymbol(st?.symbol || 'RELIANCE.NS')}
+            onToggleFavorite={(sym) => setStocks((prev) => (prev || []).map((s) => s.symbol === sym ? { ...s, isFavorite: !s.isFavorite } : s))}
             onOpenAIForStock={(st) => handleGenerateAIReport(st?.symbol || selectedSymbol)}
           />
         </div>
 
         {/* Center Panel: Main Chart & Option Chain */}
-        <div className="xl:col-span-6 flex flex-col space-y-3 h-[calc(100vh-145px)] overflow-y-auto scrollbar-none">
+        <div className="xl:col-span-6 flex flex-col space-y-3 h-[calc(100vh-170px)] overflow-y-auto scrollbar-none">
           <IndianCandleChart
             symbol={selectedStock?.symbol || 'RELIANCE.NS'}
             name={selectedStock?.name || 'Reliance Industries'}
@@ -640,18 +629,30 @@ export default function App() {
         </div>
 
         {/* Right Panel: Institutional FII Flow & Market Intelligence Feeds */}
-        <div className="xl:col-span-3 flex flex-col space-y-3 h-[calc(100vh-145px)] overflow-y-auto scrollbar-none">
+        <div className="xl:col-span-3 flex flex-col space-y-3 h-[calc(100vh-170px)] overflow-y-auto scrollbar-none">
           <FIIDIITracker flow={fiiDiiData || INITIAL_FII_DII_FLOWS[0]} />
           <SEBIAnnouncementsFeed announcements={sebiAnnouncements.length > 0 ? sebiAnnouncements : INITIAL_SEBI_ANNOUNCEMENTS} />
         </div>
       </div>
 
+      {/* Data Health & Latency Bottom Status Bar */}
+      <DataHealthBar
+        provider={(feedStatus.active_provider as MarketProvenance) || 'UPSTOX'}
+        status={feedStatus.status === 'SIMULATED' ? 'SIMULATED' : 'LIVE'}
+        wsConnected={wsConnected}
+        restConnected={restHealthy}
+        lastTickTimeMs={lastTickTimeMs}
+        subscribedCount={stocks.length}
+      />
+
       {/* Modals & Drawers */}
       <MarketIntelligenceModal
         isOpen={isAIModalOpen}
         onClose={() => setIsAIModalOpen(false)}
+        stock={selectedStock}
         report={aiReport}
         isLoading={isAILoading}
+        onReScan={(sym) => handleGenerateAIReport(sym)}
       />
 
       {selectedStock && (

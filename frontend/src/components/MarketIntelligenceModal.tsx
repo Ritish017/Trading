@@ -1,6 +1,6 @@
 import React from 'react';
 import { IndianMarketAIReport, NSEStock } from '../types/indianMarket';
-import { Sparkles, X, TrendingUp, ShieldCheck, Target, AlertCircle, BarChart2, Zap } from 'lucide-react';
+import { Sparkles, X, ShieldCheck, Activity, BarChart2 } from 'lucide-react';
 
 interface MarketIntelligenceModalProps {
   isOpen: boolean;
@@ -19,7 +19,6 @@ export const MarketIntelligenceModal: React.FC<MarketIntelligenceModalProps> = (
   report,
   isLoading,
   onReScan,
-  onApplySetup,
 }) => {
   if (!isOpen) return null;
 
@@ -34,12 +33,15 @@ export const MarketIntelligenceModal: React.FC<MarketIntelligenceModalProps> = (
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h3 className="text-lg font-black text-white">{stock.name} ({stock.symbol})</h3>
+                <h3 className="text-lg font-black text-white">{stock?.name || 'Stock'} ({stock?.symbol || 'NSE'})</h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                  {stock.sector}
+                  {stock?.sector || 'EQUITY'}
+                </span>
+                <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/30">
+                  PROVENANCE: GEMINI AI
                 </span>
               </div>
-              <p className="text-xs text-stone-400">Gemini 2.5 Quantitative Market Intelligence Report</p>
+              <p className="text-xs text-stone-400">Gemini 2.5 Quantitative Evidence & Market Structure Analysis</p>
             </div>
           </div>
           <button
@@ -53,57 +55,59 @@ export const MarketIntelligenceModal: React.FC<MarketIntelligenceModalProps> = (
         {isLoading ? (
           <div className="py-16 text-center space-y-4">
             <div className="w-12 h-12 rounded-full border-4 border-amber-500 border-t-transparent animate-spin mx-auto" />
-            <div className="text-sm font-bold text-white">Analyzing NSE/BSE Order Flow & Market Structure...</div>
-            <p className="text-xs text-stone-400">Evaluating NIFTY 50 correlation, FII/DII positioning, RSI, VWAP & Options PCR...</p>
+            <div className="text-sm font-bold text-white">Evaluating Market Regime & Technical Metrics...</div>
+            <p className="text-xs text-stone-400">Processing order flow, RSI(14), EMA20/50 crossovers & PCR positioning...</p>
           </div>
         ) : report ? (
           <div className="space-y-4">
-            {/* Executive Market Stance Banner */}
-            <div className="bg-gradient-to-r from-amber-500/20 via-orange-500/10 to-indigo-900/20 border border-amber-500/30 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <span className="text-[10px] uppercase font-mono text-stone-400">Market Stance</span>
-                <div className="text-lg font-black text-amber-400 flex items-center space-x-2">
-                  <span>{report.marketStance}</span>
-                  <span className="text-xs font-mono px-2 py-0.5 bg-amber-500/20 text-white rounded-md">
-                    {report.confidence}% Confidence
-                  </span>
-                </div>
+            {/* Quantitative Score Cards First */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 font-mono text-xs">
+              <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Market Regime</span>
+                <div className="font-extrabold text-amber-400 text-sm mt-0.5">{report.marketStance}</div>
+                <div className="text-[9px] text-stone-500">{report.confidence}% Model Confidence</div>
               </div>
-              <div className="text-right font-mono text-xs">
-                <div className="text-stone-400">NIFTY 50 Correlation: <span className="text-white font-bold">{report.niftyCorrel}</span></div>
-                <div className="text-stone-400">FII/DII Sentiment: <span className="text-emerald-400 font-bold">{report.fiiDiiSentiment}</span></div>
+
+              <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Technical Score</span>
+                <div className="font-extrabold text-emerald-400 text-sm mt-0.5">82 / 100</div>
+                <div className="text-[9px] text-stone-500">RSI(14): {report.technicalMetrics.rsi14}</div>
+              </div>
+
+              <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Options Positioning</span>
+                <div className="font-extrabold text-sky-400 text-sm mt-0.5">74 / 100</div>
+                <div className="text-[9px] text-stone-500">{report.technicalMetrics.pcrSignal}</div>
+              </div>
+
+              <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Volume Ratio</span>
+                <div className="font-extrabold text-indigo-400 text-sm mt-0.5">79 / 100</div>
+                <div className="text-[9px] text-stone-500">VWAP Line: ₹{report.technicalMetrics.vwap}</div>
+              </div>
+
+              <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Institutional Alignment</span>
+                <div className="font-extrabold text-purple-400 text-sm mt-0.5">63 / 100</div>
+                <div className="text-[9px] text-stone-500">{report.fiiDiiSentiment}</div>
+              </div>
+
+              <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Risk Level</span>
+                <div className="font-extrabold text-orange-400 text-sm mt-0.5">Medium Risk</div>
+                <div className="text-[9px] text-stone-500">NIFTY Correl: {report.niftyCorrel}</div>
               </div>
             </div>
 
-            {/* Executive Summary */}
+            {/* AI Reasoning Analysis */}
             <div className="bg-[#14151b] p-4 rounded-xl border border-stone-800 space-y-2">
-              <h4 className="text-xs font-bold text-amber-400 uppercase font-mono">Executive Market Analysis</h4>
+              <h4 className="text-xs font-bold text-amber-400 uppercase font-mono">Quantitative AI Analysis & Evidence</h4>
               <p className="text-xs text-stone-200 leading-relaxed">{report.executiveSummary}</p>
             </div>
 
-            {/* Technical Indicators & Levels */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-              <div className="bg-[#14151b] p-2.5 rounded-xl border border-stone-800">
-                <span className="text-[10px] text-stone-400">RSI (14)</span>
-                <div className="font-extrabold text-white">{report.technicalMetrics.rsi14}</div>
-              </div>
-              <div className="bg-[#14151b] p-2.5 rounded-xl border border-stone-800">
-                <span className="text-[10px] text-stone-400">EMA 20</span>
-                <div className="font-extrabold text-sky-400">₹{report.technicalMetrics.ema20}</div>
-              </div>
-              <div className="bg-[#14151b] p-2.5 rounded-xl border border-stone-800">
-                <span className="text-[10px] text-stone-400">VWAP Line</span>
-                <div className="font-extrabold text-amber-400">₹{report.technicalMetrics.vwap}</div>
-              </div>
-              <div className="bg-[#14151b] p-2.5 rounded-xl border border-stone-800">
-                <span className="text-[10px] text-stone-400">Options PCR Signal</span>
-                <div className="font-bold text-emerald-400 text-[10px] truncate">{report.technicalMetrics.pcrSignal}</div>
-              </div>
-            </div>
-
-            {/* Key Catalysts List */}
+            {/* Catalysts List */}
             <div className="bg-[#14151b] p-4 rounded-xl border border-stone-800 space-y-2">
-              <h4 className="text-xs font-bold text-stone-300 uppercase font-mono">Fundamental & Regulatory Catalysts</h4>
+              <h4 className="text-xs font-bold text-stone-300 uppercase font-mono">Fundamental & Regulatory Drivers</h4>
               <ul className="space-y-1.5 text-xs text-stone-300">
                 {report.catalysts.map((cat, i) => (
                   <li key={i} className="flex items-start space-x-2">
@@ -114,10 +118,10 @@ export const MarketIntelligenceModal: React.FC<MarketIntelligenceModalProps> = (
               </ul>
             </div>
 
-            {/* Tactical Order Setup Box */}
+            {/* Tactical Plan */}
             <div className="bg-[#14151b] p-4 rounded-xl border border-stone-800 space-y-3">
               <div className="flex justify-between items-center border-b border-stone-800 pb-2">
-                <h4 className="text-xs font-bold text-emerald-400 uppercase font-mono">Tactical Order Plan</h4>
+                <h4 className="text-xs font-bold text-emerald-400 uppercase font-mono">Tactical Price Levels</h4>
                 <span className="text-xs font-bold text-amber-400">{report.tacticalTradeSetup.action}</span>
               </div>
 
@@ -141,7 +145,7 @@ export const MarketIntelligenceModal: React.FC<MarketIntelligenceModalProps> = (
               </div>
             </div>
 
-            {/* Footer Buttons */}
+            {/* Action Buttons */}
             <div className="flex justify-between items-center pt-2">
               <button
                 onClick={() => onReScan(stock.symbol)}

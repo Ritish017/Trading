@@ -1,6 +1,6 @@
 import React from 'react';
 import { OptionChainSummary as OptionChainType } from '../types/indianMarket';
-import { BarChart3, ShieldAlert, Zap } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 import { INITIAL_OPTION_CHAIN } from '../data/indianMarketData';
 
 interface OptionChainSummaryProps {
@@ -14,14 +14,15 @@ export const OptionChainSummary: React.FC<OptionChainSummaryProps> = ({ optionSu
   const summary = optionSummary || optionChain || INITIAL_OPTION_CHAIN;
   
   const spotPrice = price ?? summary.spotPrice ?? 24580;
-  const atmStrike = summary.atmStrike ?? 24600;
+  const atmStrike = summary.atmStrike ?? Math.round(spotPrice / 50) * 50;
   const pcr = summary.pcr ?? 1.18;
-  const maxPainStrike = summary.maxPainStrike ?? 24550;
+  const maxPainStrike = summary.maxPainStrike ?? atmStrike - 50;
   const totalCallOI = summary.totalCallOI ?? 4820000;
   const totalPutOI = summary.totalPutOI ?? 5680000;
   const impliedVolatility = summary.impliedVolatility ?? 13.4;
   const expiryDate = summary.expiryDate || 'NEAR';
   const sym = symbol || summary.symbol || 'NIFTY';
+  const source = (summary as any).source || 'UPSTOX';
 
   // PCR Signal interpretation
   let pcrSignal = 'Neutral';
@@ -40,13 +41,18 @@ export const OptionChainSummary: React.FC<OptionChainSummaryProps> = ({ optionSu
 
   return (
     <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-4 select-none flex flex-col justify-between">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 border-b border-stone-800/60 pb-2">
         <div className="flex items-center space-x-2">
           <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
             <BarChart3 className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-xs font-bold text-white">{sym} Option Chain Analytics</h3>
+            <div className="flex items-center space-x-1.5">
+              <h3 className="text-xs font-bold text-white">{sym} Option Chain Analytics</h3>
+              <span className="px-1.5 py-0.2 rounded text-[8px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                {source}
+              </span>
+            </div>
             <span className="text-[10px] text-stone-400">Expiry: {expiryDate}</span>
           </div>
         </div>
@@ -59,7 +65,7 @@ export const OptionChainSummary: React.FC<OptionChainSummaryProps> = ({ optionSu
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-xs font-mono">
         <div className="bg-[#14151b] p-2.5 rounded-xl border border-stone-800">
           <div className="text-[10px] text-stone-400">Spot Price</div>
-          <div className="font-extrabold text-white">₹{spotPrice.toLocaleString()}</div>
+          <div className="font-extrabold text-white">₹{spotPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
         </div>
         <div className="bg-[#14151b] p-2.5 rounded-xl border border-stone-800">
           <div className="text-[10px] text-stone-400">ATM Strike</div>

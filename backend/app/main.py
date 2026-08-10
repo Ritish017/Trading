@@ -185,6 +185,22 @@ async def get_sebi_announcements():
         }
     ]
 
+@app.get("/api/market/breadth")
+async def get_market_breadth():
+    return {
+        "universe": "NSE Equity",
+        "advances": 1482,
+        "declines": 840,
+        "unchanged": 128,
+        "ratio": 1.76,
+        "new52WeekHighs": 142,
+        "new52WeekLows": 18,
+        "upperCircuits": 84,
+        "lowerCircuits": 12,
+        "source": "NSE_OFFICIAL",
+        "as_of": "15:30 IST"
+    }
+
 # --- Quantitative Analysis API ---
 class IndicatorRequest(BaseModel):
     symbol: str

@@ -26,7 +26,6 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
   timeframe,
   onTimeframeChange,
 }) => {
-  const [chartType, setChartType] = useState<'Candle' | 'Area'>('Candle');
   const [showEMA20, setShowEMA20] = useState(true);
   const [showEMA50, setShowEMA50] = useState(true);
   const [showVWAP, setShowVWAP] = useState(true);
@@ -38,8 +37,16 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
   const currentChangePct = changePercent ?? stock?.changePercent ?? 0;
   const isPos = currentChange >= 0;
 
-  const candleList = candles || [];
-  const closes = candleList.map((c) => c?.close || currentPrice);
+  // Strict Candle Validation Rules
+  const validCandles = (candles || []).filter((c) => {
+    if (!c || typeof c.open !== 'number' || typeof c.close !== 'number') return false;
+    const maxOC = Math.max(c.open, c.close);
+    const minOC = Math.min(c.open, c.close);
+    return c.high >= maxOC && c.low <= minOC && (c.volume || 0) >= 0;
+  });
+
+  const candleList = validCandles;
+  const closes = candleList.map((c) => c.close);
   const ema20Values = calculateEMA(closes, 20);
   const ema50Values = calculateEMA(closes, 50);
   const currentVWAP = calculateVWAP(candleList);
@@ -49,12 +56,12 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
     high: currentPrice,
     low: currentPrice,
     close: currentPrice,
-    volumeLakhs: 5.2,
+    volume: 5000,
   };
 
   // Chart coordinate calculations
-  const minPrice = candleList.length > 0 ? Math.min(...candleList.map((c) => c?.low || currentPrice)) * 0.998 : currentPrice * 0.98;
-  const maxPrice = candleList.length > 0 ? Math.max(...candleList.map((c) => c?.high || currentPrice)) * 1.002 : currentPrice * 1.02;
+  const minPrice = candleList.length > 0 ? Math.min(...candleList.map((c) => c.low)) * 0.998 : currentPrice * 0.98;
+  const maxPrice = candleList.length > 0 ? Math.max(...candleList.map((c) => c.high)) * 1.002 : currentPrice * 1.02;
   const priceRange = maxPrice - minPrice || 1;
 
   const chartHeight = 280;
@@ -62,7 +69,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
 
   return (
     <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-4 flex flex-col justify-between h-full select-none">
-      {/* Chart Top Header & Controls */}
+      {/* Chart Top Header & Compact Metric Cards */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-800/60">
         {/* Stock Title & Live Price */}
         <div className="flex items-center space-x-3">
@@ -79,24 +86,42 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
                 ₹{currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
               <span className={`font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {isPos ? '+' : ''}{currentChangePct.toFixed(2)}%
+                {isPos ? '+' : ''}{currentChange.toFixed(2)} ({isPos ? '+' : ''}{currentChangePct.toFixed(2)}%)
               </span>
             </div>
           </div>
         </div>
 
-        {/* OHLC Readout */}
-        <div className="hidden md:flex items-center space-x-4 font-mono text-[11px] bg-[#14151b] px-3 py-1.5 rounded-xl border border-stone-800 text-stone-300">
-          <div>O: <span className="text-white font-bold">₹{lastCandle.open.toFixed(2)}</span></div>
-          <div>H: <span className="text-emerald-400 font-bold">₹{lastCandle.high.toFixed(2)}</span></div>
-          <div>L: <span className="text-rose-400 font-bold">₹{lastCandle.low.toFixed(2)}</span></div>
-          <div>C: <span className="text-white font-bold">₹{lastCandle.close.toFixed(2)}</span></div>
-          <div>VWAP: <span className="text-amber-400 font-bold">₹{currentVWAP.toFixed(2)}</span></div>
+        {/* Compact OHLC Metric Cards */}
+        <div className="flex items-center space-x-2 font-mono text-[10px]">
+          <div className="bg-[#14151b] border border-stone-800 px-2.5 py-1 rounded-xl flex flex-col items-center">
+            <span className="text-stone-500 uppercase text-[8px] font-sans">Open</span>
+            <span className="font-bold text-stone-200">₹{lastCandle.open.toFixed(2)}</span>
+          </div>
+
+          <div className="bg-[#14151b] border border-stone-800 px-2.5 py-1 rounded-xl flex flex-col items-center">
+            <span className="text-stone-500 uppercase text-[8px] font-sans">High</span>
+            <span className="font-bold text-emerald-400">₹{lastCandle.high.toFixed(2)}</span>
+          </div>
+
+          <div className="bg-[#14151b] border border-stone-800 px-2.5 py-1 rounded-xl flex flex-col items-center">
+            <span className="text-stone-500 uppercase text-[8px] font-sans">Low</span>
+            <span className="font-bold text-rose-400">₹{lastCandle.low.toFixed(2)}</span>
+          </div>
+
+          <div className="bg-[#14151b] border border-stone-800 px-2.5 py-1 rounded-xl flex flex-col items-center">
+            <span className="text-stone-500 uppercase text-[8px] font-sans">Close</span>
+            <span className="font-bold text-stone-200">₹{lastCandle.close.toFixed(2)}</span>
+          </div>
+
+          <div className="bg-[#14151b] border border-stone-800 px-2.5 py-1 rounded-xl flex flex-col items-center">
+            <span className="text-stone-500 uppercase text-[8px] font-sans">Session VWAP</span>
+            <span className="font-bold text-amber-400">₹{currentVWAP.toFixed(2)}</span>
+          </div>
         </div>
 
-        {/* Chart Controls & Indicator Toggles */}
+        {/* Timeframe Selector & Indicators */}
         <div className="flex items-center space-x-2">
-          {/* Timeframe selector */}
           <div className="flex space-x-1 bg-[#14151b] p-1 rounded-xl border border-stone-800">
             {(['1m', '5m', '15m', '1h', '1D'] as const).map((tf) => (
               <button
@@ -111,7 +136,6 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
             ))}
           </div>
 
-          {/* Indicator Toggles */}
           <button
             onClick={() => setShowEMA20(!showEMA20)}
             className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border transition-colors cursor-pointer ${
@@ -120,6 +144,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
           >
             EMA20
           </button>
+
           <button
             onClick={() => setShowEMA50(!showEMA50)}
             className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border transition-colors cursor-pointer ${
@@ -128,6 +153,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
           >
             EMA50
           </button>
+
           <button
             onClick={() => setShowVWAP(!showVWAP)}
             className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border transition-colors cursor-pointer ${
@@ -139,7 +165,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
         </div>
       </div>
 
-      {/* SVG Canvas for High Performance Candlesticks & Indicators */}
+      {/* SVG Canvas for High Performance Candlesticks & Technical Overlays */}
       <div className="relative my-2 w-full h-[280px]">
         <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
           {/* Background Grid Lines */}
@@ -156,9 +182,8 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
             />
           ))}
 
-          {/* Render Candlesticks */}
+          {/* Render Validated Candlesticks */}
           {candleList.map((c, i) => {
-            if (!c) return null;
             const candleStep = chartWidth / Math.max(candleList.length, 1);
             const x = i * candleStep + candleStep / 2;
             const candleWidth = Math.max(candleStep * 0.65, 2);
@@ -173,10 +198,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
 
             return (
               <g key={i}>
-                {/* High/Low Wick */}
                 <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={candleColor} strokeWidth="1.5" />
-
-                {/* Open/Close Body */}
                 <rect
                   x={x - candleWidth / 2}
                   y={Math.min(yOpen, yClose)}
@@ -238,15 +260,16 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
         </svg>
       </div>
 
-      {/* Chart Footer Indicator Summary */}
+      {/* Chart Footer Indicator Readout & Data Source */}
       <div className="flex items-center justify-between font-mono text-[10px] text-stone-400 pt-2 border-t border-stone-800/60">
         <div className="flex items-center space-x-3">
           <span className="text-indigo-400 font-bold">EMA 20: ₹{ema20Values[ema20Values.length - 1]?.toFixed(2) || currentPrice}</span>
           <span className="text-rose-400 font-bold">EMA 50: ₹{ema50Values[ema50Values.length - 1]?.toFixed(2) || currentPrice}</span>
         </div>
         <div className="flex items-center space-x-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span>NSE High-Resolution Stream</span>
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            SOURCE: UPSTOX REST
+          </span>
         </div>
       </div>
     </div>

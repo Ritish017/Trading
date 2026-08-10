@@ -31,7 +31,8 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
     'Pharmaceuticals',
   ];
 
-  const filteredStocks = stocks.filter((stock) => {
+  const filteredStocks = (stocks || []).filter((stock) => {
+    if (!stock || !stock.symbol) return false;
     if (selectedSector === 'All') return true;
     if (selectedSector === 'Favorites') return stock.isFavorite;
     if (selectedSector === 'NIFTY 50') return stock.isNifty50;
@@ -76,8 +77,8 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
           </thead>
           <tbody className="divide-y divide-stone-800/40">
             {filteredStocks.map((stock) => {
-              const isSelected = selectedStock.symbol === stock.symbol;
-              const isPos = stock.change >= 0;
+              const isSelected = selectedStock?.symbol === stock.symbol;
+              const isPos = (stock.change || 0) >= 0;
 
               // Compute 52-Week Range position percentage
               const rangeSpan = stock.week52High - stock.week52Low || 1;

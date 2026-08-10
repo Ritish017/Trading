@@ -41,15 +41,25 @@ import {
 } from './utils/indianTechnicalAnalysis';
 
 export default function App() {
-  // 1. Core State
+  // 1. Core State with robust localStorage validation
   const [indices, setIndices] = useState<MarketIndex[]>(INITIAL_INDICES);
   const [stocks, setStocks] = useState<NSEStock[]>(() => {
-    const saved = localStorage.getItem('apexnse_stocks');
-    return saved ? JSON.parse(saved) : INITIAL_NSE_STOCKS;
+    try {
+      const saved = localStorage.getItem('apexnse_stocks');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0] && typeof parsed[0].symbol === 'string') {
+          return parsed;
+        }
+      }
+    } catch {
+      // fallback
+    }
+    return INITIAL_NSE_STOCKS;
   });
 
   const [selectedSymbol, setSelectedSymbol] = useState<string>('RELIANCE.NS');
-  const selectedStock = stocks.find((s) => s.symbol === selectedSymbol) || stocks[0];
+  const selectedStock = (stocks && stocks.find((s) => s && s.symbol === selectedSymbol)) || (stocks && stocks[0]) || INITIAL_NSE_STOCKS[0];
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [timeframe, setTimeframe] = useState<'1m' | '5m' | '15m' | '1h' | '1D'>('5m');
@@ -72,13 +82,21 @@ export default function App() {
 
   // Paper Trading Account State
   const [paperBalance, setPaperBalance] = useState<number>(() => {
-    const saved = localStorage.getItem('apexnse_balance');
-    return saved ? Number(saved) : 1000000;
+    try {
+      const saved = localStorage.getItem('apexnse_balance');
+      return saved ? Number(saved) : 1000000;
+    } catch {
+      return 1000000;
+    }
   });
 
   const [paperPositions, setPaperPositions] = useState<PaperPosition[]>(() => {
-    const saved = localStorage.getItem('apexnse_positions');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('apexnse_positions');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
 
   // Modals & Auxiliary Views State
@@ -93,7 +111,9 @@ export default function App() {
 
   // Persistence Effects
   useEffect(() => {
-    localStorage.setItem('apexnse_stocks', JSON.stringify(stocks));
+    if (stocks && stocks.length > 0) {
+      localStorage.setItem('apexnse_stocks', JSON.stringify(stocks));
+    }
   }, [stocks]);
 
   useEffect(() => {
@@ -149,7 +169,8 @@ export default function App() {
           if (payload.type === 'TICK' && payload.data) {
             const tick = payload.data;
             setStocks((prev) =>
-              prev.map((s) => {
+              (prev || []).map((s) => {
+                if (!s || !s.symbol) return s;
                 if (s.symbol === tick.symbol || s.symbol === tick.instrument_key) {
                   const newPrice = tick.ltp;
                   const prevClose = tick.previous_close || s.prevClose || newPrice;
@@ -189,7 +210,8 @@ export default function App() {
     fallbackInterval = setInterval(() => {
       if (feedStatus.status === 'SIMULATED') {
         setStocks((prevStocks) =>
-          prevStocks.map((stock) => {
+          (prevStocks || []).map((stock) => {
+            if (!stock || !stock.symbol) return stock;
             const volatility = stock.price * 0.0015;
             const delta = (Math.random() - 0.49) * volatility;
             const newPrice = Number(Math.max(stock.price + delta, 1.0).toFixed(2));
@@ -216,6 +238,7 @@ export default function App() {
 
   // Sync Candlestick History and Positions PnL on Tick
   useEffect(() => {
+    if (!selectedStock || !selectedStock.price) return;
     const currentPrice = selectedStock.price;
 
     setCandles((prev) => {
@@ -255,8 +278,8 @@ export default function App() {
     });
 
     setPaperPositions((prev) =>
-      prev.map((pos) => {
-        if (pos.symbol === selectedSymbol) {
+      (prev || []).map((pos) => {
+        if (pos && pos.symbol === selectedSymbol) {
           const diff = currentPrice - pos.entryPrice;
           const pnl = pos.side === 'BUY' ? diff * pos.quantity : -diff * pos.quantity;
           const pnlPct = (pnl / (pos.entryPrice * pos.quantity)) * 100;
@@ -270,10 +293,11 @@ export default function App() {
         return pos;
       })
     );
-  }, [selectedStock.price, selectedSymbol]);
+  }, [selectedStock?.price, selectedSymbol]);
 
   const handleGenerateAIReport = async (symbol: string) => {
-    const stockObj = stocks.find((s) => s.symbol === symbol) || selectedStock;
+    const stockObj = (stocks && stocks.find((s) => s && s.symbol === symbol)) || selectedStock;
+    if (!stockObj) return;
     setIsAILoading(true);
     setIsAIModalOpen(true);
 
@@ -318,16 +342,11 @@ export default function App() {
     stopLoss?: number;
   }) => {
     try {
-      const res = await fetch('/api/paper/order', {
+      await fetch('/api/paper/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(order),
       });
-
-      if (res.ok) {
-        const data = await res.json();
-        // Updated positions from paper trading backend
-      }
     } catch {
       // Fallback local state handling
     }
@@ -355,14 +374,14 @@ export default function App() {
 
   const handleClosePaperPosition = async (id: string) => {
     setPaperPositions((prev) => {
-      const pos = prev.find((p) => p.id === id);
+      const pos = (prev || []).find((p) => p && p.id === id);
       if (!pos) return prev;
 
       const returnedMargin = pos.productType === 'MIS (Intraday)' ? (pos.quantity * pos.entryPrice * 0.20) : (pos.quantity * pos.entryPrice);
       const netCapitalReturned = returnedMargin + pos.unrealizedPnL;
 
       setPaperBalance((b) => b + netCapitalReturned);
-      return prev.filter((p) => p.id !== id);
+      return prev.filter((p) => p && p.id !== id);
     });
   };
 
@@ -385,13 +404,15 @@ export default function App() {
   };
 
   const filteredStocks = searchQuery
-    ? stocks.filter(
+    ? (stocks || []).filter(
         (s) =>
-          s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.sector.toLowerCase().includes(searchQuery.toLowerCase())
+          s &&
+          s.symbol &&
+          (s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (s.name && s.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+            (s.sector && s.sector.toLowerCase().includes(searchQuery.toLowerCase())))
       )
-    : stocks;
+    : stocks || [];
 
   return (
     <div className="min-h-screen bg-[#0f1015] text-stone-100 flex flex-col font-sans selection:bg-amber-900 selection:text-amber-100">
@@ -457,28 +478,29 @@ export default function App() {
         <div className="xl:col-span-3 h-[calc(100vh-145px)] overflow-hidden">
           <NSEWatchlist
             stocks={filteredStocks}
-            selectedSymbol={selectedSymbol}
-            onSelectStock={setSelectedSymbol}
-            onOpenAIAnalysis={(sym) => handleGenerateAIReport(sym)}
+            selectedStock={selectedStock}
+            onSelectStock={setSelectedSymbol ? ((st) => setSelectedSymbol(st?.symbol || 'RELIANCE.NS')) : () => {}}
+            onToggleFavorite={() => {}}
+            onOpenAIForStock={(st) => handleGenerateAIReport(st?.symbol || selectedSymbol)}
           />
         </div>
 
         {/* Center Panel: Main Chart & Option Chain */}
         <div className="xl:col-span-6 flex flex-col space-y-3 h-[calc(100vh-145px)] overflow-y-auto scrollbar-none">
           <IndianCandleChart
-            symbol={selectedStock.symbol}
-            name={selectedStock.name}
-            price={selectedStock.price}
-            change={selectedStock.change}
-            changePercent={selectedStock.changePercent}
+            symbol={selectedStock?.symbol || 'RELIANCE.NS'}
+            name={selectedStock?.name || 'Reliance Industries'}
+            price={selectedStock?.price || 2845.5}
+            change={selectedStock?.change || 0}
+            changePercent={selectedStock?.changePercent || 0}
             candles={candles[selectedSymbol] || []}
             timeframe={timeframe}
             onTimeframeChange={setTimeframe}
           />
 
           <OptionChainSummary
-            symbol={selectedStock.symbol}
-            price={selectedStock.price}
+            symbol={selectedStock?.symbol || 'RELIANCE.NS'}
+            price={selectedStock?.price || 2845.5}
             optionChain={INITIAL_OPTION_CHAIN}
           />
         </div>
@@ -498,15 +520,17 @@ export default function App() {
         isLoading={isAILoading}
       />
 
-      <PaperTradingModal
-        isOpen={isPaperModalOpen}
-        onClose={() => setIsPaperModalOpen(false)}
-        selectedStock={selectedStock}
-        paperBalance={paperBalance}
-        positions={paperPositions}
-        onPlaceOrder={handlePlacePaperOrder}
-        onClosePosition={handleClosePaperPosition}
-      />
+      {selectedStock && (
+        <PaperTradingModal
+          isOpen={isPaperModalOpen}
+          onClose={() => setIsPaperModalOpen(false)}
+          selectedStock={selectedStock}
+          paperBalance={paperBalance}
+          positions={paperPositions}
+          onPlaceOrder={handlePlacePaperOrder}
+          onClosePosition={handleClosePaperPosition}
+        />
+      )}
 
       <CommandPalette
         isOpen={isCommandPaletteOpen}

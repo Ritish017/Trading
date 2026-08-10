@@ -15,10 +15,12 @@ interface IndexTickerBarProps {
   onSelectIndex?: (index: MarketIndex) => void;
 }
 
-export const IndexTickerBar: React.FC<IndexTickerBarProps> = ({ indices, feedStatus, onSelectIndex }) => {
+export const IndexTickerBar: React.FC<IndexTickerBarProps> = ({ indices = [], feedStatus, onSelectIndex }) => {
   const isLive = feedStatus?.is_live && feedStatus?.status === 'CONNECTED';
   const isSimulated = feedStatus?.status === 'SIMULATED' || feedStatus?.mode === 'SIMULATED';
   const providerName = feedStatus?.active_provider || 'UPSTOX';
+
+  const validIndices = (indices || []).filter((idx) => idx && idx.symbol);
 
   return (
     <div className="bg-[#0f1015] border-b border-stone-800/80 px-4 py-2 flex items-center space-x-6 overflow-x-auto scrollbar-none select-none text-xs">
@@ -46,9 +48,11 @@ export const IndexTickerBar: React.FC<IndexTickerBarProps> = ({ indices, feedSta
       </div>
 
       <div className="flex items-center space-x-6 shrink-0">
-        {indices.map((idx) => {
-          const isPos = idx.change >= 0;
+        {validIndices.map((idx) => {
+          const isPos = (idx.change || 0) >= 0;
           const isVix = idx.symbol === 'INDIA VIX';
+          const changePct = idx.changePercent ?? 0;
+          const val = idx.value ?? 0;
 
           return (
             <div
@@ -62,7 +66,7 @@ export const IndexTickerBar: React.FC<IndexTickerBarProps> = ({ indices, feedSta
                   {isVix && <Activity className="w-3 h-3 text-amber-400" />}
                 </span>
                 <span className="text-[10px] text-stone-400 font-mono">
-                  {idx.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
 
@@ -76,7 +80,7 @@ export const IndexTickerBar: React.FC<IndexTickerBarProps> = ({ indices, feedSta
                 {isPos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                 <span>
                   {isPos ? '+' : ''}
-                  {idx.changePercent.toFixed(2)}%
+                  {changePct.toFixed(2)}%
                 </span>
               </div>
             </div>

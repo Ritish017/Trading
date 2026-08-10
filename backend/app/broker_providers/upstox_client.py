@@ -6,6 +6,25 @@ from backend.app.market.instruments import get_instrument_key, get_instrument_me
 
 logger = logging.getLogger(__name__)
 
+def parse_upstox_timestamp(ts_val: Any) -> float:
+    if not ts_val:
+        return time.time()
+    if isinstance(ts_val, (int, float)):
+        return float(ts_val) / 1000.0 if ts_val > 1e11 else float(ts_val)
+    if isinstance(ts_val, str):
+        try:
+            val = float(ts_val)
+            return val / 1000.0 if val > 1e11 else val
+        except ValueError:
+            pass
+        try:
+            import datetime
+            dt = datetime.datetime.fromisoformat(ts_val.replace("Z", "+00:00"))
+            return dt.timestamp()
+        except Exception:
+            pass
+    return time.time()
+
 class UpstoxRESTClient:
     """
     Production-grade Async REST Client for Upstox V2/V3 API.
@@ -74,7 +93,7 @@ class UpstoxRESTClient:
 
     async def get_ws_authorize_url(self) -> str:
         """Fetch authorized WebSocket redirect URL from Upstox Feed Authorization API."""
-        endpoint = "/v2/feed/market-data-feed/authorize"
+        endpoint = "/v3/feed/market-data-feed/authorize"
         res = await self._request("GET", endpoint)
         data = res.get("data", {})
         ws_url = data.get("authorizedRedirectUri") or data.get("wsUrl") or data.get("authorized_redirect_uri")
@@ -118,18 +137,18 @@ class UpstoxRESTClient:
             "exchange": meta.get("exchange", "NSE"),
             "instrument_type": meta.get("instrument_type", "EQUITY"),
             "ltp": ltp,
-            "open": float(ohlc.get("open", ltp)),
-            "high": float(ohlc.get("high", ltp)),
-            "low": float(ohlc.get("low", ltp)),
+            "open": float(ohlc.get("open", ltp) or ltp),
+            "high": float(ohlc.get("high", ltp) or ltp),
+            "low": float(ohlc.get("low", ltp) or ltp),
             "close": ltp,
             "previous_close": prev_close,
             "change": change,
             "change_percent": change_pct,
-            "volume": int(quote_body.get("volume", 0)),
-            "open_interest": int(quote_body.get("oi", 0)),
-            "bid": float(bids[0].get("price", 0.0)) if bids else None,
-            "ask": float(asks[0].get("price", 0.0)) if asks else None,
-            "timestamp": float(quote_body.get("timestamp", 0) or 0.0) / 1000.0,
+            "volume": int(quote_body.get("volume", 0) or 0),
+            "open_interest": int(quote_body.get("oi", 0) or 0),
+            "bid": float(bids[0].get("price", 0.0) or 0.0) if bids else None,
+            "ask": float(asks[0].get("price", 0.0) or 0.0) if asks else None,
+            "timestamp": parse_upstox_timestamp(quote_body.get("timestamp")),
             "source": "UPSTOX",
             "is_live": True
         }

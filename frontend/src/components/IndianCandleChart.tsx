@@ -4,15 +4,25 @@ import { IndianCandle, calculateEMA, calculateVWAP } from '../utils/indianTechni
 import { Maximize2, Layers, TrendingUp, BarChart2, Eye, Activity } from 'lucide-react';
 
 interface IndianCandleChartProps {
-  stock: NSEStock;
-  candles: IndianCandle[];
+  stock?: NSEStock;
+  symbol?: string;
+  name?: string;
+  price?: number;
+  change?: number;
+  changePercent?: number;
+  candles?: IndianCandle[];
   timeframe: '1m' | '5m' | '15m' | '1h' | '1D';
   onTimeframeChange: (tf: '1m' | '5m' | '15m' | '1h' | '1D') => void;
 }
 
 export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
   stock,
-  candles,
+  symbol,
+  name,
+  price,
+  change,
+  changePercent,
+  candles = [],
   timeframe,
   onTimeframeChange,
 }) => {
@@ -21,24 +31,30 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
   const [showEMA50, setShowEMA50] = useState(true);
   const [showVWAP, setShowVWAP] = useState(true);
 
-  const closes = candles.map((c) => c.close);
+  const sym = symbol || stock?.symbol || 'RELIANCE.NS';
+  const stName = name || stock?.name || 'Reliance Industries';
+  const currentPrice = price ?? stock?.price ?? 2845.5;
+  const currentChange = change ?? stock?.change ?? 0;
+  const currentChangePct = changePercent ?? stock?.changePercent ?? 0;
+  const isPos = currentChange >= 0;
+
+  const candleList = candles || [];
+  const closes = candleList.map((c) => c?.close || currentPrice);
   const ema20Values = calculateEMA(closes, 20);
   const ema50Values = calculateEMA(closes, 50);
-  const currentVWAP = calculateVWAP(candles);
+  const currentVWAP = calculateVWAP(candleList);
 
-  const lastCandle = candles.length > 0 ? candles[candles.length - 1] : {
-    open: stock.price,
-    high: stock.price,
-    low: stock.price,
-    close: stock.price,
+  const lastCandle = candleList.length > 0 ? candleList[candleList.length - 1] : {
+    open: currentPrice,
+    high: currentPrice,
+    low: currentPrice,
+    close: currentPrice,
     volumeLakhs: 5.2,
   };
 
-  const isPos = stock.change >= 0;
-
   // Chart coordinate calculations
-  const minPrice = Math.min(...candles.map((c) => c.low)) * 0.998;
-  const maxPrice = Math.max(...candles.map((c) => c.high)) * 1.002;
+  const minPrice = candleList.length > 0 ? Math.min(...candleList.map((c) => c?.low || currentPrice)) * 0.998 : currentPrice * 0.98;
+  const maxPrice = candleList.length > 0 ? Math.max(...candleList.map((c) => c?.high || currentPrice)) * 1.002 : currentPrice * 1.02;
   const priceRange = maxPrice - minPrice || 1;
 
   const chartHeight = 280;
@@ -55,15 +71,15 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="font-black text-white text-sm font-mono tracking-wide">{stock.symbol}</span>
-              <span className="text-[10px] text-stone-400 font-medium">{stock.name}</span>
+              <span className="font-black text-white text-sm font-mono tracking-wide">{sym}</span>
+              <span className="text-[10px] text-stone-400 font-medium">{stName}</span>
             </div>
             <div className="flex items-center space-x-2 font-mono text-xs">
               <span className="font-extrabold text-white">
-                ₹{stock.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ₹{currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
               <span className={`font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {isPos ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                {isPos ? '+' : ''}{currentChangePct.toFixed(2)}%
               </span>
             </div>
           </div>
@@ -98,24 +114,24 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
           {/* Indicator Toggles */}
           <button
             onClick={() => setShowEMA20(!showEMA20)}
-            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border cursor-pointer ${
-              showEMA20 ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' : 'bg-[#14151b] text-stone-500 border-stone-800'
+            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border transition-colors cursor-pointer ${
+              showEMA20 ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' : 'bg-[#14151b] text-stone-500 border-stone-800'
             }`}
           >
             EMA20
           </button>
           <button
             onClick={() => setShowEMA50(!showEMA50)}
-            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border cursor-pointer ${
-              showEMA50 ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : 'bg-[#14151b] text-stone-500 border-stone-800'
+            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border transition-colors cursor-pointer ${
+              showEMA50 ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-[#14151b] text-stone-500 border-stone-800'
             }`}
           >
             EMA50
           </button>
           <button
             onClick={() => setShowVWAP(!showVWAP)}
-            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border cursor-pointer ${
-              showVWAP ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-[#14151b] text-stone-500 border-stone-800'
+            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border transition-colors cursor-pointer ${
+              showVWAP ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-[#14151b] text-stone-500 border-stone-800'
             }`}
           >
             VWAP
@@ -123,129 +139,114 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
         </div>
       </div>
 
-      {/* Candlestick Canvas / SVG Chart View */}
-      <div className="relative w-full h-[300px] my-2 bg-[#14151b] rounded-xl border border-stone-800/80 p-2 overflow-hidden">
-        {/* Background Grid Lines */}
-        <div className="absolute inset-0 flex flex-col justify-between pointer-events-none p-4 opacity-20">
-          <div className="border-b border-stone-700 border-dashed w-full" />
-          <div className="border-b border-stone-700 border-dashed w-full" />
-          <div className="border-b border-stone-700 border-dashed w-full" />
-          <div className="border-b border-stone-700 border-dashed w-full" />
-        </div>
-
-        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-full preserve-3d">
-          {/* Render Volume Bars at the bottom */}
-          {candles.map((c, idx) => {
-            const x = (idx / (candles.length - 1 || 1)) * (chartWidth - 40) + 20;
-            const volHeight = Math.min((c.volumeLakhs / 15) * 50, 50);
-            const isBullish = c.close >= c.open;
-
-            return (
-              <rect
-                key={`vol-${idx}`}
-                x={x - 2}
-                y={chartHeight - volHeight}
-                width={4}
-                height={volHeight}
-                fill={isBullish ? 'rgba(16, 185, 129, 0.25)' : 'rgba(244, 63, 94, 0.25)'}
-              />
-            );
-          })}
+      {/* SVG Canvas for High Performance Candlesticks & Indicators */}
+      <div className="relative my-2 w-full h-[280px]">
+        <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
+          {/* Background Grid Lines */}
+          {[0.2, 0.4, 0.6, 0.8].map((ratio) => (
+            <line
+              key={ratio}
+              x1="0"
+              y1={chartHeight * ratio}
+              x2={chartWidth}
+              y2={chartHeight * ratio}
+              stroke="#262730"
+              strokeDasharray="4 4"
+              strokeWidth="1"
+            />
+          ))}
 
           {/* Render Candlesticks */}
-          {candles.map((c, idx) => {
-            const x = (idx / (candles.length - 1 || 1)) * (chartWidth - 40) + 20;
-            const highY = chartHeight - 60 - ((c.high - minPrice) / priceRange) * (chartHeight - 80);
-            const lowY = chartHeight - 60 - ((c.low - minPrice) / priceRange) * (chartHeight - 80);
-            const openY = chartHeight - 60 - ((c.open - minPrice) / priceRange) * (chartHeight - 80);
-            const closeY = chartHeight - 60 - ((c.close - minPrice) / priceRange) * (chartHeight - 80);
+          {candleList.map((c, i) => {
+            if (!c) return null;
+            const candleStep = chartWidth / Math.max(candleList.length, 1);
+            const x = i * candleStep + candleStep / 2;
+            const candleWidth = Math.max(candleStep * 0.65, 2);
 
-            const isBullish = c.close >= c.open;
-            const bodyTop = Math.min(openY, closeY);
-            const bodyHeight = Math.max(Math.abs(closeY - openY), 2);
+            const yOpen = chartHeight - ((c.open - minPrice) / priceRange) * chartHeight;
+            const yClose = chartHeight - ((c.close - minPrice) / priceRange) * chartHeight;
+            const yHigh = chartHeight - ((c.high - minPrice) / priceRange) * chartHeight;
+            const yLow = chartHeight - ((c.low - minPrice) / priceRange) * chartHeight;
+
+            const isCandleGreen = c.close >= c.open;
+            const candleColor = isCandleGreen ? '#10b981' : '#f43f5e';
 
             return (
-              <g key={`candle-${idx}`}>
-                {/* Wick */}
-                <line
-                  x1={x}
-                  y1={highY}
-                  x2={x}
-                  y2={lowY}
-                  stroke={isBullish ? '#10b981' : '#f43f5e'}
-                  strokeWidth="1.2"
-                />
-                {/* Candle Body */}
+              <g key={i}>
+                {/* High/Low Wick */}
+                <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={candleColor} strokeWidth="1.5" />
+
+                {/* Open/Close Body */}
                 <rect
-                  x={x - 3.5}
-                  y={bodyTop}
-                  width={7}
-                  height={bodyHeight}
-                  fill={isBullish ? '#10b981' : '#f43f5e'}
+                  x={x - candleWidth / 2}
+                  y={Math.min(yOpen, yClose)}
+                  width={candleWidth}
+                  height={Math.max(Math.abs(yOpen - yClose), 1.5)}
+                  fill={candleColor}
                   rx="1"
                 />
               </g>
             );
           })}
 
-          {/* EMA 20 Line Overlay */}
-          {showEMA20 && (
-            <path
-              d={ema20Values.reduce((acc, val, i) => {
-                const x = (i / (ema20Values.length - 1 || 1)) * (chartWidth - 40) + 20;
-                const y = chartHeight - 60 - ((val - minPrice) / priceRange) * (chartHeight - 80);
-                return acc + `${i === 0 ? 'M' : 'L'} ${x} ${y} `;
-              }, '')}
+          {/* EMA20 Polyline */}
+          {showEMA20 && ema20Values.length > 0 && (
+            <polyline
               fill="none"
-              stroke="#38bdf8"
-              strokeWidth="1.8"
-              strokeDasharray="4 2"
+              stroke="#818cf8"
+              strokeWidth="1.5"
+              points={ema20Values
+                .map((val, idx) => {
+                  const step = chartWidth / Math.max(candleList.length, 1);
+                  const x = idx * step + step / 2;
+                  const y = chartHeight - ((val - minPrice) / priceRange) * chartHeight;
+                  return `${x},${y}`;
+                })
+                .join(' ')}
             />
           )}
 
-          {/* EMA 50 Line Overlay */}
-          {showEMA50 && (
-            <path
-              d={ema50Values.reduce((acc, val, i) => {
-                const x = (i / (ema50Values.length - 1 || 1)) * (chartWidth - 40) + 20;
-                const y = chartHeight - 60 - ((val - minPrice) / priceRange) * (chartHeight - 80);
-                return acc + `${i === 0 ? 'M' : 'L'} ${x} ${y} `;
-              }, '')}
+          {/* EMA50 Polyline */}
+          {showEMA50 && ema50Values.length > 0 && (
+            <polyline
               fill="none"
-              stroke="#a855f7"
-              strokeWidth="1.8"
+              stroke="#f43f5e"
+              strokeWidth="1.5"
+              points={ema50Values
+                .map((val, idx) => {
+                  const step = chartWidth / Math.max(candleList.length, 1);
+                  const x = idx * step + step / 2;
+                  const y = chartHeight - ((val - minPrice) / priceRange) * chartHeight;
+                  return `${x},${y}`;
+                })
+                .join(' ')}
             />
           )}
 
-          {/* VWAP Horizontal Indicator */}
+          {/* VWAP Constant Line */}
           {showVWAP && (
             <line
-              x1="20"
-              y1={chartHeight - 60 - ((currentVWAP - minPrice) / priceRange) * (chartHeight - 80)}
-              x2={chartWidth - 20}
-              y2={chartHeight - 60 - ((currentVWAP - minPrice) / priceRange) * (chartHeight - 80)}
+              x1="0"
+              y1={chartHeight - ((currentVWAP - minPrice) / priceRange) * chartHeight}
+              x2={chartWidth}
+              y2={chartHeight - ((currentVWAP - minPrice) / priceRange) * chartHeight}
               stroke="#f59e0b"
               strokeWidth="1.5"
-              strokeDasharray="6 3"
+              strokeDasharray="3 3"
             />
           )}
         </svg>
-
-        {/* Live Price Tag Badge */}
-        <div className="absolute right-3 top-4 bg-amber-500 text-stone-950 font-mono font-black text-xs px-2 py-1 rounded-lg shadow-lg">
-          LIVE ₹{stock.price.toFixed(2)}
-        </div>
       </div>
 
-      {/* Bottom Technical Indicators Summary */}
-      <div className="flex items-center justify-between text-[11px] font-mono text-stone-400 pt-1">
+      {/* Chart Footer Indicator Summary */}
+      <div className="flex items-center justify-between font-mono text-[10px] text-stone-400 pt-2 border-t border-stone-800/60">
         <div className="flex items-center space-x-3">
-          <span>RSI (14): <strong className="text-white">58.4 (Bullish)</strong></span>
-          <span>MACD (12,26,9): <strong className="text-emerald-400">+4.20 Bullish Cross</strong></span>
+          <span className="text-indigo-400 font-bold">EMA 20: ₹{ema20Values[ema20Values.length - 1]?.toFixed(2) || currentPrice}</span>
+          <span className="text-rose-400 font-bold">EMA 50: ₹{ema50Values[ema50Values.length - 1]?.toFixed(2) || currentPrice}</span>
         </div>
-        <div className="flex items-center space-x-2 text-[10px] text-stone-500">
-          <Activity className="w-3.5 h-3.5 text-amber-400" />
-          <span>Real-time NSE Tick Engine</span>
+        <div className="flex items-center space-x-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span>NSE High-Resolution Stream</span>
         </div>
       </div>
     </div>

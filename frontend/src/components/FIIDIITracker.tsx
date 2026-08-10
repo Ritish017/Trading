@@ -1,18 +1,26 @@
 import React from 'react';
 import { FIIDIINetFlow } from '../types/indianMarket';
 import { ArrowUpRight, ArrowDownRight, Globe, Landmark, Activity } from 'lucide-react';
+import { INITIAL_FII_DII_FLOWS } from '../data/indianMarketData';
 
 interface FIIDIITrackerProps {
-  flows: FIIDIINetFlow[];
+  flows?: FIIDIINetFlow[];
+  flow?: FIIDIINetFlow;
 }
 
-export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows }) => {
-  const latest = flows[0] || {
+export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows, flow }) => {
+  const latest = flow || (flows && flows[0]) || INITIAL_FII_DII_FLOWS[0] || {
+    date: 'Today',
     fiiCashNetCr: +1840.50,
     diiCashNetCr: +1210.80,
     fiiIndexFuturesCr: +680.20,
     fiiIndexOptionsCr: +3450.00,
   };
+
+  const fiiCash = latest.fiiCashNetCr ?? 0;
+  const diiCash = latest.diiCashNetCr ?? 0;
+  const fiiFut = latest.fiiIndexFuturesCr ?? 0;
+  const fiiOpt = latest.fiiIndexOptionsCr ?? 0;
 
   return (
     <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-4 select-none flex flex-col justify-between">
@@ -40,10 +48,10 @@ export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows }) => {
               <Globe className="w-3 h-3 text-sky-400" />
               <span>FII Cash Net</span>
             </span>
-            <span className="font-mono">{latest.date}</span>
+            <span className="font-mono">{latest.date || 'Today'}</span>
           </div>
-          <div className={`text-base font-black font-mono ${latest.fiiCashNetCr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {latest.fiiCashNetCr >= 0 ? '+' : ''}₹{latest.fiiCashNetCr.toLocaleString()} Cr
+          <div className={`text-base font-black font-mono ${fiiCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {fiiCash >= 0 ? '+' : ''}₹{fiiCash.toLocaleString()} Cr
           </div>
         </div>
 
@@ -54,10 +62,10 @@ export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows }) => {
               <Landmark className="w-3 h-3 text-purple-400" />
               <span>DII Cash Net</span>
             </span>
-            <span className="font-mono">{latest.date}</span>
+            <span className="font-mono">{latest.date || 'Today'}</span>
           </div>
-          <div className={`text-base font-black font-mono ${latest.diiCashNetCr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {latest.diiCashNetCr >= 0 ? '+' : ''}₹{latest.diiCashNetCr.toLocaleString()} Cr
+          <div className={`text-base font-black font-mono ${diiCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {diiCash >= 0 ? '+' : ''}₹{diiCash.toLocaleString()} Cr
           </div>
         </div>
       </div>
@@ -69,14 +77,14 @@ export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows }) => {
         </div>
         <div className="flex justify-between items-center">
           <span className="text-stone-400">Index Futures Net:</span>
-          <span className={`font-bold ${latest.fiiIndexFuturesCr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {latest.fiiIndexFuturesCr >= 0 ? '+' : ''}₹{latest.fiiIndexFuturesCr} Cr
+          <span className={`font-bold ${fiiFut >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {fiiFut >= 0 ? '+' : ''}₹{fiiFut.toLocaleString()} Cr
           </span>
         </div>
         <div className="flex justify-between items-center">
           <span className="text-stone-400">Index Options Net:</span>
-          <span className={`font-bold ${latest.fiiIndexOptionsCr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {latest.fiiIndexOptionsCr >= 0 ? '+' : ''}₹{latest.fiiIndexOptionsCr} Cr
+          <span className={`font-bold ${fiiOpt >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {fiiOpt >= 0 ? '+' : ''}₹{fiiOpt.toLocaleString()} Cr
           </span>
         </div>
       </div>

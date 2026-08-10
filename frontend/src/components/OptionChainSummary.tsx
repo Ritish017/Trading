@@ -1,13 +1,27 @@
 import React from 'react';
 import { OptionChainSummary as OptionChainType } from '../types/indianMarket';
 import { BarChart3, ShieldAlert, Zap } from 'lucide-react';
+import { INITIAL_OPTION_CHAIN } from '../data/indianMarketData';
 
 interface OptionChainSummaryProps {
-  optionSummary: OptionChainType;
+  optionSummary?: OptionChainType;
+  optionChain?: OptionChainType;
+  symbol?: string;
+  price?: number;
 }
 
-export const OptionChainSummary: React.FC<OptionChainSummaryProps> = ({ optionSummary }) => {
-  const { spotPrice, atmStrike, pcr, maxPainStrike, totalCallOI, totalPutOI, impliedVolatility, expiryDate } = optionSummary;
+export const OptionChainSummary: React.FC<OptionChainSummaryProps> = ({ optionSummary, optionChain, symbol, price }) => {
+  const summary = optionSummary || optionChain || INITIAL_OPTION_CHAIN;
+  
+  const spotPrice = price ?? summary.spotPrice ?? 24580;
+  const atmStrike = summary.atmStrike ?? 24600;
+  const pcr = summary.pcr ?? 1.18;
+  const maxPainStrike = summary.maxPainStrike ?? 24550;
+  const totalCallOI = summary.totalCallOI ?? 4820000;
+  const totalPutOI = summary.totalPutOI ?? 5680000;
+  const impliedVolatility = summary.impliedVolatility ?? 13.4;
+  const expiryDate = summary.expiryDate || 'NEAR';
+  const sym = symbol || summary.symbol || 'NIFTY';
 
   // PCR Signal interpretation
   let pcrSignal = 'Neutral';
@@ -20,6 +34,10 @@ export const OptionChainSummary: React.FC<OptionChainSummaryProps> = ({ optionSu
     pcrColor = 'text-rose-400 bg-rose-500/10 border-rose-500/30';
   }
 
+  const callOIFmt = (totalCallOI / 100000).toFixed(1);
+  const putOIFmt = (totalPutOI / 100000).toFixed(1);
+  const totalOI = (totalPutOI + totalCallOI) || 1;
+
   return (
     <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-4 select-none flex flex-col justify-between">
       <div className="flex items-center justify-between mb-3">
@@ -28,7 +46,7 @@ export const OptionChainSummary: React.FC<OptionChainSummaryProps> = ({ optionSu
             <BarChart3 className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-xs font-bold text-white">NIFTY Option Chain Analytics</h3>
+            <h3 className="text-xs font-bold text-white">{sym} Option Chain Analytics</h3>
             <span className="text-[10px] text-stone-400">Expiry: {expiryDate}</span>
           </div>
         </div>
@@ -60,17 +78,17 @@ export const OptionChainSummary: React.FC<OptionChainSummaryProps> = ({ optionSu
       {/* Put vs Call Open Interest Bar */}
       <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800 space-y-1.5">
         <div className="flex justify-between text-[10px] font-mono font-bold">
-          <span className="text-emerald-400">Put OI: {totalPutOI} Lakhs</span>
-          <span className="text-rose-400">Call OI: {totalCallOI} Lakhs</span>
+          <span className="text-emerald-400">Put OI: {putOIFmt} Lakhs</span>
+          <span className="text-rose-400">Call OI: {callOIFmt} Lakhs</span>
         </div>
         <div className="w-full bg-stone-800 h-2 rounded-full overflow-hidden flex">
           <div
             className="bg-emerald-500 h-full"
-            style={{ width: `${(totalPutOI / (totalPutOI + totalCallOI)) * 100}%` }}
+            style={{ width: `${(totalPutOI / totalOI) * 100}%` }}
           />
           <div
             className="bg-rose-500 h-full"
-            style={{ width: `${(totalCallOI / (totalPutOI + totalCallOI)) * 100}%` }}
+            style={{ width: `${(totalCallOI / totalOI) * 100}%` }}
           />
         </div>
       </div>

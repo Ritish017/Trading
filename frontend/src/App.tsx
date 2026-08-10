@@ -146,6 +146,93 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch real market quotes from Upstox REST endpoint on load and periodically
+  useEffect(() => {
+    const fetchRealQuotes = async () => {
+      try {
+        const symbolList = (stocks || [])
+          .map((s) => s.symbol)
+          .concat(['NIFTY 50', 'BANKNIFTY', 'INDIA VIX', 'SENSEX', 'NIFTY IT'])
+          .join(',');
+        const res = await fetch(`/api/market/quotes?symbols=${encodeURIComponent(symbolList)}`);
+        if (res.ok) {
+          const quotes: Array<any> = await res.json();
+          if (Array.isArray(quotes) && quotes.length > 0) {
+            setStocks((prev) =>
+              (prev || []).map((stock) => {
+                const q = quotes.find((item) => item && (item.symbol === stock.symbol || item.instrument_key === stock.symbol));
+                if (!q || !q.ltp) return stock;
+                const newPrice = q.ltp;
+                const prevClose = q.previous_close || stock.prevClose || newPrice;
+                const priceDiff = newPrice - prevClose;
+                return {
+                  ...stock,
+                  price: newPrice,
+                  change: q.change ?? Number((newPrice - prevClose).toFixed(2)),
+                  changePercent: q.change_percent ?? Number(((priceDiff / prevClose) * 100).toFixed(2)),
+                  high: q.high ? Math.max(q.high, newPrice) : stock.high,
+                  low: q.low ? Math.min(q.low, newPrice) : stock.low,
+                  open: q.open || stock.open,
+                  prevClose: prevClose,
+                  vwap: Number((stock.vwap * 0.9 + newPrice * 0.1).toFixed(2)),
+                };
+              })
+            );
+
+            setIndices((prev) =>
+              (prev || []).map((idx) => {
+                const q = quotes.find((item) => item && (item.symbol === idx.symbol || item.instrument_key === idx.symbol));
+                if (!q || !q.ltp) return idx;
+                return {
+                  ...idx,
+                  value: q.ltp,
+                  change: q.change ?? 0,
+                  changePercent: q.change_percent ?? 0,
+                };
+              })
+            );
+          }
+        }
+      } catch {
+        // quiet fallback
+      }
+    };
+
+    fetchRealQuotes();
+    const interval = setInterval(fetchRealQuotes, 6000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch real candles for selected stock from Upstox REST endpoint
+  useEffect(() => {
+    const fetchRealCandles = async () => {
+      try {
+        const res = await fetch(`/api/market/candles/${encodeURIComponent(selectedSymbol)}?interval=${timeframe}&count=100`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.candles) && data.candles.length > 0) {
+            const formattedCandles: IndianCandle[] = data.candles.map((c: any) => ({
+              time: typeof c.timestamp === 'number' ? c.timestamp : Math.floor(new Date(c.timestamp || c.time).getTime() / 1000),
+              open: c.open,
+              high: c.high,
+              low: c.low,
+              close: c.close,
+              volume: c.volume || Math.floor(Math.random() * 5000) + 1000,
+              vwap: c.vwap || c.close,
+            }));
+            setCandles((prev) => ({
+              ...prev,
+              [selectedSymbol]: formattedCandles,
+            }));
+          }
+        }
+      } catch {
+        // quiet fallback
+      }
+    };
+    fetchRealCandles();
+  }, [selectedSymbol, timeframe]);
+
   // Connect to FastAPI WebSocket `/ws/ticks` Feed
   useEffect(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';

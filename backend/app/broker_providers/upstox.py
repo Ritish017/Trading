@@ -92,14 +92,9 @@ class UpstoxProvider(MarketDataProvider):
         return await self.rest_client.get_full_quote(symbol)
 
     async def get_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:
-        results = []
-        for sym in symbols:
-            try:
-                q = await self.get_quote(sym)
-                results.append(q)
-            except Exception as e:
-                logger.error(f"[UPSTOX] Failed to fetch quote for {sym}: {str(e)}")
-        return results
+        if not self.rest_client or not self.is_connected:
+            raise RuntimeError("Upstox REST client not connected.")
+        return await self.rest_client.get_multi_quotes(symbols)
 
     async def get_historical_candles(
         self, symbol: str, interval: str, count: int = 100, from_date: Optional[str] = None, to_date: Optional[str] = None

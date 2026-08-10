@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 from typing import Dict, Any, List, Optional
 import httpx
 from backend.app.market.instruments import get_instrument_key, get_instrument_metadata
@@ -152,6 +153,68 @@ class UpstoxRESTClient:
             "source": "UPSTOX",
             "is_live": True
         }
+
+    async def get_multi_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:
+        """Fetch market quotes for multiple symbols in a single Upstox API request."""
+        if not symbols:
+            return []
+        keys = [get_instrument_key(s) for s in symbols]
+        comma_keys = ",".join(keys)
+        endpoint = f"/v2/market-quote/quotes?instrument_key={comma_keys}"
+        try:
+            res = await self._request("GET", endpoint)
+            raw_data = res.get("data", {})
+        except Exception as e:
+            logger.error(f"[UPSTOX REST] Multi-quote request failed: {str(e)}")
+            raw_data = {}
+
+        results = []
+        for symbol in symbols:
+            inst_key = get_instrument_key(symbol)
+            inst_colon = inst_key.replace("|", ":")
+            quote_body = raw_data.get(inst_key) or raw_data.get(inst_colon) or {}
+            
+            if quote_body:
+                ohlc = quote_body.get("ohlc", {})
+                depth = quote_body.get("depth", {})
+                bids = depth.get("buy", [])
+                asks = depth.get("sell", [])
+                ltp = float(quote_body.get("last_price", 0.0) or quote_body.get("close", 0.0))
+                prev_close = float(ohlc.get("close", ltp) or ltp)
+                change = round(ltp - prev_close, 2)
+                change_pct = round((change / prev_close) * 100, 2) if prev_close else 0.0
+                meta = get_instrument_metadata(symbol)
+
+                results.append({
+                    "symbol": symbol,
+                    "instrument_key": inst_key,
+                    "exchange": meta.get("exchange", "NSE"),
+                    "instrument_type": meta.get("instrument_type", "EQUITY"),
+                    "ltp": ltp,
+                    "open": float(ohlc.get("open", ltp) or ltp),
+                    "high": float(ohlc.get("high", ltp) or ltp),
+                    "low": float(ohlc.get("low", ltp) or ltp),
+                    "close": ltp,
+                    "previous_close": prev_close,
+                    "change": change,
+                    "change_percent": change_pct,
+                    "volume": int(quote_body.get("volume", 0) or 0),
+                    "open_interest": int(quote_body.get("oi", 0) or 0),
+                    "bid": float(bids[0].get("price", 0.0) or 0.0) if bids else None,
+                    "ask": float(asks[0].get("price", 0.0) or 0.0) if asks else None,
+                    "timestamp": parse_upstox_timestamp(quote_body.get("timestamp")),
+                    "source": "UPSTOX",
+                    "is_live": True
+                })
+            else:
+                # Fallback to single get_full_quote if symbol wasn't returned in batch
+                try:
+                    single = await self.get_full_quote(symbol)
+                    results.append(single)
+                except Exception:
+                    pass
+
+        return results
 
     async def get_historical_candles(self, symbol: str, interval: str = "5m", to_date: Optional[str] = None, from_date: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetch historical candle series from Upstox API."""

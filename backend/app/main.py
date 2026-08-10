@@ -114,6 +114,11 @@ async def redis_health():
 async def get_market_quote(symbol: str):
     return await market_data_service.get_quote(symbol)
 
+@app.get("/api/market/quotes")
+async def get_market_quotes(symbols: str = Query(default="RELIANCE.NS,TCS.NS,HDFCBANK.NS,ICICIBANK.NS,INFY.NS,SBIN.NS,TATAMOTORS.NS,NIFTY 50,BANKNIFTY,INDIA VIX")):
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    return await market_data_service.get_quotes(sym_list)
+
 @app.get("/api/market/candles/{symbol}")
 async def get_candles(symbol: str, interval: str = "5m", count: int = 60):
     cached = candle_aggregator.get_history(symbol, interval, count)

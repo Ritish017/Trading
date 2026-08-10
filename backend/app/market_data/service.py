@@ -135,6 +135,17 @@ class MarketDataService:
                 return cached
             raise e
 
+    async def get_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:
+        try:
+            quotes = await self.active_provider.get_quotes(symbols)
+            for q in quotes:
+                if q and q.get("symbol"):
+                    self._quote_cache[q["symbol"]] = q
+            return quotes
+        except Exception as e:
+            logger.error(f"[MARKET DATA HUB] Failed to fetch quotes: {str(e)}")
+            return [self._quote_cache.get(s, {"symbol": s, "stale": True}) for s in symbols]
+
     async def get_candles(self, symbol: str, interval: str = "5m", count: int = 60) -> List[Dict[str, Any]]:
         return await self.active_provider.get_historical_candles(symbol, interval, count=count)
 

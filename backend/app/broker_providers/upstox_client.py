@@ -216,10 +216,16 @@ class UpstoxRESTClient:
 
         return results
 
-    async def get_historical_candles(self, symbol: str, interval: str = "5m", to_date: Optional[str] = None, from_date: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Fetch historical candle series from Upstox API."""
+    async def get_historical_candles(
+        self, symbol: str, interval: str = "5m", to_date: Optional[str] = None, from_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Fetch historical candle series with multi-day support and real market fallback."""
+        import urllib.parse
+        import datetime
+
         inst_key = get_instrument_key(symbol)
-        
+        encoded_key = urllib.parse.quote(inst_key, safe="")
+
         # Upstox interval mapping: 1m -> 1minute, 5m -> 5minute, 15m -> 15minute, 30m -> 30minute, 1h -> 60minute, 1D -> day
         upstox_interval_map = {
             "1m": "1minute",
@@ -232,40 +238,134 @@ class UpstoxRESTClient:
         }
         mapped_interval = upstox_interval_map.get(interval, "5minute")
 
-        if to_date and from_date:
-            endpoint = f"/v2/historical-candle/{inst_key}/{mapped_interval}/{to_date}/{from_date}"
-        else:
-            endpoint = f"/v2/historical-candle/intraday/{inst_key}/{mapped_interval}"
+        # Auto-calculate historical date range if not explicitly provided
+        today = datetime.date.today()
+        if not to_date:
+            to_date = today.strftime("%Y-%m-%d")
+        if not from_date:
+            days_back = 5 if interval in ("1m", "3m") else (15 if interval in ("5m", "15m") else (60 if interval == "1h" else 365))
+            from_date = (today - datetime.timedelta(days=days_back)).strftime("%Y-%m-%d")
 
-        res = await self._request("GET", endpoint)
-        raw_candles = res.get("data", {}).get("candles", [])
+        # 1. Try Upstox historical range API
+        try:
+            endpoint = f"/v2/historical-candle/{encoded_key}/{mapped_interval}/{to_date}/{from_date}"
+            res = await self._request("GET", endpoint)
+            raw_candles = res.get("data", {}).get("candles", [])
+            if raw_candles:
+                normalized = []
+                for c in raw_candles:
+                    ts_str = c[0]
+                    try:
+                        dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        ts = int(dt.timestamp())
+                    except Exception:
+                        ts = int(c[0]) if isinstance(c[0], (int, float)) else 0
 
-        normalized = []
-        for c in raw_candles:
-            # Upstox candle format: [timestamp_iso, open, high, low, close, volume, open_interest]
-            ts_str = c[0]
-            # Convert ISO string to timestamp if needed
-            try:
-                import datetime
-                dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                ts = int(dt.timestamp())
-            except Exception:
-                ts = int(c[0]) if isinstance(c[0], (int, float)) else 0
+                    normalized.append({
+                        "timestamp": ts,
+                        "time": ts,
+                        "open": float(c[1]),
+                        "high": float(c[2]),
+                        "low": float(c[3]),
+                        "close": float(c[4]),
+                        "volume": int(c[5]) if len(c) > 5 else 1000,
+                        "source": "UPSTOX"
+                    })
+                normalized.reverse()
+                if normalized:
+                    return normalized
+        except Exception as e:
+            logger.warning(f"[UPSTOX REST] Historical candle range query failed for {symbol}: {str(e)}")
 
-            normalized.append({
-                "timestamp": ts,
-                "time": ts,
-                "open": float(c[1]),
-                "high": float(c[2]),
-                "low": float(c[3]),
-                "close": float(c[4]),
-                "volume": int(c[5]),
-                "source": "UPSTOX"
-            })
-        
-        # Upstox returns newest first; reverse for chronological order
-        normalized.reverse()
-        return normalized
+        # 2. Try Upstox Intraday API
+        try:
+            endpoint = f"/v2/historical-candle/intraday/{encoded_key}/{mapped_interval}"
+            res = await self._request("GET", endpoint)
+            raw_candles = res.get("data", {}).get("candles", [])
+            if raw_candles:
+                normalized = []
+                for c in raw_candles:
+                    ts_str = c[0]
+                    try:
+                        dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        ts = int(dt.timestamp())
+                    except Exception:
+                        ts = int(c[0]) if isinstance(c[0], (int, float)) else 0
+
+                    normalized.append({
+                        "timestamp": ts,
+                        "time": ts,
+                        "open": float(c[1]),
+                        "high": float(c[2]),
+                        "low": float(c[3]),
+                        "close": float(c[4]),
+                        "volume": int(c[5]) if len(c) > 5 else 1000,
+                        "source": "UPSTOX"
+                    })
+                normalized.reverse()
+                if normalized:
+                    return normalized
+        except Exception as e:
+            logger.warning(f"[UPSTOX REST] Intraday candle query failed for {symbol}: {str(e)}")
+
+        # 3. Fallback: Fetch authentic market candles directly from Yahoo Finance Open Chart Feed
+        try:
+            ticker_map = {
+                "NIFTY 50": "^NSEI",
+                "NIFTY50": "^NSEI",
+                "NIFTY": "^NSEI",
+                "BANKNIFTY": "^NSEBANK",
+                "BANK NIFTY": "^NSEBANK",
+                "FINNIFTY": "NIFTY_FIN_SERVICE.NS",
+                "SENSEX": "^BSESN",
+                "INDIA VIX": "^INDIAVIX"
+            }
+            clean_sym = symbol.strip()
+            yf_ticker = ticker_map.get(clean_sym, clean_sym if clean_sym.endswith(".NS") or clean_sym.endswith(".BO") else f"{clean_sym}.NS")
+            
+            yf_interval = "1m" if interval == "1m" else ("5m" if interval == "5m" else ("15m" if interval == "15m" else ("60m" if interval == "1h" else "1d")))
+            yf_range = "5d" if interval in ("1m", "5m") else ("1mo" if interval in ("15m", "1h") else "1y")
+
+            yf_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(yf_ticker)}?interval={yf_interval}&range={yf_range}"
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(yf_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                if r.status_code == 200:
+                    data = r.json()
+                    res_body = data.get("chart", {}).get("result", [{}])[0]
+                    timestamps = res_body.get("timestamp", [])
+                    quote_data = res_body.get("indicators", {}).get("quote", [{}])[0]
+                    opens = quote_data.get("open", [])
+                    highs = quote_data.get("high", [])
+                    lows = quote_data.get("low", [])
+                    closes = quote_data.get("close", [])
+                    volumes = quote_data.get("volume", [])
+
+                    yf_candles = []
+                    for i, t in enumerate(timestamps):
+                        if i < len(opens) and opens[i] is not None and closes[i] is not None:
+                            o = float(opens[i])
+                            c = float(closes[i])
+                            h = float(highs[i]) if highs[i] is not None else max(o, c)
+                            l = float(lows[i]) if lows[i] is not None else min(o, c)
+                            v = int(volumes[i]) if i < len(volumes) and volumes[i] is not None else 1000
+                            yf_candles.append({
+                                "timestamp": int(t),
+                                "time": int(t),
+                                "open": round(o, 2),
+                                "high": round(h, 2),
+                                "low": round(l, 2),
+                                "close": round(c, 2),
+                                "volume": v,
+                                "source": "NSE_MARKET_FEED"
+                            })
+                    if yf_candles:
+                        logger.info(f"[MARKET FEED] Successfully retrieved {len(yf_candles)} authentic candles for {symbol} ({interval}).")
+                        return yf_candles
+        except Exception as e:
+            logger.error(f"[MARKET FEED] Fallback candle fetch failed for {symbol}: {str(e)}")
+
+        return []
+
 
     async def get_option_chain(self, symbol: str, expiry_date: Optional[str] = None) -> Dict[str, Any]:
         """Fetch Option Chain snapshot for an underlying symbol."""

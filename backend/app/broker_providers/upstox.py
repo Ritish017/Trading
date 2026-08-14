@@ -102,7 +102,7 @@ class UpstoxProvider(MarketDataProvider):
         if not self.rest_client or not self.is_connected:
             raise RuntimeError("Upstox REST client not connected.")
         candles = await self.rest_client.get_historical_candles(symbol, interval, to_date=to_date, from_date=from_date)
-        return candles[:count] if count and len(candles) > count else candles
+        return candles[-count:] if count and len(candles) > count else candles
 
     async def get_option_chain(self, symbol: str, expiry: Optional[str] = None) -> Dict[str, Any]:
         if not self.rest_client or not self.is_connected:

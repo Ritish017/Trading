@@ -79,14 +79,15 @@ class UpstoxRESTClient:
             except httpx.HTTPStatusError as e:
                 last_error = e
                 logger.error(f"[UPSTOX REST] HTTP Error {e.response.status_code} for {endpoint}: {e.response.text}")
-                if e.response.status_code in (401, 403):
-                    # Authentication failure - do not retry
+                if e.response.status_code in (400, 401, 403, 404):
+                    # Bad Request, Auth failure, or Not Found - do not retry
                     break
-                await asyncio.sleep(1.0 * (attempt + 1))
+                await asyncio.sleep(0.5 * (attempt + 1))
             except Exception as e:
                 last_error = e
                 logger.error(f"[UPSTOX REST] Request failed for {endpoint}: {str(e)}")
-                await asyncio.sleep(1.0 * (attempt + 1))
+                await asyncio.sleep(0.5 * (attempt + 1))
+
 
         if last_error:
             raise last_error
@@ -226,89 +227,47 @@ class UpstoxRESTClient:
         inst_key = get_instrument_key(symbol)
         encoded_key = urllib.parse.quote(inst_key, safe="")
 
-        # Upstox interval mapping: 1m -> 1minute, 5m -> 5minute, 15m -> 15minute, 30m -> 30minute, 1h -> 60minute, 1D -> day
-        upstox_interval_map = {
+        # Upstox only natively supports: 1minute, 30minute, day, week, month
+        upstox_supported_map = {
             "1m": "1minute",
-            "3m": "3minute",
-            "5m": "5minute",
-            "15m": "15minute",
             "30m": "30minute",
-            "1h": "60minute",
             "1D": "day"
         }
-        mapped_interval = upstox_interval_map.get(interval, "5minute")
+        mapped_interval = upstox_supported_map.get(interval)
 
-        # Auto-calculate historical date range if not explicitly provided
-        today = datetime.date.today()
-        if not to_date:
-            to_date = today.strftime("%Y-%m-%d")
-        if not from_date:
-            days_back = 5 if interval in ("1m", "3m") else (15 if interval in ("5m", "15m") else (60 if interval == "1h" else 365))
-            from_date = (today - datetime.timedelta(days=days_back)).strftime("%Y-%m-%d")
+        # 1. If Upstox natively supports the interval, try Upstox API first
+        if mapped_interval:
+            try:
+                endpoint = f"/v2/historical-candle/{encoded_key}/{mapped_interval}/{to_date}/{from_date}"
+                res = await self._request("GET", endpoint)
+                raw_candles = res.get("data", {}).get("candles", [])
+                if raw_candles:
+                    normalized = []
+                    for c in raw_candles:
+                        ts_str = c[0]
+                        try:
+                            dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                            ts = int(dt.timestamp())
+                        except Exception:
+                            ts = int(c[0]) if isinstance(c[0], (int, float)) else 0
 
-        # 1. Try Upstox historical range API
-        try:
-            endpoint = f"/v2/historical-candle/{encoded_key}/{mapped_interval}/{to_date}/{from_date}"
-            res = await self._request("GET", endpoint)
-            raw_candles = res.get("data", {}).get("candles", [])
-            if raw_candles:
-                normalized = []
-                for c in raw_candles:
-                    ts_str = c[0]
-                    try:
-                        dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                        ts = int(dt.timestamp())
-                    except Exception:
-                        ts = int(c[0]) if isinstance(c[0], (int, float)) else 0
+                        normalized.append({
+                            "timestamp": ts,
+                            "time": ts,
+                            "open": float(c[1]),
+                            "high": float(c[2]),
+                            "low": float(c[3]),
+                            "close": float(c[4]),
+                            "volume": int(c[5]) if len(c) > 5 else 1000,
+                            "source": "UPSTOX"
+                        })
+                    normalized.reverse()
+                    if normalized:
+                        return normalized
+            except Exception as e:
+                logger.info(f"[UPSTOX REST] Native candle query for {symbol} ({interval}) skipped to market feed: {str(e)}")
 
-                    normalized.append({
-                        "timestamp": ts,
-                        "time": ts,
-                        "open": float(c[1]),
-                        "high": float(c[2]),
-                        "low": float(c[3]),
-                        "close": float(c[4]),
-                        "volume": int(c[5]) if len(c) > 5 else 1000,
-                        "source": "UPSTOX"
-                    })
-                normalized.reverse()
-                if normalized:
-                    return normalized
-        except Exception as e:
-            logger.warning(f"[UPSTOX REST] Historical candle range query failed for {symbol}: {str(e)}")
-
-        # 2. Try Upstox Intraday API
-        try:
-            endpoint = f"/v2/historical-candle/intraday/{encoded_key}/{mapped_interval}"
-            res = await self._request("GET", endpoint)
-            raw_candles = res.get("data", {}).get("candles", [])
-            if raw_candles:
-                normalized = []
-                for c in raw_candles:
-                    ts_str = c[0]
-                    try:
-                        dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                        ts = int(dt.timestamp())
-                    except Exception:
-                        ts = int(c[0]) if isinstance(c[0], (int, float)) else 0
-
-                    normalized.append({
-                        "timestamp": ts,
-                        "time": ts,
-                        "open": float(c[1]),
-                        "high": float(c[2]),
-                        "low": float(c[3]),
-                        "close": float(c[4]),
-                        "volume": int(c[5]) if len(c) > 5 else 1000,
-                        "source": "UPSTOX"
-                    })
-                normalized.reverse()
-                if normalized:
-                    return normalized
-        except Exception as e:
-            logger.warning(f"[UPSTOX REST] Intraday candle query failed for {symbol}: {str(e)}")
-
-        # 3. Fallback: Fetch authentic market candles directly from Yahoo Finance Open Chart Feed
+        # 2. Fast Authentic Market Feed (Yahoo Finance Chart Engine)
         try:
             ticker_map = {
                 "NIFTY 50": "^NSEI",
@@ -327,7 +286,7 @@ class UpstoxRESTClient:
             yf_range = "5d" if interval in ("1m", "5m") else ("1mo" if interval in ("15m", "1h") else "1y")
 
             yf_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(yf_ticker)}?interval={yf_interval}&range={yf_range}"
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(timeout=4.0) as client:
                 r = await client.get(yf_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
                 if r.status_code == 200:
                     data = r.json()
@@ -359,12 +318,12 @@ class UpstoxRESTClient:
                                 "source": "NSE_MARKET_FEED"
                             })
                     if yf_candles:
-                        logger.info(f"[MARKET FEED] Successfully retrieved {len(yf_candles)} authentic candles for {symbol} ({interval}).")
                         return yf_candles
         except Exception as e:
             logger.error(f"[MARKET FEED] Fallback candle fetch failed for {symbol}: {str(e)}")
 
         return []
+
 
 
     async def get_option_chain(self, symbol: str, expiry_date: Optional[str] = None) -> Dict[str, Any]:

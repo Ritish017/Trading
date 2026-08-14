@@ -519,20 +519,73 @@ export default function App() {
     setPaperPositions((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const handleAddCustomStock = (sym: string) => {
+
+    const clean = sym.trim().toUpperCase();
+    const fullSym = clean.endsWith('.NS') || clean.endsWith('.BO') ? clean : `${clean}.NS`;
+    const exists = (stocks || []).find((s) => s.symbol === fullSym || s.symbol === clean);
+    if (exists) {
+      setSelectedSymbol(exists.symbol);
+      return;
+    }
+    const newStock: NSEStock = {
+      symbol: fullSym,
+      bseCode: '000000',
+      name: `${clean} Limited`,
+      sector: 'NSE Equities',
+      price: 1000.0,
+      change: 0,
+      changePercent: 0,
+      open: 1000.0,
+      high: 1000.0,
+      low: 1000.0,
+      prevClose: 1000.0,
+      volumeLakhs: 10.0,
+      turnoverCr: 50.0,
+      marketCapCr: 10000,
+      peRatio: 20.0,
+      pbRatio: 2.0,
+      week52High: 1200.0,
+      week52Low: 800.0,
+      vwap: 1000.0,
+      upperCircuit: 1100.0,
+      lowerCircuit: 900.0,
+      isNifty50: false,
+      isFavorite: true,
+      sparkline: [1000, 1000, 1000, 1000, 1000, 1000, 1000],
+    };
+    setStocks((prev) => [newStock, ...(prev || [])]);
+    setSelectedSymbol(fullSym);
+  };
+
   const handleCommandPaletteAction = (action: string, payload?: any) => {
-    if (action === 'SELECT_STOCK' && payload) {
-      setSelectedSymbol(payload.symbol);
+    if ((action === 'SELECT_STOCK' || action === 'SELECT_SYMBOL') && payload) {
+      const sym = typeof payload === 'string' ? payload : (payload.symbol || selectedSymbol);
+      handleAddCustomStock(sym);
     } else if (action === 'AI_REPORT' && payload) {
-      handleGenerateAIReport(payload.symbol);
+      handleGenerateAIReport(typeof payload === 'string' ? payload : payload.symbol);
     } else if (action === 'PAPER_TRADE') {
       setIsPaperModalOpen(true);
     }
   };
 
+  // Typo-tolerant and fuzzy filtering
+  const stripVowels = (s: string) => s.replace(/[aeiou\s\-_.]/g, '');
+
   const filteredStocks = (stocks || []).filter((s) => {
     if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.sector.toLowerCase().includes(q);
+    const q = searchQuery.toLowerCase().trim();
+    const sym = (s.symbol || '').toLowerCase();
+    const cleanSym = sym.replace('.ns', '').replace('.bo', '');
+    const name = (s.name || '').toLowerCase();
+    const sector = (s.sector || '').toLowerCase();
+
+    if (sym.includes(q) || cleanSym.includes(q) || name.includes(q) || sector.includes(q)) return true;
+    const qStripped = stripVowels(q);
+    const symStripped = stripVowels(cleanSym);
+    const nameStripped = stripVowels(name);
+    if (qStripped.length >= 2 && (symStripped.includes(qStripped) || nameStripped.includes(qStripped) || qStripped.includes(symStripped))) return true;
+    return false;
   });
 
   const indexQuotes: MarketQuote[] = (indices || []).map((idx) => toMarketQuote(idx, true));
@@ -605,6 +658,9 @@ export default function App() {
             onSelectStock={(st) => setSelectedSymbol(st?.symbol || 'RELIANCE.NS')}
             onToggleFavorite={(sym) => setStocks((prev) => (prev || []).map((s) => s.symbol === sym ? { ...s, isFavorite: !s.isFavorite } : s))}
             onOpenAIForStock={(st) => handleGenerateAIReport(st?.symbol || selectedSymbol)}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onAddCustomStock={handleAddCustomStock}
           />
         </div>
 

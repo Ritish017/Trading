@@ -141,6 +141,146 @@ INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
         "instrument_type": "EQUITY",
         "display_name": "State Bank of India"
     },
+    "MRF.NS": {
+        "instrument_key": "NSE_EQ|INE883A01011",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "MRF Limited"
+    },
+    "MRF": {
+        "instrument_key": "NSE_EQ|INE883A01011",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "MRF Limited"
+    },
+    "MARUTI.NS": {
+        "instrument_key": "NSE_EQ|INE585B01010",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Maruti Suzuki India Ltd"
+    },
+    "MARUTI": {
+        "instrument_key": "NSE_EQ|INE585B01010",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Maruti Suzuki India Ltd"
+    },
+    "M&M.NS": {
+        "instrument_key": "NSE_EQ|INE101A01026",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Mahindra & Mahindra Ltd"
+    },
+    "M&M": {
+        "instrument_key": "NSE_EQ|INE101A01026",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Mahindra & Mahindra Ltd"
+    },
+    "WIPRO.NS": {
+        "instrument_key": "NSE_EQ|INE075A01022",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Wipro Limited"
+    },
+    "WIPRO": {
+        "instrument_key": "NSE_EQ|INE075A01022",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Wipro Limited"
+    },
+    "TITAN.NS": {
+        "instrument_key": "NSE_EQ|INE280A01028",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Titan Company Ltd"
+    },
+    "TITAN": {
+        "instrument_key": "NSE_EQ|INE280A01028",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Titan Company Ltd"
+    },
+    "TATASTEEL.NS": {
+        "instrument_key": "NSE_EQ|INE081A01020",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Tata Steel Ltd"
+    },
+    "TATASTEEL": {
+        "instrument_key": "NSE_EQ|INE081A01020",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Tata Steel Ltd"
+    },
+    "ZOMATO.NS": {
+        "instrument_key": "NSE_EQ|INE758T01015",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Zomato Limited"
+    },
+    "ZOMATO": {
+        "instrument_key": "NSE_EQ|INE758T01015",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Zomato Limited"
+    },
+    "COALINDIA.NS": {
+        "instrument_key": "NSE_EQ|INE522F01014",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Coal India Ltd"
+    },
+    "COALINDIA": {
+        "instrument_key": "NSE_EQ|INE522F01014",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Coal India Ltd"
+    },
+    "ADANIENT.NS": {
+        "instrument_key": "NSE_EQ|INE423A01024",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Adani Enterprises Ltd"
+    },
+    "ADANIENT": {
+        "instrument_key": "NSE_EQ|INE423A01024",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Adani Enterprises Ltd"
+    },
+    "ASIANPAINT.NS": {
+        "instrument_key": "NSE_EQ|INE021A01026",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Asian Paints Ltd"
+    },
+    "ASIANPAINT": {
+        "instrument_key": "NSE_EQ|INE021A01026",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Asian Paints Ltd"
+    }
 }
 
 def get_instrument_key(symbol: str) -> str:

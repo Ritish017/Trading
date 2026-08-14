@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NSEStock } from '../types/indianMarket';
-import { Star, ArrowUpRight, ArrowDownRight, Sparkles, LayoutList, Columns } from 'lucide-react';
+import { Star, ArrowUpRight, ArrowDownRight, Sparkles, LayoutList, Columns, Search, X, PlusCircle } from 'lucide-react';
 
 interface NSEWatchlistProps {
   stocks: NSEStock[];
@@ -8,6 +8,9 @@ interface NSEWatchlistProps {
   onSelectStock: (stock: NSEStock) => void;
   onToggleFavorite: (symbol: string) => void;
   onOpenAIForStock: (stock: NSEStock) => void;
+  searchQuery?: string;
+  onSearchChange?: (q: string) => void;
+  onAddCustomStock?: (symbol: string) => void;
 }
 
 export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
@@ -16,9 +19,19 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
   onSelectStock,
   onToggleFavorite,
   onOpenAIForStock,
+  searchQuery = '',
+  onSearchChange,
+  onAddCustomStock,
 }) => {
   const [selectedSector, setSelectedSector] = useState<string>('All');
   const [viewMode, setViewMode] = useState<'Compact' | 'Detailed'>('Compact');
+  const [localSearch, setLocalSearch] = useState<string>('');
+
+  const effectiveSearch = onSearchChange ? searchQuery : localSearch;
+  const handleSearch = (val: string) => {
+    if (onSearchChange) onSearchChange(val);
+    else setLocalSearch(val);
+  };
 
   const sectors: string[] = [
     'All',
@@ -32,8 +45,36 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
     'Pharmaceuticals',
   ];
 
+  // Smart Typo-Tolerant & Fuzzy Search Matcher
+  const isMatch = (stock: NSEStock, rawQuery: string) => {
+    if (!rawQuery) return true;
+    const q = rawQuery.toLowerCase().trim();
+    const sym = (stock.symbol || '').toLowerCase();
+    const cleanSym = sym.replace('.ns', '').replace('.bo', '');
+    const name = (stock.name || '').toLowerCase();
+    const sector = (stock.sector || '').toLowerCase();
+
+    // 1. Direct substring match
+    if (sym.includes(q) || cleanSym.includes(q) || name.includes(q) || sector.includes(q)) {
+      return true;
+    }
+
+    // 2. Vowel-stripped / typo match (e.g. "mref" -> "mrf", "rlinc" -> "reliance")
+    const stripVowels = (s: string) => s.replace(/[aeiou\s\-_.]/g, '');
+    const qStripped = stripVowels(q);
+    const symStripped = stripVowels(cleanSym);
+    const nameStripped = stripVowels(name);
+
+    if (qStripped.length >= 2 && (symStripped.includes(qStripped) || nameStripped.includes(qStripped) || qStripped.includes(symStripped))) {
+      return true;
+    }
+
+    return false;
+  };
+
   const filteredStocks = (stocks || []).filter((stock) => {
     if (!stock || !stock.symbol) return false;
+    if (!isMatch(stock, effectiveSearch)) return false;
     if (selectedSector === 'All') return true;
     if (selectedSector === 'Favorites') return stock.isFavorite;
     if (selectedSector === 'NIFTY 50') return stock.isNifty50;
@@ -73,6 +114,26 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
         </div>
       </div>
 
+      {/* Integrated Search Input */}
+      <div className="relative mb-2 shrink-0">
+        <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+        <input
+          type="text"
+          value={effectiveSearch}
+          onChange={(e) => handleSearch(e.target.value)}
+          placeholder="Search stock (e.g. MRF, TCS)..."
+          className="w-full bg-[#14151b] border border-stone-800 rounded-xl pl-8 pr-7 py-1.5 text-xs text-stone-200 placeholder-stone-500 focus:outline-none focus:border-amber-500/50 transition-all font-mono"
+        />
+        {effectiveSearch && (
+          <button
+            onClick={() => handleSearch('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-300"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
       {/* Sector Filter Chips */}
       <div className="flex items-center space-x-1.5 overflow-x-auto custom-scrollbar pb-2 mb-2 border-b border-stone-800/60 shrink-0">
         {sectors.map((sec) => (
@@ -92,7 +153,23 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
 
       {/* Watchlist Body */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto custom-scrollbar pr-0.5">
-        {viewMode === 'Compact' ? (
+        {filteredStocks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-4 text-center space-y-3 bg-[#14151b]/40 rounded-xl border border-dashed border-stone-800 my-2">
+            <span className="text-xs text-stone-400">
+              No local stock matching &ldquo;<strong className="text-amber-400">{effectiveSearch}</strong>&rdquo;
+            </span>
+            {effectiveSearch && onAddCustomStock && (
+              <button
+                onClick={() => onAddCustomStock(effectiveSearch.trim().toUpperCase())}
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 rounded-xl text-xs font-bold font-mono transition-all shadow-md cursor-pointer"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Load &ldquo;{effectiveSearch.trim().toUpperCase()}&rdquo; Live</span>
+              </button>
+            )}
+          </div>
+        ) : viewMode === 'Compact' ? (
+
           /* COMPACT SIDEBAR VIEW (Optimized for sidebar with full price and change visibility) */
           <div className="space-y-1.5">
             {filteredStocks.map((stock) => {

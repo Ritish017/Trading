@@ -41,12 +41,12 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
   });
 
   return (
-    <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-3 select-none h-full flex flex-col justify-between overflow-hidden">
+    <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-3 h-full flex flex-col justify-between overflow-hidden shadow-sm">
       {/* Header & View Mode Switcher */}
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-stone-800/60 shrink-0">
         <div className="flex items-center space-x-2">
           <span className="font-extrabold text-xs text-white uppercase tracking-wider font-mono">NSE Watchlist</span>
-          <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
             {filteredStocks.length} Stocks
           </span>
         </div>
@@ -54,19 +54,19 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
         <div className="flex items-center space-x-1 bg-[#14151b] p-0.5 rounded-lg border border-stone-800">
           <button
             onClick={() => setViewMode('Compact')}
-            className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+            className={`p-1.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
               viewMode === 'Compact' ? 'bg-amber-500 text-stone-950 shadow-sm' : 'text-stone-400 hover:text-stone-200'
             }`}
-            title="Compact Sidebar View"
+            title="Compact View (Recommended for Sidebar)"
           >
             <LayoutList className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setViewMode('Detailed')}
-            className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+            className={`p-1.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
               viewMode === 'Detailed' ? 'bg-amber-500 text-stone-950 shadow-sm' : 'text-stone-400 hover:text-stone-200'
             }`}
-            title="Detailed Multi-Column Table View"
+            title="Detailed Table View"
           >
             <Columns className="w-3.5 h-3.5" />
           </button>
@@ -74,7 +74,7 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
       </div>
 
       {/* Sector Filter Chips */}
-      <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none pb-2 mb-2 border-b border-stone-800/60 shrink-0">
+      <div className="flex items-center space-x-1.5 overflow-x-auto custom-scrollbar pb-2 mb-2 border-b border-stone-800/60 shrink-0">
         {sectors.map((sec) => (
           <button
             key={sec}
@@ -91,10 +91,10 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
       </div>
 
       {/* Watchlist Body */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto scrollbar-none">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto custom-scrollbar pr-0.5">
         {viewMode === 'Compact' ? (
-          /* COMPACT SIDEBAR VIEW (Fits 100% in left panel with zero clipping) */
-          <div className="space-y-1">
+          /* COMPACT SIDEBAR VIEW (Optimized for sidebar with full price and change visibility) */
+          <div className="space-y-1.5">
             {filteredStocks.map((stock) => {
               const isSelected = selectedStock?.symbol === stock.symbol;
               const isPos = (stock.change || 0) >= 0;
@@ -109,11 +109,11 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
                   className={`flex items-center justify-between p-2 rounded-xl transition-all cursor-pointer border ${
                     isSelected
                       ? 'bg-amber-500/10 border-amber-500/50 text-white shadow-sm'
-                      : 'bg-[#14151b]/60 hover:bg-stone-800/50 border-stone-800/40 text-stone-200'
+                      : 'bg-[#14151b]/70 hover:bg-stone-800/50 border-stone-800/40 text-stone-200'
                   }`}
                 >
                   {/* Left: Star + Symbol & Name */}
-                  <div className="flex items-center space-x-2 min-w-0 pr-2">
+                  <div className="flex items-center space-x-2 min-w-0 pr-1.5 flex-1">
                     <Star
                       onClick={(e) => {
                         e.stopPropagation();
@@ -124,27 +124,27 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
                       }`}
                     />
 
-                    <div className="flex flex-col min-w-0">
+                    <div className="flex flex-col min-w-0 flex-1">
                       <div className="flex items-center space-x-1">
                         <span className="font-extrabold font-mono text-xs tracking-tight text-white">
                           {stock.symbol.split('.')[0]}
                         </span>
                         {stock.isNifty50 && (
-                          <span className="px-1 py-0.1 text-[7px] font-bold rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                          <span className="px-1 py-0.2 text-[7px] font-bold rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                             N50
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] text-stone-400 truncate max-w-[120px]">
+                      <span className="text-[10px] text-stone-400 truncate">
                         {stock.name}
                       </span>
                     </div>
                   </div>
 
                   {/* Right: Price (₹) & Change (%) */}
-                  <div className="flex items-center space-x-2 shrink-0 text-right">
+                  <div className="flex items-center space-x-1.5 shrink-0 text-right">
                     <div className="flex flex-col items-end">
-                      <span className="font-black font-mono text-xs text-stone-100">
+                      <span className="font-black font-mono text-xs text-stone-100 whitespace-nowrap">
                         ₹{priceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                       <div className={`flex items-center space-x-0.5 text-[10px] font-mono font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -158,7 +158,7 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
                         e.stopPropagation();
                         onOpenAIForStock(stock);
                       }}
-                      className="p-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-colors cursor-pointer"
+                      className="p-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-colors cursor-pointer shrink-0"
                       title="Run Gemini AI Intelligence"
                     >
                       <Sparkles className="w-3 h-3" />
@@ -169,99 +169,102 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
             })}
           </div>
         ) : (
-          /* DETAILED TABLE VIEW (With Horizontal Scrollbar for Extended Metrics) */
-          <table className="w-full text-left text-xs font-sans border-collapse min-w-[650px]">
-            <thead>
-              <tr className="text-stone-400 font-medium border-b border-stone-800/60 pb-2">
-                <th className="pb-2 pl-1 font-medium w-6">Fav</th>
-                <th className="pb-2 font-medium min-w-[120px]">NSE Symbol / Name</th>
-                <th className="pb-2 font-medium min-w-[90px]">Sector</th>
-                <th className="pb-2 font-medium min-w-[85px]">Price (₹)</th>
-                <th className="pb-2 font-medium min-w-[85px]">24h Change</th>
-                <th className="pb-2 font-medium min-w-[70px]">Vol (L)</th>
-                <th className="pb-2 font-medium min-w-[75px]">Turn (Cr)</th>
-                <th className="pb-2 font-medium min-w-[45px]">PE</th>
-                <th className="pb-2 font-medium text-right pr-1 min-w-[60px]">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-800/40">
-              {filteredStocks.map((stock) => {
-                const isSelected = selectedStock?.symbol === stock.symbol;
-                const isPos = (stock.change || 0) >= 0;
-                const priceVal = stock.price || 0;
-                const changeVal = stock.change || 0;
-                const changePct = stock.changePercent || 0;
+          /* DETAILED TABLE VIEW (With Horizontal Scrollbar & Priority Column Ordering) */
+          <div className="w-full">
+            <table className="w-full text-left text-xs font-sans border-collapse min-w-[550px]">
+              <thead>
+                <tr className="text-stone-400 font-medium border-b border-stone-800/60 pb-2">
+                  <th className="pb-2 pl-1 font-medium w-6">Fav</th>
+                  <th className="pb-2 font-medium min-w-[100px]">Symbol</th>
+                  <th className="pb-2 font-medium min-w-[85px]">Price (₹)</th>
+                  <th className="pb-2 font-medium min-w-[75px]">Change</th>
+                  <th className="pb-2 font-medium min-w-[90px]">Sector</th>
+                  <th className="pb-2 font-medium min-w-[65px]">Vol (L)</th>
+                  <th className="pb-2 font-medium min-w-[70px]">Turn (Cr)</th>
+                  <th className="pb-2 font-medium min-w-[40px]">PE</th>
+                  <th className="pb-2 font-medium text-right pr-1 min-w-[45px]">AI</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-800/40">
+                {filteredStocks.map((stock) => {
+                  const isSelected = selectedStock?.symbol === stock.symbol;
+                  const isPos = (stock.change || 0) >= 0;
+                  const priceVal = stock.price || 0;
+                  const changeVal = stock.change || 0;
+                  const changePct = stock.changePercent || 0;
 
-                return (
-                  <tr
-                    key={stock.symbol}
-                    onClick={() => onSelectStock(stock)}
-                    className={`hover:bg-stone-800/40 transition-colors cursor-pointer ${
-                      isSelected ? 'bg-amber-500/10 border-l-2 border-amber-500' : ''
-                    }`}
-                  >
-                    <td className="py-2 pl-1 shrink-0" onClick={(e) => { e.stopPropagation(); onToggleFavorite(stock.symbol); }}>
-                      <Star
-                        className={`w-3.5 h-3.5 cursor-pointer transition-colors ${
-                          stock.isFavorite ? 'text-amber-400 fill-amber-400' : 'text-stone-600 hover:text-stone-400'
-                        }`}
-                      />
-                    </td>
+                  return (
+                    <tr
+                      key={stock.symbol}
+                      onClick={() => onSelectStock(stock)}
+                      className={`hover:bg-stone-800/40 transition-colors cursor-pointer ${
+                        isSelected ? 'bg-amber-500/10 border-l-2 border-amber-500' : ''
+                      }`}
+                    >
+                      <td className="py-2 pl-1 shrink-0" onClick={(e) => { e.stopPropagation(); onToggleFavorite(stock.symbol); }}>
+                        <Star
+                          className={`w-3.5 h-3.5 cursor-pointer transition-colors ${
+                            stock.isFavorite ? 'text-amber-400 fill-amber-400' : 'text-stone-600 hover:text-stone-400'
+                          }`}
+                        />
+                      </td>
 
-                    <td className="py-2 pr-2">
-                      <div className="flex flex-col">
-                        <span className="font-extrabold text-stone-100 font-mono text-xs">{stock.symbol.split('.')[0]}</span>
-                        <span className="text-[9px] text-stone-400 font-medium truncate max-w-[110px]">
-                          {stock.name}
+                      <td className="py-2 pr-2">
+                        <div className="flex flex-col">
+                          <span className="font-extrabold text-stone-100 font-mono text-xs">{stock.symbol.split('.')[0]}</span>
+                          <span className="text-[9px] text-stone-400 font-medium truncate max-w-[95px]">
+                            {stock.name}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="py-2 font-mono font-black text-stone-100 text-xs whitespace-nowrap">
+                        ₹{priceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+
+                      <td className="py-2 font-mono whitespace-nowrap">
+                        <div className={`flex items-center space-x-1 text-xs font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {isPos ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                          <span>{isPos ? '+' : ''}{changePct.toFixed(2)}%</span>
+                        </div>
+                      </td>
+
+                      <td className="py-2 pr-2">
+                        <span className="px-1.5 py-0.5 rounded text-[8px] font-medium bg-[#14151b] text-stone-300 border border-stone-800 whitespace-nowrap">
+                          {stock.sector}
                         </span>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td className="py-2 pr-2">
-                      <span className="px-1.5 py-0.5 rounded text-[8px] font-medium bg-[#14151b] text-stone-300 border border-stone-800 whitespace-nowrap">
-                        {stock.sector}
-                      </span>
-                    </td>
+                      <td className="py-2 font-mono text-stone-300 text-xs whitespace-nowrap">
+                        {(stock.volumeLakhs || 12.4).toFixed(1)} L
+                      </td>
 
-                    <td className="py-2 font-mono font-black text-stone-100 text-xs whitespace-nowrap">
-                      ₹{priceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
+                      <td className="py-2 font-mono text-stone-300 text-xs whitespace-nowrap">
+                        ₹{(stock.turnoverCr || 85.0).toFixed(1)} Cr
+                      </td>
 
-                    <td className="py-2 font-mono whitespace-nowrap">
-                      <div className={`flex items-center space-x-1 text-xs font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isPos ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                        <span>{isPos ? '+' : ''}{changePct.toFixed(2)}%</span>
-                      </div>
-                    </td>
+                      <td className="py-2 font-mono text-stone-400 text-xs">
+                        {stock.peRatio || 24.5}x
+                      </td>
 
-                    <td className="py-2 font-mono text-stone-300 text-xs whitespace-nowrap">
-                      {(stock.volumeLakhs || 12.4).toFixed(1)} L
-                    </td>
-
-                    <td className="py-2 font-mono text-stone-300 text-xs whitespace-nowrap">
-                      ₹{(stock.turnoverCr || 85.0).toFixed(1)} Cr
-                    </td>
-
-                    <td className="py-2 font-mono text-stone-400 text-xs">
-                      {stock.peRatio || 24.5}x
-                    </td>
-
-                    <td className="py-2 text-right pr-1" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => onOpenAIForStock(stock)}
-                        className="p-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-colors cursor-pointer"
-                        title="Run Gemini AI Intelligence"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      <td className="py-2 text-right pr-1" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => onOpenAIForStock(stock)}
+                          className="p-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-colors cursor-pointer"
+                          title="Run Gemini AI Intelligence"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
   );
 };
+

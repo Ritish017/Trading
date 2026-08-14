@@ -28,7 +28,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   const ratio = breadth?.ratio ?? 1.76;
 
   return (
-    <header className="bg-[#14151b] border-b border-stone-800/80 px-5 py-3 flex flex-wrap items-center justify-between gap-4 select-none shrink-0">
+    <header className="bg-[#14151b] border-b border-stone-800/80 px-4 py-3 flex flex-wrap items-center justify-between gap-3 select-none shrink-0">
       {/* Brand & Market Session Status */}
       <div className="flex items-center space-x-3">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-orange-500/20 font-black">
@@ -85,26 +85,26 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
       </div>
 
       {/* Search Input for NSE/BSE Tickers */}
-      <div className="relative w-64 xl:w-80">
+      <div className="relative w-full sm:w-64 xl:w-80">
         <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search NSE/BSE Stock (e.g. RELIANCE, TCS, HDFC)..."
+          placeholder="Search NSE/BSE (e.g. RELIANCE, TCS)..."
           className="w-full bg-[#1c1e27] border border-stone-800/80 rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-stone-200 placeholder-stone-500 focus:outline-none focus:border-amber-500/50 transition-all"
         />
       </div>
 
       {/* Right Action Buttons */}
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-2 sm:space-x-3">
         {/* Gemini AI Intelligence Desk Button */}
         <button
           onClick={onOpenAIIntelligence}
-          className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-orange-500 via-amber-500 to-indigo-600 hover:from-orange-600 hover:to-indigo-700 text-white font-bold text-xs shadow-lg shadow-orange-500/20 cursor-pointer transition-all transform active:scale-95"
+          className="flex items-center space-x-2 px-3 sm:px-3.5 py-2 rounded-xl bg-gradient-to-r from-orange-500 via-amber-500 to-indigo-600 hover:from-orange-600 hover:to-indigo-700 text-white font-bold text-xs shadow-lg shadow-orange-500/20 cursor-pointer transition-all transform active:scale-95"
         >
-          <Sparkles className="w-4 h-4 animate-pulse text-amber-200" />
-          <span>Gemini AI Market Intel</span>
+          <Sparkles className="w-4 h-4 animate-pulse text-amber-200 shrink-0" />
+          <span className="hidden sm:inline">Gemini AI Market Intel</span>
         </button>
 
         {/* Paper Order Terminal Button */}
@@ -112,8 +112,8 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           onClick={onOpenPaperTrading}
           className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-[#1c1e27] border border-stone-800/80 hover:border-amber-500/40 text-stone-200 hover:text-white font-bold text-xs transition-all cursor-pointer"
         >
-          <BarChart2 className="w-4 h-4 text-amber-400" />
-          <span>Paper Order Terminal</span>
+          <BarChart2 className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="hidden sm:inline">Paper Order Terminal</span>
         </button>
 
         {/* Notifications */}

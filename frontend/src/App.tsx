@@ -557,14 +557,14 @@ export default function App() {
       />
 
       {/* Quick Action Navigation Bar */}
-      <div className="bg-[#12131a] border-b border-stone-800 px-4 py-1.5 flex items-center justify-between font-mono text-xs text-stone-400">
-        <div className="flex items-center space-x-4">
+      <div className="bg-[#12131a] border-b border-stone-800 px-4 py-1.5 flex flex-wrap items-center justify-between gap-y-1.5 font-mono text-xs text-stone-400">
+        <div className="flex items-center space-x-3 flex-wrap gap-y-1">
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
             className="flex items-center space-x-1.5 bg-stone-800 hover:bg-stone-700 px-2.5 py-1 rounded text-stone-200 transition-colors"
           >
             <span className="font-bold text-amber-400">⌘K</span>
-            <span>Command Palette</span>
+            <span className="hidden sm:inline">Command Palette</span>
           </button>
 
           <button
@@ -572,17 +572,17 @@ export default function App() {
             className="flex items-center space-x-1 hover:text-stone-200 transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5 text-sky-400" />
-            <span>Market Replay Mode</span>
+            <span className="hidden sm:inline">Market Replay Mode</span>
           </button>
         </div>
 
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-3">
           <button
             onClick={() => setIsLearnOpen(true)}
             className="flex items-center space-x-1 text-amber-400 hover:text-amber-300 transition-colors font-bold"
           >
             <BookOpen className="w-3.5 h-3.5" />
-            <span>Apex Quant Learn</span>
+            <span className="hidden sm:inline">Apex Quant Learn</span>
           </button>
 
           <button
@@ -590,15 +590,15 @@ export default function App() {
             className="flex items-center space-x-1 text-indigo-400 hover:text-indigo-300 transition-colors font-bold"
           >
             <Bot className="w-3.5 h-3.5" />
-            <span>AI Copilot</span>
+            <span className="hidden sm:inline">AI Copilot</span>
           </button>
         </div>
       </div>
 
       {/* Main Terminal Grid Dashboard */}
-      <div className="flex-1 p-3 grid grid-cols-1 xl:grid-cols-12 gap-3 overflow-hidden">
+      <div className="flex-1 p-3 grid grid-cols-1 md:grid-cols-12 gap-3">
         {/* Left Panel: Watchlist */}
-        <div className="xl:col-span-3 h-[calc(100vh-170px)] overflow-hidden">
+        <div className="md:col-span-3 md:h-[calc(100vh-170px)] flex flex-col min-h-0">
           <NSEWatchlist
             stocks={filteredStocks}
             selectedStock={selectedStock}
@@ -609,7 +609,7 @@ export default function App() {
         </div>
 
         {/* Center Panel: Main Chart & Option Chain */}
-        <div className="xl:col-span-6 flex flex-col space-y-3 h-[calc(100vh-170px)] overflow-y-auto scrollbar-none">
+        <div className="md:col-span-6 flex flex-col space-y-3 md:h-[calc(100vh-170px)] md:overflow-y-auto custom-scrollbar pr-0.5">
           <IndianCandleChart
             symbol={selectedStock?.symbol || 'RELIANCE.NS'}
             name={selectedStock?.name || 'Reliance Industries'}
@@ -629,7 +629,7 @@ export default function App() {
         </div>
 
         {/* Right Panel: Institutional FII Flow & Market Intelligence Feeds */}
-        <div className="xl:col-span-3 flex flex-col space-y-3 h-[calc(100vh-170px)] overflow-y-auto scrollbar-none">
+        <div className="md:col-span-3 flex flex-col space-y-3 md:h-[calc(100vh-170px)] md:overflow-y-auto custom-scrollbar pr-0.5">
           <FIIDIITracker flow={fiiDiiData || INITIAL_FII_DII_FLOWS[0]} />
           <SEBIAnnouncementsFeed announcements={sebiAnnouncements.length > 0 ? sebiAnnouncements : INITIAL_SEBI_ANNOUNCEMENTS} />
         </div>

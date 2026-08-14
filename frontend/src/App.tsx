@@ -15,6 +15,15 @@ import { MarketReplayModal } from './components/MarketReplayModal';
 import { DataHealthBar } from './components/DataHealthBar';
 import { BookOpen, Bot, RotateCcw } from 'lucide-react';
 
+import { NavigationTabs, ActivePage } from './components/NavigationTabs';
+import { TradingTerminalPage } from './components/pages/TradingTerminalPage';
+import { IntelligenceDeskPage } from './components/pages/IntelligenceDeskPage';
+import { DerivativesLabPage } from './components/pages/DerivativesLabPage';
+import { InstitutionalDeskPage } from './components/pages/InstitutionalDeskPage';
+import { PortfolioPage } from './components/pages/PortfolioPage';
+import { BacktestReplayPage } from './components/pages/BacktestReplayPage';
+import { QuantLearnPage } from './components/pages/QuantLearnPage';
+
 import { MarketNarrativeBanner } from './components/intelligence/MarketNarrativeBanner';
 import { IntelligenceTimeline } from './components/intelligence/IntelligenceTimeline';
 import { SecurityIntelligencePanel } from './components/intelligence/SecurityIntelligencePanel';
@@ -146,6 +155,9 @@ export default function App() {
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
   const [isLearnOpen, setIsLearnOpen] = useState<boolean>(false);
   const [isReplayOpen, setIsReplayOpen] = useState<boolean>(false);
+
+  // Active Page Workspace State
+  const [activePage, setActivePage] = useState<ActivePage>('terminal');
 
   // AI Market Intelligence Engine State
   const [marketNarrative, setMarketNarrative] = useState<MarketNarrative | undefined>(undefined);
@@ -636,10 +648,21 @@ export default function App() {
     if ((action === 'SELECT_STOCK' || action === 'SELECT_SYMBOL') && payload) {
       const sym = typeof payload === 'string' ? payload : (payload.symbol || selectedSymbol);
       handleAddCustomStock(sym);
-    } else if (action === 'AI_REPORT' && payload) {
-      handleGenerateAIReport(typeof payload === 'string' ? payload : payload.symbol);
-    } else if (action === 'PAPER_TRADE') {
-      setIsPaperModalOpen(true);
+      setActivePage('terminal');
+    } else if (action === 'ANALYZE_STOCK' || action === 'AI_REPORT') {
+      if (payload) {
+        const sym = typeof payload === 'string' ? payload : payload.symbol;
+        setSelectedSymbol(sym);
+      }
+      setActivePage('intelligence');
+    } else if (action === 'OPEN_PAPER_TRADING' || action === 'PAPER_TRADE') {
+      setActivePage('portfolio');
+    } else if (action === 'RUN_BACKTEST') {
+      setActivePage('backtest');
+    } else if (action === 'OPEN_REPLAY') {
+      setIsReplayOpen(true);
+    } else if (action === 'OPEN_LEARN') {
+      setActivePage('learn');
     }
   };
 
@@ -679,118 +702,102 @@ export default function App() {
         onSearchChange={setSearchQuery}
         fiiDiiFlow={fiiDiiData || INITIAL_FII_DII_FLOWS[0]}
         breadth={marketBreadthData || INITIAL_MARKET_BREADTH}
-        onOpenAIIntelligence={() => handleGenerateAIReport(selectedSymbol)}
-        onOpenPaperTrading={() => setIsPaperModalOpen(true)}
+        onOpenAIIntelligence={() => setActivePage('intelligence')}
+        onOpenPaperTrading={() => setActivePage('portfolio')}
       />
 
-      {/* 3. Today's Market Narrative Banner */}
-      {marketNarrative && (
-        <div className="px-3 pt-2">
-          <MarketNarrativeBanner
-            narrative={marketNarrative}
-            isLoading={isNarrativeLoading}
-            onRefresh={fetchMarketNarrative}
-          />
-        </div>
+      {/* 3. Navigation Workspaces Tab Bar */}
+      <NavigationTabs
+        activePage={activePage}
+        onSelectPage={setActivePage}
+        eventCount={intelligenceEvents.length}
+        openPositionsCount={paperPositions.length}
+      />
+
+      {/* 4. Dynamic Modular Workspaces */}
+      {activePage === 'terminal' && (
+        <TradingTerminalPage
+          stocks={filteredStocks}
+          selectedStock={selectedStock}
+          selectedSymbol={selectedSymbol}
+          onSelectStock={(st) => setSelectedSymbol(st?.symbol || 'RELIANCE.NS')}
+          onToggleFavorite={(sym) => setStocks((prev) => (prev || []).map((s) => s.symbol === sym ? { ...s, isFavorite: !s.isFavorite } : s))}
+          onOpenAIForStock={(st) => {
+            setSelectedSymbol(st?.symbol || selectedSymbol);
+            setActivePage('intelligence');
+          }}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onAddCustomStock={handleAddCustomStock}
+          candles={candles[selectedSymbol] || []}
+          timeframe={timeframe}
+          onTimeframeChange={setTimeframe}
+          onQuickBuy={() => setIsPaperModalOpen(true)}
+          onQuickSell={() => setIsPaperModalOpen(true)}
+        />
       )}
 
-      {/* Quick Action Navigation Bar */}
-      <div className="bg-[#12131a] border-b border-stone-800 px-4 py-1.5 flex flex-wrap items-center justify-between gap-y-1.5 font-mono text-xs text-stone-400">
-        <div className="flex items-center space-x-3 flex-wrap gap-y-1">
-          <button
-            onClick={() => setIsCommandPaletteOpen(true)}
-            className="flex items-center space-x-1.5 bg-stone-800 hover:bg-stone-700 px-2.5 py-1 rounded text-stone-200 transition-colors"
-          >
-            <span className="font-bold text-amber-400">⌘K</span>
-            <span className="hidden sm:inline">Command Palette</span>
-          </button>
+      {activePage === 'intelligence' && (
+        <IntelligenceDeskPage
+          narrative={marketNarrative}
+          isNarrativeLoading={isNarrativeLoading}
+          onRefreshNarrative={fetchMarketNarrative}
+          events={intelligenceEvents}
+          selectedSymbol={selectedSymbol}
+          onSelectSymbol={(sym) => setSelectedSymbol(sym)}
+          selectedStock={selectedStock}
+          commentary={selectedSymbolIntelligence}
+          isCommentaryLoading={isSymbolIntelligenceLoading}
+          onRefreshCommentary={() => fetchSymbolIntelligence(selectedSymbol)}
+        />
+      )}
 
-          <button
-            onClick={() => setIsReplayOpen(true)}
-            className="flex items-center space-x-1 hover:text-stone-200 transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden sm:inline">Market Replay Mode</span>
-          </button>
-        </div>
+      {activePage === 'derivatives' && (
+        <DerivativesLabPage
+          stocks={filteredStocks}
+          selectedStock={selectedStock}
+          onSelectStock={(st) => setSelectedSymbol(st?.symbol || 'RELIANCE.NS')}
+          onToggleFavorite={(sym) => setStocks((prev) => (prev || []).map((s) => s.symbol === sym ? { ...s, isFavorite: !s.isFavorite } : s))}
+          onOpenAIForStock={(st) => {
+            setSelectedSymbol(st?.symbol || selectedSymbol);
+            setActivePage('intelligence');
+          }}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onAddCustomStock={handleAddCustomStock}
+          optionSummary={optionChainData || INITIAL_OPTION_CHAIN}
+        />
+      )}
 
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setIsLearnOpen(true)}
-            className="flex items-center space-x-1 text-amber-400 hover:text-amber-300 transition-colors font-bold"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Apex Quant Learn</span>
-          </button>
+      {activePage === 'institutional' && (
+        <InstitutionalDeskPage
+          fiiDiiFlow={fiiDiiData || INITIAL_FII_DII_FLOWS[0]}
+          breadth={marketBreadthData || INITIAL_MARKET_BREADTH}
+          announcements={sebiAnnouncements.length > 0 ? sebiAnnouncements : INITIAL_SEBI_ANNOUNCEMENTS}
+        />
+      )}
 
-          <button
-            onClick={() => setIsCopilotOpen(true)}
-            className="flex items-center space-x-1 text-indigo-400 hover:text-indigo-300 transition-colors font-bold"
-          >
-            <Bot className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">AI Copilot</span>
-          </button>
-        </div>
-      </div>
+      {activePage === 'portfolio' && (
+        <PortfolioPage
+          balance={paperBalance}
+          positions={paperPositions}
+          stocks={stocks}
+          onOpenOrderModal={() => setIsPaperModalOpen(true)}
+          onClosePosition={handleClosePaperPosition}
+        />
+      )}
 
-      {/* Main Terminal Grid Dashboard */}
-      <div className="flex-1 p-3 grid grid-cols-1 md:grid-cols-12 gap-3">
-        {/* Left Panel: Watchlist */}
-        <div className="md:col-span-3 md:h-[calc(100vh-210px)] flex flex-col min-h-0">
-          <NSEWatchlist
-            stocks={filteredStocks}
-            selectedStock={selectedStock}
-            onSelectStock={(st) => setSelectedSymbol(st?.symbol || 'RELIANCE.NS')}
-            onToggleFavorite={(sym) => setStocks((prev) => (prev || []).map((s) => s.symbol === sym ? { ...s, isFavorite: !s.isFavorite } : s))}
-            onOpenAIForStock={(st) => handleGenerateAIReport(st?.symbol || selectedSymbol)}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onAddCustomStock={handleAddCustomStock}
-          />
-        </div>
+      {activePage === 'backtest' && (
+        <BacktestReplayPage
+          stocks={stocks}
+          selectedSymbol={selectedSymbol}
+          onOpenReplayModal={() => setIsReplayOpen(true)}
+        />
+      )}
 
-        {/* Center Panel: Main Chart, Security Intelligence Panel, and Option Chain */}
-        <div className="md:col-span-6 flex flex-col space-y-3 md:h-[calc(100vh-210px)] md:overflow-y-auto custom-scrollbar pr-0.5">
-          <IndianCandleChart
-            symbol={selectedStock?.symbol || 'RELIANCE.NS'}
-            name={selectedStock?.name || 'Reliance Industries'}
-            price={selectedStock?.price || 2845.5}
-            change={selectedStock?.change || 0}
-            changePercent={selectedStock?.changePercent || 0}
-            candles={candles[selectedSymbol] || []}
-            timeframe={timeframe}
-            onTimeframeChange={setTimeframe}
-          />
-
-          {/* New AI Security Intelligence Panel */}
-          <SecurityIntelligencePanel
-            commentary={selectedSymbolIntelligence}
-            isLoading={isSymbolIntelligenceLoading}
-            onRefresh={() => fetchSymbolIntelligence(selectedSymbol)}
-          />
-
-          <OptionChainSummary
-            symbol={selectedStock?.symbol || 'RELIANCE.NS'}
-            price={selectedStock?.price || 2845.5}
-            optionSummary={optionChainData || INITIAL_OPTION_CHAIN}
-          />
-        </div>
-
-        {/* Right Panel: Intelligence Timeline, Institutional Flow & SEBI Feeds */}
-        <div className="md:col-span-3 flex flex-col space-y-3 md:h-[calc(100vh-210px)] md:overflow-y-auto custom-scrollbar pr-0.5">
-          {/* Live Apex Intelligence Timeline Feed */}
-          <div className="h-[280px] shrink-0">
-            <IntelligenceTimeline
-              events={intelligenceEvents}
-              selectedSymbol={selectedSymbol}
-              onSelectSymbol={(sym) => setSelectedSymbol(sym)}
-            />
-          </div>
-
-          <FIIDIITracker flow={fiiDiiData || INITIAL_FII_DII_FLOWS[0]} />
-          <SEBIAnnouncementsFeed announcements={sebiAnnouncements.length > 0 ? sebiAnnouncements : INITIAL_SEBI_ANNOUNCEMENTS} />
-        </div>
-      </div>
+      {activePage === 'learn' && (
+        <QuantLearnPage />
+      )}
 
       {/* Data Health & Latency Bottom Status Bar */}
       <DataHealthBar

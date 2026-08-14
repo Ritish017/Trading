@@ -15,6 +15,10 @@ import { MarketReplayModal } from './components/MarketReplayModal';
 import { DataHealthBar } from './components/DataHealthBar';
 import { BookOpen, Bot, RotateCcw } from 'lucide-react';
 
+import { MarketNarrativeBanner } from './components/intelligence/MarketNarrativeBanner';
+import { IntelligenceTimeline } from './components/intelligence/IntelligenceTimeline';
+import { SecurityIntelligencePanel } from './components/intelligence/SecurityIntelligencePanel';
+import { AICommentary, MarketEvent, MarketNarrative } from './types/intelligence';
 import { 
   NSEStock, 
   MarketIndex, 
@@ -142,6 +146,13 @@ export default function App() {
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
   const [isLearnOpen, setIsLearnOpen] = useState<boolean>(false);
   const [isReplayOpen, setIsReplayOpen] = useState<boolean>(false);
+
+  // AI Market Intelligence Engine State
+  const [marketNarrative, setMarketNarrative] = useState<MarketNarrative | undefined>(undefined);
+  const [intelligenceEvents, setIntelligenceEvents] = useState<MarketEvent[]>([]);
+  const [selectedSymbolIntelligence, setSelectedSymbolIntelligence] = useState<AICommentary | undefined>(undefined);
+  const [isNarrativeLoading, setIsNarrativeLoading] = useState<boolean>(false);
+  const [isSymbolIntelligenceLoading, setIsSymbolIntelligenceLoading] = useState<boolean>(false);
 
   // Persistence Effects
   useEffect(() => {
@@ -333,6 +344,69 @@ export default function App() {
     };
     fetchMarketInfo();
   }, []);
+
+  // Fetch AI Market Narrative on Mount
+  const fetchMarketNarrative = async () => {
+    try {
+      setIsNarrativeLoading(true);
+      const res = await fetch('/api/intelligence/market-narrative');
+      if (res.ok) {
+        const data: MarketNarrative = await res.json();
+        setMarketNarrative(data);
+      }
+    } catch {
+      // quiet fallback
+    } finally {
+      setIsNarrativeLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMarketNarrative();
+  }, []);
+
+  // Fetch AI Intelligence Event Timeline Feed
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        const symbolsParam = (stocks || []).slice(0, 10).map((s) => s.symbol).join(',');
+        const res = await fetch(`/api/intelligence/feed?symbols=${encodeURIComponent(symbolsParam)}`);
+        if (res.ok) {
+          const data: MarketEvent[] = await res.json();
+          if (Array.isArray(data)) {
+            setIntelligenceEvents(data);
+          }
+        }
+      } catch {
+        // quiet fallback
+      }
+    };
+    fetchEvents();
+    const interval = setInterval(fetchEvents, 12000);
+    return () => clearInterval(interval);
+  }, [stocks]);
+
+  // Fetch AI Commentary for Active Selected Symbol
+  const fetchSymbolIntelligence = async (symbol: string) => {
+    try {
+      setIsSymbolIntelligenceLoading(true);
+      const res = await fetch(`/api/intelligence/symbol/${encodeURIComponent(symbol)}`);
+      if (res.ok) {
+        const data: AICommentary = await res.json();
+        setSelectedSymbolIntelligence(data);
+      }
+    } catch {
+      // quiet fallback
+    } finally {
+      setIsSymbolIntelligenceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedSymbol) {
+      fetchSymbolIntelligence(selectedSymbol);
+    }
+  }, [selectedSymbol]);
 
   // Connect to FastAPI WebSocket `/ws/ticks` Feed
   useEffect(() => {
@@ -609,6 +683,17 @@ export default function App() {
         onOpenPaperTrading={() => setIsPaperModalOpen(true)}
       />
 
+      {/* 3. Today's Market Narrative Banner */}
+      {marketNarrative && (
+        <div className="px-3 pt-2">
+          <MarketNarrativeBanner
+            narrative={marketNarrative}
+            isLoading={isNarrativeLoading}
+            onRefresh={fetchMarketNarrative}
+          />
+        </div>
+      )}
+
       {/* Quick Action Navigation Bar */}
       <div className="bg-[#12131a] border-b border-stone-800 px-4 py-1.5 flex flex-wrap items-center justify-between gap-y-1.5 font-mono text-xs text-stone-400">
         <div className="flex items-center space-x-3 flex-wrap gap-y-1">
@@ -651,7 +736,7 @@ export default function App() {
       {/* Main Terminal Grid Dashboard */}
       <div className="flex-1 p-3 grid grid-cols-1 md:grid-cols-12 gap-3">
         {/* Left Panel: Watchlist */}
-        <div className="md:col-span-3 md:h-[calc(100vh-170px)] flex flex-col min-h-0">
+        <div className="md:col-span-3 md:h-[calc(100vh-210px)] flex flex-col min-h-0">
           <NSEWatchlist
             stocks={filteredStocks}
             selectedStock={selectedStock}
@@ -664,8 +749,8 @@ export default function App() {
           />
         </div>
 
-        {/* Center Panel: Main Chart & Option Chain */}
-        <div className="md:col-span-6 flex flex-col space-y-3 md:h-[calc(100vh-170px)] md:overflow-y-auto custom-scrollbar pr-0.5">
+        {/* Center Panel: Main Chart, Security Intelligence Panel, and Option Chain */}
+        <div className="md:col-span-6 flex flex-col space-y-3 md:h-[calc(100vh-210px)] md:overflow-y-auto custom-scrollbar pr-0.5">
           <IndianCandleChart
             symbol={selectedStock?.symbol || 'RELIANCE.NS'}
             name={selectedStock?.name || 'Reliance Industries'}
@@ -677,6 +762,13 @@ export default function App() {
             onTimeframeChange={setTimeframe}
           />
 
+          {/* New AI Security Intelligence Panel */}
+          <SecurityIntelligencePanel
+            commentary={selectedSymbolIntelligence}
+            isLoading={isSymbolIntelligenceLoading}
+            onRefresh={() => fetchSymbolIntelligence(selectedSymbol)}
+          />
+
           <OptionChainSummary
             symbol={selectedStock?.symbol || 'RELIANCE.NS'}
             price={selectedStock?.price || 2845.5}
@@ -684,8 +776,17 @@ export default function App() {
           />
         </div>
 
-        {/* Right Panel: Institutional FII Flow & Market Intelligence Feeds */}
-        <div className="md:col-span-3 flex flex-col space-y-3 md:h-[calc(100vh-170px)] md:overflow-y-auto custom-scrollbar pr-0.5">
+        {/* Right Panel: Intelligence Timeline, Institutional Flow & SEBI Feeds */}
+        <div className="md:col-span-3 flex flex-col space-y-3 md:h-[calc(100vh-210px)] md:overflow-y-auto custom-scrollbar pr-0.5">
+          {/* Live Apex Intelligence Timeline Feed */}
+          <div className="h-[280px] shrink-0">
+            <IntelligenceTimeline
+              events={intelligenceEvents}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={(sym) => setSelectedSymbol(sym)}
+            />
+          </div>
+
           <FIIDIITracker flow={fiiDiiData || INITIAL_FII_DII_FLOWS[0]} />
           <SEBIAnnouncementsFeed announcements={sebiAnnouncements.length > 0 ? sebiAnnouncements : INITIAL_SEBI_ANNOUNCEMENTS} />
         </div>

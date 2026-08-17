@@ -7,6 +7,16 @@ from backend.app.ai_engine.contracts import (
 class TechnicalAnalyst:
     @staticmethod
     def analyze(market: MarketSnapshot, tech: TechnicalSnapshot) -> DomainAssessment:
+        if tech.freshness == DataFreshness.UNAVAILABLE and market.freshness == DataFreshness.UNAVAILABLE:
+            return DomainAssessment(
+                domain="Technical Analysis",
+                stance=SignalStance.UNAVAILABLE,
+                confidence=0.0,
+                key_findings=["Technical and market data unavailable"],
+                bullish_evidence=[],
+                bearish_evidence=[]
+            )
+
         bullish_ev: List[EvidenceItem] = []
         bearish_ev: List[EvidenceItem] = []
         findings: List[str] = []
@@ -57,7 +67,7 @@ class TechnicalAnalyst:
 class DerivativesAnalyst:
     @staticmethod
     def analyze(deriv: Optional[DerivativeSnapshot], market_chg: float) -> DomainAssessment:
-        if not deriv or deriv.pcr is None:
+        if not deriv or deriv.freshness == DataFreshness.UNAVAILABLE or deriv.pcr is None:
             return DomainAssessment(
                 domain="Derivatives Analysis",
                 stance=SignalStance.UNAVAILABLE,
@@ -105,11 +115,11 @@ class DerivativesAnalyst:
 class NewsAnalyst:
     @staticmethod
     def analyze(news: Optional[NewsSnapshot]) -> DomainAssessment:
-        if not news or not news.headline:
+        if not news or not news.headline or news.freshness == DataFreshness.UNAVAILABLE:
             return DomainAssessment(
                 domain="News & Announcements",
-                stance=SignalStance.NEUTRAL,
-                confidence=0.5,
+                stance=SignalStance.UNAVAILABLE,
+                confidence=0.0,
                 key_findings=["No breaking high-impact corporate announcement in current session"],
                 bullish_evidence=[],
                 bearish_evidence=[]
@@ -146,12 +156,12 @@ class NewsAnalyst:
 class SectorAnalyst:
     @staticmethod
     def analyze(sector: Optional[SectorSnapshot], stock_chg: float, nifty_chg: float) -> DomainAssessment:
-        if not sector:
+        if not sector or sector.freshness == DataFreshness.UNAVAILABLE:
             return DomainAssessment(
                 domain="Sector Analysis",
-                stance=SignalStance.NEUTRAL,
-                confidence=0.5,
-                key_findings=["Sector index benchmark data neutral"],
+                stance=SignalStance.UNAVAILABLE,
+                confidence=0.0,
+                key_findings=["Sector index benchmark data unavailable"],
                 bullish_evidence=[],
                 bearish_evidence=[]
             )
@@ -188,12 +198,12 @@ class SectorAnalyst:
 class InstitutionalAnalyst:
     @staticmethod
     def analyze(inst: Optional[InstitutionalSnapshot]) -> DomainAssessment:
-        if not inst:
+        if not inst or inst.freshness == DataFreshness.UNAVAILABLE:
             return DomainAssessment(
                 domain="Institutional Flow",
-                stance=SignalStance.NEUTRAL,
-                confidence=0.5,
-                key_findings=["Institutional flows unavailable"],
+                stance=SignalStance.UNAVAILABLE,
+                confidence=0.0,
+                key_findings=["Institutional flow data unavailable"],
                 bullish_evidence=[],
                 bearish_evidence=[]
             )
@@ -233,8 +243,8 @@ class InstitutionalAnalyst:
 class MacroAnalyst:
     @staticmethod
     def analyze(macro: Optional[MacroSnapshot]) -> DomainAssessment:
-        if not macro:
-            return DomainAssessment(domain="Macro Context", stance=SignalStance.NEUTRAL, confidence=0.5, key_findings=[], bullish_evidence=[], bearish_evidence=[])
+        if not macro or macro.freshness == DataFreshness.UNAVAILABLE:
+            return DomainAssessment(domain="Macro Context", stance=SignalStance.UNAVAILABLE, confidence=0.0, key_findings=["Macro context data unavailable"], bullish_evidence=[], bearish_evidence=[])
 
         vix = macro.india_vix
         nifty_chg = macro.nifty_change_pct

@@ -1,21 +1,19 @@
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Optional
-from backend.app.ai_engine.contracts import TechnicalSnapshot, DerivativeSnapshot
+from backend.app.ai_engine.contracts import TechnicalSnapshot, DerivativeSnapshot, DataFreshness
+from backend.app.quant_engine.indicators import detect_support_resistance
 
 def compute_market_features(candles: List[Dict[str, Any]], current_price: float, prev_close: float) -> TechnicalSnapshot:
     """
     Compute comprehensive quantitative and technical feature vector from historical OHLCV candles.
+    Returns TechnicalSnapshot with DataFreshness.UNAVAILABLE and None values if insufficient data.
     """
     if not candles or len(candles) < 5:
-        # Minimalist fallback
         return TechnicalSnapshot(
-            rsi_14=50.0,
-            ema_20=round(current_price * 0.99, 2),
-            ema_50=round(current_price * 0.98, 2),
-            relative_volume=1.0,
-            support_levels=[round(current_price * 0.97, 2), round(current_price * 0.95, 2)],
-            resistance_levels=[round(current_price * 1.03, 2), round(current_price * 1.05, 2)]
+            support_levels=[],
+            resistance_levels=[],
+            freshness=DataFreshness.UNAVAILABLE
         )
 
     df = pd.DataFrame(candles)
@@ -41,7 +39,7 @@ def compute_market_features(candles: List[Dict[str, Any]], current_price: float,
     avg_loss = loss.rolling(window=14, min_periods=1).mean()
     rs = avg_gain / (avg_loss + 1e-9)
     rsi_series = 100 - (100 / (1 + rs))
-    rsi_14 = float(rsi_series.iloc[-1])
+    rsi_14 = float(rsi_series.iloc[-1]) if len(rsi_series) > 0 and not pd.isna(rsi_series.iloc[-1]) else None
 
     # 3. MACD (12, 26, 9)
     ema12 = close.ewm(span=12, adjust=False).mean()
@@ -50,9 +48,9 @@ def compute_market_features(candles: List[Dict[str, Any]], current_price: float,
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
     macd_hist = macd_line - signal_line
 
-    macd = float(macd_line.iloc[-1])
-    macd_signal = float(signal_line.iloc[-1])
-    macd_histogram = float(macd_hist.iloc[-1])
+    macd = float(macd_line.iloc[-1]) if len(macd_line) > 0 else None
+    macd_signal = float(signal_line.iloc[-1]) if len(signal_line) > 0 else None
+    macd_histogram = float(macd_hist.iloc[-1]) if len(macd_hist) > 0 else None
 
     # 4. ATR (14)
     tr1 = high - low
@@ -60,7 +58,7 @@ def compute_market_features(candles: List[Dict[str, Any]], current_price: float,
     tr3 = (low - close.shift()).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     atr_series = tr.rolling(window=14, min_periods=1).mean()
-    atr_14 = float(atr_series.iloc[-1])
+    atr_14 = float(atr_series.iloc[-1]) if len(atr_series) > 0 else None
 
     # 5. Relative Volume (RVOL) = Current Volume / 20-period SMA Volume
     vol_sma20 = volume.rolling(window=min(20, len(volume)), min_periods=1).mean()
@@ -70,45 +68,32 @@ def compute_market_features(candles: List[Dict[str, Any]], current_price: float,
     # 6. Bollinger Bands (20, 2)
     sma20 = close.rolling(window=min(20, len(close)), min_periods=1).mean()
     std20 = close.rolling(window=min(20, len(close)), min_periods=1).std().fillna(0)
-    bb_mid = float(sma20.iloc[-1])
-    bb_up = float(bb_mid + 2 * std20.iloc[-1])
-    bb_low = float(bb_mid - 2 * std20.iloc[-1])
+    bb_mid = float(sma20.iloc[-1]) if len(sma20) > 0 else None
+    bb_up = float(bb_mid + 2 * std20.iloc[-1]) if bb_mid is not None else None
+    bb_low = float(bb_mid - 2 * std20.iloc[-1]) if bb_mid is not None else None
 
-    # 7. Support & Resistance Levels (Local extrema)
-    supports = []
-    resistances = []
-    window = 5
-    for i in range(window, len(df) - window):
-        if low.iloc[i] == low.iloc[i - window:i + window + 1].min():
-            supports.append(float(low.iloc[i]))
-        if high.iloc[i] == high.iloc[i - window:i + window + 1].max():
-            resistances.append(float(high.iloc[i]))
-
-    # Filter and sort closest to current price
-    sup_sorted = sorted([s for s in set(supports) if s < current_price], reverse=True)[:3]
-    res_sorted = sorted([r for r in set(resistances) if r > current_price])[:3]
-
-    if not sup_sorted:
-        sup_sorted = [round(current_price * 0.98, 2), round(current_price * 0.95, 2)]
-    if not res_sorted:
-        res_sorted = [round(current_price * 1.02, 2), round(current_price * 1.05, 2)]
+    # 7. Support & Resistance Levels
+    levels = detect_support_resistance(df)
+    sup_sorted = [s for s in levels["support"] if s < current_price][:3]
+    res_sorted = [r for r in levels["resistance"] if r > current_price][:3]
 
     return TechnicalSnapshot(
-        rsi_14=round(rsi_14, 1),
-        macd=round(macd, 2),
-        macd_signal=round(macd_signal, 2),
-        macd_histogram=round(macd_histogram, 2),
+        rsi_14=round(rsi_14, 1) if rsi_14 is not None else None,
+        macd=round(macd, 2) if macd is not None else None,
+        macd_signal=round(macd_signal, 2) if macd_signal is not None else None,
+        macd_histogram=round(macd_histogram, 2) if macd_histogram is not None else None,
         ema_20=round(ema_20, 2),
         ema_50=round(ema_50, 2),
         ema_200=round(ema_200, 2),
-        sma_20=round(bb_mid, 2),
-        atr_14=round(atr_14, 2),
-        bb_upper=round(bb_up, 2),
-        bb_middle=round(bb_mid, 2),
-        bb_lower=round(bb_low, 2),
+        sma_20=round(bb_mid, 2) if bb_mid is not None else None,
+        atr_14=round(atr_14, 2) if atr_14 is not None else None,
+        bb_upper=round(bb_up, 2) if bb_up is not None else None,
+        bb_middle=round(bb_mid, 2) if bb_mid is not None else None,
+        bb_lower=round(bb_low, 2) if bb_low is not None else None,
         relative_volume=round(rvol, 2),
         support_levels=[round(x, 2) for x in sup_sorted],
-        resistance_levels=[round(x, 2) for x in res_sorted]
+        resistance_levels=[round(x, 2) for x in res_sorted],
+        freshness=DataFreshness.LIVE
     )
 
 def compute_z_score(price_change_pct: float, baseline_volatility: float = 1.2) -> float:

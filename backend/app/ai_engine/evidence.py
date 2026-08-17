@@ -15,24 +15,26 @@ def aggregate_market_evidence(
     institutional: Optional[InstitutionalSnapshot] = None
 ) -> List[EvidenceItem]:
     """
-    Collects, normalizes, and stamps verified factual evidence items across all 7 market pillars.
+    Collects, normalizes, and stamps verified factual evidence items across all market pillars.
+    Excludes UNAVAILABLE snapshots so AI synthesis only reasons over authentic evidence.
     """
     evidence: List[EvidenceItem] = []
     now_str = datetime.now().strftime("%H:%M IST")
 
     # 1. Price Evidence
-    sign = "+" if market.change_percent >= 0 else ""
-    evidence.append(EvidenceItem(
-        type="PRICE",
-        statement=f"Price is ₹{market.ltp:,.2f} ({sign}{market.change_percent:.2f}% intraday)",
-        value=market.change_percent,
-        source="NSE_FEED",
-        timestamp=now_str,
-        freshness=market.freshness
-    ))
+    if market.freshness != DataFreshness.UNAVAILABLE and market.ltp is not None:
+        sign = "+" if market.change_percent >= 0 else ""
+        evidence.append(EvidenceItem(
+            type="PRICE",
+            statement=f"Price is ₹{market.ltp:,.2f} ({sign}{market.change_percent:.2f}% intraday)",
+            value=market.change_percent,
+            source=market.source or "NSE_FEED",
+            timestamp=now_str,
+            freshness=market.freshness
+        ))
 
     # 2. Volume Evidence
-    if technical.relative_volume is not None:
+    if technical.freshness != DataFreshness.UNAVAILABLE and technical.relative_volume is not None:
         evidence.append(EvidenceItem(
             type="VOLUME",
             statement=f"Relative volume (RVOL) is {technical.relative_volume:.2f}x of 20-period baseline",
@@ -43,40 +45,41 @@ def aggregate_market_evidence(
         ))
 
     # 3. Technical Indicator Evidence
-    if technical.rsi_14 is not None:
-        rsi_zone = "Overbought (>70)" if technical.rsi_14 >= 70 else "Oversold (<30)" if technical.rsi_14 <= 30 else "Neutral range"
-        evidence.append(EvidenceItem(
-            type="TECHNICAL",
-            statement=f"RSI 14 at {technical.rsi_14:.1f} ({rsi_zone})",
-            value=technical.rsi_14,
-            source="QUANT_ENGINE",
-            timestamp=now_str,
-            freshness=technical.freshness
-        ))
-    if market.vwap > 0:
-        vwap_pos = "above" if market.ltp >= market.vwap else "below"
-        vwap_gap = abs(market.ltp - market.vwap) / market.vwap * 100
-        evidence.append(EvidenceItem(
-            type="TECHNICAL",
-            statement=f"Trading {vwap_gap:.2f}% {vwap_pos} intraday VWAP of ₹{market.vwap:,.2f}",
-            value=round(market.vwap, 2),
-            source="QUANT_ENGINE",
-            timestamp=now_str,
-            freshness=technical.freshness
-        ))
-    if technical.ema_20 and technical.ema_50:
-        trend = "Bullish (EMA20 > EMA50)" if technical.ema_20 > technical.ema_50 else "Bearish (EMA20 < EMA50)"
-        evidence.append(EvidenceItem(
-            type="TECHNICAL",
-            statement=f"Short-term moving average structure is {trend}",
-            value=round(technical.ema_20, 2),
-            source="QUANT_ENGINE",
-            timestamp=now_str,
-            freshness=technical.freshness
-        ))
+    if technical.freshness != DataFreshness.UNAVAILABLE:
+        if technical.rsi_14 is not None:
+            rsi_zone = "Overbought (>70)" if technical.rsi_14 >= 70 else "Oversold (<30)" if technical.rsi_14 <= 30 else "Neutral range"
+            evidence.append(EvidenceItem(
+                type="TECHNICAL",
+                statement=f"RSI 14 at {technical.rsi_14:.1f} ({rsi_zone})",
+                value=technical.rsi_14,
+                source="QUANT_ENGINE",
+                timestamp=now_str,
+                freshness=technical.freshness
+            ))
+        if market.vwap > 0:
+            vwap_pos = "above" if market.ltp >= market.vwap else "below"
+            vwap_gap = abs(market.ltp - market.vwap) / market.vwap * 100
+            evidence.append(EvidenceItem(
+                type="TECHNICAL",
+                statement=f"Trading {vwap_gap:.2f}% {vwap_pos} intraday VWAP of ₹{market.vwap:,.2f}",
+                value=round(market.vwap, 2),
+                source="QUANT_ENGINE",
+                timestamp=now_str,
+                freshness=technical.freshness
+            ))
+        if technical.ema_20 and technical.ema_50:
+            trend = "Bullish (EMA20 > EMA50)" if technical.ema_20 > technical.ema_50 else "Bearish (EMA20 < EMA50)"
+            evidence.append(EvidenceItem(
+                type="TECHNICAL",
+                statement=f"Short-term moving average structure is {trend}",
+                value=round(technical.ema_20, 2),
+                source="QUANT_ENGINE",
+                timestamp=now_str,
+                freshness=technical.freshness
+            ))
 
     # 4. Derivatives Evidence
-    if derivatives:
+    if derivatives and derivatives.freshness != DataFreshness.UNAVAILABLE:
         if derivatives.pcr is not None:
             pcr_sentiment = "Heavy Put Writing (Bullish)" if derivatives.pcr >= 1.25 else "Call Writing Pressure (Bearish)" if derivatives.pcr <= 0.75 else "Balanced"
             evidence.append(EvidenceItem(
@@ -99,7 +102,7 @@ def aggregate_market_evidence(
             ))
 
     # 5. News & SEBI Announcement Evidence
-    if news and news.headline:
+    if news and news.headline and news.freshness != DataFreshness.UNAVAILABLE:
         evidence.append(EvidenceItem(
             type="NEWS",
             statement=f"{news.headline}",
@@ -110,8 +113,9 @@ def aggregate_market_evidence(
         ))
 
     # 6. Sector Evidence
-    if sector:
-        rel = sector.change_percent - (macro.nifty_change_pct if macro else 0.0)
+    if sector and sector.freshness != DataFreshness.UNAVAILABLE:
+        nifty_ref_chg = (macro.nifty_change_pct if macro and macro.freshness != DataFreshness.UNAVAILABLE else 0.0)
+        rel = sector.change_percent - nifty_ref_chg
         outperformance = "outperforming" if rel > 0 else "underperforming"
         evidence.append(EvidenceItem(
             type="SECTOR",
@@ -123,7 +127,7 @@ def aggregate_market_evidence(
         ))
 
     # 7. Institutional FII/DII Evidence
-    if institutional:
+    if institutional and institutional.freshness != DataFreshness.UNAVAILABLE:
         fii_flow = f"FII Net Cash: {institutional.fii_cash_net_cr:+,g} Cr | DII Net Cash: {institutional.dii_cash_net_cr:+,g} Cr"
         evidence.append(EvidenceItem(
             type="INSTITUTIONAL",
@@ -135,7 +139,7 @@ def aggregate_market_evidence(
         ))
 
     # 8. Macro Evidence
-    if macro:
+    if macro and macro.freshness != DataFreshness.UNAVAILABLE:
         vix_status = "Elevated (>15)" if macro.india_vix >= 15 else "Calm (<13)"
         evidence.append(EvidenceItem(
             type="MACRO",

@@ -184,36 +184,65 @@ def detect_market_events(
             affected_assets=[market.symbol]
         ))
 
-    # If no specific extreme event, provide a baseline MONITOR or CONSOLIDATION event
+    # If no specific extreme event, provide a baseline MONITOR or CONSOLIDATION event if data is present
     if not events:
-        events.append(MarketEvent(
-            event_id=f"EV_{uuid.uuid4().hex[:8].upper()}",
-            event_type="ORDERLY_CONSOLIDATION",
-            symbol=market.symbol,
-            company_name=market.symbol.split('.')[0],
-            sector=sector.sector_name if sector else "NSE Equities",
-            timestamp=now_str,
-            severity=35,
-            confidence=0.85,
-            attention_score=attention.total_score,
-            classification=attention.classification,
-            evidence=[
+        if market.freshness == DataFreshness.UNAVAILABLE:
+            events.append(MarketEvent(
+                event_id=f"EV_{uuid.uuid4().hex[:8].upper()}",
+                event_type="DATA_UNAVAILABLE",
+                symbol=market.symbol,
+                company_name=market.symbol.split('.')[0],
+                sector=sector.sector_name if sector else "NSE Equities",
+                timestamp=now_str,
+                severity=20,
+                confidence=1.0,
+                attention_score=0,
+                classification=attention.classification,
+                evidence=[
+                    EvidenceItem(
+                        type="SYSTEM",
+                        statement=f"Market data feed for {market.symbol} is currently unavailable or initializing.",
+                        value=0.0,
+                        source="MARKET_DATA_HUB",
+                        timestamp=now_str
+                    )
+                ],
+                affected_assets=[market.symbol]
+            ))
+        else:
+            evidence_items = [
                 EvidenceItem(
                     type="PRICE",
-                    statement=f"Price stable at ₹{price:,.2f} ({chg_pct:+.2f}%)",
+                    statement=f"Price at ₹{price:,.2f} ({chg_pct:+.2f}%)",
                     value=chg_pct,
-                    source="NSE_FEED",
-                    timestamp=now_str
-                ),
-                EvidenceItem(
-                    type="TECHNICAL",
-                    statement=f"RSI 14 at {technical.rsi_14 or 50.0} in neutral range",
-                    value=technical.rsi_14 or 50.0,
-                    source="QUANT_ENGINE",
+                    source=market.source or "NSE_FEED",
                     timestamp=now_str
                 )
-            ],
-            affected_assets=[market.symbol]
-        ))
+            ]
+            if technical.rsi_14 is not None:
+                evidence_items.append(
+                    EvidenceItem(
+                        type="TECHNICAL",
+                        statement=f"RSI 14 at {technical.rsi_14:.1f}",
+                        value=technical.rsi_14,
+                        source="QUANT_ENGINE",
+                        timestamp=now_str
+                    )
+                )
+
+            events.append(MarketEvent(
+                event_id=f"EV_{uuid.uuid4().hex[:8].upper()}",
+                event_type="ORDERLY_CONSOLIDATION",
+                symbol=market.symbol,
+                company_name=market.symbol.split('.')[0],
+                sector=sector.sector_name if sector else "NSE Equities",
+                timestamp=now_str,
+                severity=30,
+                confidence=0.85,
+                attention_score=attention.total_score,
+                classification=attention.classification,
+                evidence=evidence_items,
+                affected_assets=[market.symbol]
+            ))
 
     return events

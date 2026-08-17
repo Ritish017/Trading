@@ -1,5 +1,6 @@
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Dict, Any
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from backend.app.config import settings
@@ -9,8 +10,8 @@ logger = logging.getLogger(__name__)
 # Base declarative class
 Base = declarative_base()
 
-# Async Engine Creation (supports PostgreSQL + asyncpg or SQLite for in-memory dev)
-database_url = getattr(settings, "database_url", None) or "sqlite+aiosqlite:///:memory:"
+# Async Engine Creation (supports PostgreSQL + asyncpg or SQLite for dev)
+database_url = getattr(settings, "database_url", None) or "sqlite+aiosqlite:///./apex_quant.db"
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
 
@@ -32,9 +33,27 @@ async def init_db():
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database initialized successfully.")
+        logger.info("[DATABASE] Database initialized successfully.")
     except Exception as e:
-        logger.warning(f"Database initialization warning (running in degraded state if DB unavailable): {e}")
+        logger.warning(f"[DATABASE] Database initialization warning: {e}")
+
+async def check_db_health() -> Dict[str, Any]:
+    """Execute active query on database connection to verify connectivity."""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {
+            "status": "ONLINE",
+            "database": "CONNECTED",
+            "dialect": engine.dialect.name
+        }
+    except Exception as e:
+        logger.error(f"[DB HEALTH CHECK FAILED] {e}")
+        return {
+            "status": "DEGRADED",
+            "database": "DISCONNECTED",
+            "error": str(e)
+        }
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """Dependency for providing database sessions to FastAPI routes."""

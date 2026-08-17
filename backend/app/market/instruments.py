@@ -267,6 +267,34 @@ INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
         "instrument_type": "EQUITY",
         "display_name": "Adani Enterprises Ltd"
     },
+    "TATAMOTORS.NS": {
+        "instrument_key": "NSE_EQ|INE155A01022",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Tata Motors Ltd"
+    },
+    "TATAMOTORS": {
+        "instrument_key": "NSE_EQ|INE155A01022",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Tata Motors Ltd"
+    },
+    "NIFTY IT": {
+        "instrument_key": "NSE_INDEX|Nifty IT",
+        "exchange": "NSE",
+        "segment": "NSE_INDEX",
+        "instrument_type": "INDEX",
+        "display_name": "NIFTY IT Index"
+    },
+    "NIFTYIT": {
+        "instrument_key": "NSE_INDEX|Nifty IT",
+        "exchange": "NSE",
+        "segment": "NSE_INDEX",
+        "instrument_type": "INDEX",
+        "display_name": "NIFTY IT Index"
+    },
     "ASIANPAINT.NS": {
         "instrument_key": "NSE_EQ|INE021A01026",
         "exchange": "NSE",
@@ -283,35 +311,63 @@ INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
     }
 }
 
-def get_instrument_key(symbol: str) -> str:
-    """Resolve symbol string to Upstox instrument key."""
+def normalize_symbol_alias(symbol: str) -> str:
+    """Normalize symbol to standard uppercase canonical alias format."""
+    clean = symbol.strip().upper()
+    if clean.endswith(".NS"):
+        clean_base = clean[:-3]
+        return f"{clean_base}.NS"
+    return clean
+
+def get_instrument_key(symbol: str) -> Optional[str]:
+    """
+    Resolve symbol string to official Upstox instrument key.
+    Returns None if instrument is unknown rather than inventing a fake key.
+    """
+    if not symbol:
+        return None
     clean_sym = symbol.strip().upper()
     if clean_sym in INSTRUMENT_MAP:
         return INSTRUMENT_MAP[clean_sym]["instrument_key"]
-    # If instrument key format is already passed directly (e.g. NSE_EQ|...)
-    if "|" in symbol:
-        return symbol
-    # Default fallback construct
-    if clean_sym.endswith(".NS"):
-        return f"NSE_EQ|{clean_sym.replace('.NS', '')}"
-    return f"NSE_EQ|{clean_sym}"
+    # If standard .NS alias is passed or omitted, check normalized alias
+    if not clean_sym.endswith(".NS"):
+        ns_sym = f"{clean_sym}.NS"
+        if ns_sym in INSTRUMENT_MAP:
+            return INSTRUMENT_MAP[ns_sym]["instrument_key"]
+    else:
+        base_sym = clean_sym.replace(".NS", "")
+        if base_sym in INSTRUMENT_MAP:
+            return INSTRUMENT_MAP[base_sym]["instrument_key"]
 
-def get_instrument_metadata(symbol: str) -> Dict[str, Any]:
-    """Retrieve full instrument metadata dictionary."""
+    # If raw instrument key format is already passed directly (e.g. NSE_EQ|INE...)
+    if "|" in symbol and (symbol.startswith("NSE_") or symbol.startswith("BSE_")):
+        return symbol
+
+    # Unknown instrument
+    return None
+
+def get_instrument_metadata(symbol: str) -> Optional[Dict[str, Any]]:
+    """Retrieve full instrument metadata dictionary if known."""
     clean_sym = symbol.strip().upper()
     if clean_sym in INSTRUMENT_MAP:
         return INSTRUMENT_MAP[clean_sym]
-    key = get_instrument_key(symbol)
-    return {
-        "instrument_key": key,
-        "exchange": "NSE",
-        "segment": "NSE_EQ",
-        "instrument_type": "EQUITY",
-        "display_name": symbol
-    }
+    if not clean_sym.endswith(".NS") and f"{clean_sym}.NS" in INSTRUMENT_MAP:
+        return INSTRUMENT_MAP[f"{clean_sym}.NS"]
+    if clean_sym.endswith(".NS") and clean_sym[:-3] in INSTRUMENT_MAP:
+        return INSTRUMENT_MAP[clean_sym[:-3]]
+    return None
 
 def get_symbol_from_key(instrument_key: str) -> str:
-    """Reverse map instrument_key to primary UI symbol."""
+    """
+    Deterministically reverse map instrument_key to canonical primary UI symbol (.NS preferred for equities).
+    """
+    if not instrument_key:
+        return ""
+    # Look for .NS primary alias first
+    for sym, meta in INSTRUMENT_MAP.items():
+        if meta["instrument_key"] == instrument_key and sym.endswith(".NS"):
+            return sym
+    # Look for any matching alias
     for sym, meta in INSTRUMENT_MAP.items():
         if meta["instrument_key"] == instrument_key:
             return sym

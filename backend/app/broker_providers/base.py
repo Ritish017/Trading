@@ -8,23 +8,42 @@ class NormalizedTick(BaseModel):
     instrument_key: Optional[str] = None
     exchange: str = "NSE"
     timestamp: float = Field(default_factory=time.time)
+    received_at: float = Field(default_factory=lambda: time.time() * 1000.0)
     last_trade_time: Optional[float] = None
     ltp: float
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    close: Optional[float] = None
     previous_close: Optional[float] = None
     change: Optional[float] = None
     change_percent: Optional[float] = None
     volume: int = 0
-    buy_qty: Optional[int] = None
-    sell_qty: Optional[int] = None
-    open_interest: Optional[int] = None
     bid: Optional[float] = None
     ask: Optional[float] = None
+    bid_quantity: Optional[int] = None
+    ask_quantity: Optional[int] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    open_interest: Optional[int] = None
+    oi_change: Optional[int] = None
     provider: str = "GENERIC"
     is_live: bool = True
+    market_status: str = "LIVE"
+
+    @property
+    def instrument_id(self) -> Optional[str]:
+        return self.instrument_key
+
+    @property
+    def oi(self) -> Optional[int]:
+        return self.open_interest
+
+    @property
+    def buy_qty(self) -> Optional[int]:
+        return self.bid_quantity
+
+    @property
+    def sell_qty(self) -> Optional[int]:
+        return self.ask_quantity
 
 class MarketDataProvider(ABC):
     provider_name: str = "GENERIC"

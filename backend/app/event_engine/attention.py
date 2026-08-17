@@ -15,10 +15,10 @@ def compute_attention_score(
 ) -> AttentionScore:
     """
     Computes a deterministic, transparent 0-100 attention score based on real market anomaly weights.
-    Does NOT use an LLM to guess arbitrary numbers.
+    Does not assign baseline points to unavailable or unconfigured domains.
     """
     # 1. Price Anomaly (0 - 20 pts)
-    abs_chg = abs(market.change_percent)
+    abs_chg = abs(market.change_percent) if market.change_percent is not None else 0.0
     if abs_chg >= 5.0:
         tech_score = 20.0
     elif abs_chg >= 3.0:
@@ -48,22 +48,22 @@ def compute_attention_score(
         vol_score = 2.0
 
     # 3. Derivatives Anomaly (0 - 20 pts)
-    deriv_score = 4.0 # Baseline if no F&O data
-    if derivatives:
+    deriv_score = 0.0
+    if derivatives and derivatives.freshness != "UNAVAILABLE":
         oi_chg = abs(derivatives.futures_oi_change or 0.0)
-        pcr = derivatives.pcr or 1.0
-        if oi_chg >= 15.0 or pcr <= 0.6 or pcr >= 1.6:
+        pcr = derivatives.pcr
+        if oi_chg >= 15.0 or (pcr is not None and (pcr <= 0.6 or pcr >= 1.6)):
             deriv_score = 20.0
-        elif oi_chg >= 10.0 or pcr <= 0.75 or pcr >= 1.4:
+        elif oi_chg >= 10.0 or (pcr is not None and (pcr <= 0.75 or pcr >= 1.4)):
             deriv_score = 15.0
         elif oi_chg >= 5.0:
             deriv_score = 10.0
-        else:
-            deriv_score = 6.0
+        elif pcr is not None or oi_chg > 0:
+            deriv_score = 5.0
 
     # 4. News & Corporate Catalyst Impact (0 - 15 pts)
-    news_score = 2.0
-    if news:
+    news_score = 0.0
+    if news and news.freshness != "UNAVAILABLE":
         if news.event_type in ["EARNINGS", "REGULATORY", "ACQUISITION"]:
             news_score = 15.0
         elif news.event_type in ["ORDER_WIN", "CORPORATE_ACTION"]:
@@ -74,27 +74,27 @@ def compute_attention_score(
             news_score = 4.0
 
     # 5. Sector & Market Relevance (0 - 15 pts)
-    sec_score = 4.0
-    if is_nifty50:
-        sec_score += 4.0
-    if sector:
-        sec_chg = abs(sector.change_percent)
+    sec_score = 4.0 if is_nifty50 else 0.0
+    if sector and sector.freshness != "UNAVAILABLE":
+        sec_chg = abs(sector.change_percent) if sector.change_percent is not None else 0.0
         if sec_chg >= 2.5:
-            sec_score = min(15.0, sec_score + 7.0)
+            sec_score = min(15.0, sec_score + 9.0)
         elif sec_chg >= 1.5:
-            sec_score = min(15.0, sec_score + 4.0)
+            sec_score = min(15.0, sec_score + 6.0)
+        else:
+            sec_score = min(15.0, sec_score + 3.0)
 
     # 6. Macro Shock Impact (0 - 10 pts)
-    macro_score = 2.0
-    if macro:
-        vix_chg = abs(macro.india_vix_change_pct)
-        nifty_chg = abs(macro.nifty_change_pct)
+    macro_score = 0.0
+    if macro and macro.freshness != "UNAVAILABLE":
+        vix_chg = abs(macro.india_vix_change_pct) if macro.india_vix_change_pct is not None else 0.0
+        nifty_chg = abs(macro.nifty_change_pct) if macro.nifty_change_pct is not None else 0.0
         if vix_chg >= 10.0 or nifty_chg >= 2.0:
             macro_score = 10.0
         elif vix_chg >= 5.0 or nifty_chg >= 1.0:
             macro_score = 7.0
         else:
-            macro_score = 4.0
+            macro_score = 3.0
 
     total = int(round(tech_score + vol_score + deriv_score + news_score + sec_score + macro_score))
     total = max(0, min(100, total))

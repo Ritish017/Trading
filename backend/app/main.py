@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Dict, Any, List, Optional, Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +8,7 @@ from pydantic import BaseModel
 import pandas as pd
 
 from backend.app.config import settings
-from backend.app.database.connection import init_db
+from backend.app.database.connection import init_db, check_db_health
 from backend.app.broker_providers.base import NormalizedTick
 from backend.app.market_data.service import MarketDataService
 from backend.app.market_data.candle_aggregator import MarketCandleAggregator
@@ -22,6 +23,13 @@ from backend.app.backtesting.event_driven import EventDrivenBacktester
 from backend.app.paper_trading.engine import PaperTradingEngine, PaperOrderRequest
 from backend.app.journal.analytics import compute_journal_statistics
 from backend.app.personalization.trader_profile import trader_profile_mgr
+from backend.app.ai_engine.chief_analyst import ChiefMarketAnalyst
+from backend.app.quant_engine.features import compute_market_features
+from backend.app.event_engine.detector import detect_market_events
+from backend.app.ai_engine.contracts import (
+    MarketSnapshot, TechnicalSnapshot, DerivativeSnapshot, NewsSnapshot, SectorSnapshot, MacroSnapshot, InstitutionalSnapshot,
+    DataFreshness
+)
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
@@ -48,12 +56,16 @@ paper_engine = PaperTradingEngine(initial_capital=settings.default_paper_capital
 market_research_agent = MarketResearchAgent(api_key=settings.gemini_api_key)
 trading_coach_agent = PersonalTradingCoach(api_key=settings.gemini_api_key)
 strategy_agent = StrategyResearchAgent(api_key=settings.gemini_api_key)
+chief_market_analyst = ChiefMarketAnalyst(api_key=settings.gemini_api_key)
 
 active_ws_connections: Set[WebSocket] = set()
 
 async def on_normalized_tick_received(tick: NormalizedTick):
     """Callback triggered whenever a normalized tick is received from MarketDataService."""
     updated_candles = candle_aggregator.process_tick(tick)
+    # Update paper trading mark-to-market
+    paper_engine.update_market_price(tick.symbol, tick.ltp)
+
     payload = {
         "type": "TICK",
         "data": tick.dict(),
@@ -94,7 +106,7 @@ async def health_check():
         "status": "ONLINE",
         "system": settings.app_name,
         "environment": settings.environment,
-        "real_trading_enabled": settings.real_trading_enabled
+        "real_trading_enabled": False
     }
 
 @app.get("/health/data-feed")
@@ -103,7 +115,7 @@ async def data_feed_health():
 
 @app.get("/health/database")
 async def database_health():
-    return {"status": "ONLINE", "type": "AsyncSQLite/PostgreSQL"}
+    return await check_db_health()
 
 @app.get("/health/redis")
 async def redis_health():
@@ -125,14 +137,14 @@ async def get_candles(symbol: str, interval: str = "5m", count: int = 60):
     if cached and len(cached) >= count:
         return {"symbol": symbol, "interval": interval, "candles": cached, "source": "AGGREGATOR"}
     candles = await market_data_service.get_candles(symbol, interval, count)
-    candle_aggregator.seed_historical_candles(symbol, interval, candles)
+    if candles:
+        candle_aggregator.seed_historical_candles(symbol, interval, candles)
     return {"symbol": symbol, "interval": interval, "candles": candles, "source": "PROVIDER"}
 
 @app.get("/api/market/option-chain/{symbol}")
 async def get_option_chain(symbol: str):
     return await market_data_service.get_option_chain(symbol)
 
-# --- Phase 10 Market Information APIs ---
 @app.get("/api/market/fii-dii")
 async def get_fii_dii():
     return await market_data_service.get_fii_dii()
@@ -155,50 +167,24 @@ async def get_max_pain(symbol: str):
 
 @app.get("/api/market/announcements")
 async def get_sebi_announcements():
-    return [
-        {
-            "id": "ann_1",
-            "companySymbol": "RELIANCE.NS",
-            "category": "Quarterly Disclosures",
-            "headline": "Jio Platforms reports 12.4% YoY increase in Q3 Net Profit to ₹5,420 Cr; ARPU rises to ₹188.5",
-            "details": "Digital services segment recorded highest ever subscriber addition of 10.8 million during the quarter.",
-            "timestamp": "10:42 AM IST",
-            "source": "NSE_FILING"
-        },
-        {
-            "id": "ann_2",
-            "companySymbol": "HDFCBANK.NS",
-            "category": "SEBI Disclosure",
-            "headline": "SEBI grants approval for HDFC Mutual Fund new thematic infrastructure equity scheme",
-            "details": "Regulatory approval received under SEBI Mutual Funds Regulations 1996 for new fund offering.",
-            "timestamp": "09:55 AM IST",
-            "source": "NSE_FILING"
-        },
-        {
-            "id": "ann_3",
-            "companySymbol": "TCS.NS",
-            "category": "Corporate Action",
-            "headline": "TCS secures $450 Million multi-year AI cloud transformation deal with European retail giant",
-            "details": "Strategic technology modernization contract covering cloud migration and generative AI integration.",
-            "timestamp": "09:18 AM IST",
-            "source": "BSE_FILING"
-        }
-    ]
+    return []
 
 @app.get("/api/market/breadth")
 async def get_market_breadth():
+    default_syms = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "TATAMOTORS.NS"]
+    quotes = await market_data_service.get_quotes(default_syms)
+    advances = sum(1 for q in quotes if (q.get("change") or 0) > 0)
+    declines = sum(1 for q in quotes if (q.get("change") or 0) < 0)
+    unchanged = len(quotes) - advances - declines
+    ratio = round(advances / declines, 2) if declines > 0 else (advances if advances > 0 else 1.0)
     return {
-        "universe": "NSE Equity",
-        "advances": 1482,
-        "declines": 840,
-        "unchanged": 128,
-        "ratio": 1.76,
-        "new52WeekHighs": 142,
-        "new52WeekLows": 18,
-        "upperCircuits": 84,
-        "lowerCircuits": 12,
-        "source": "NSE_OFFICIAL",
-        "as_of": "15:30 IST"
+        "universe": "Tracked Active Equities",
+        "advances": advances,
+        "declines": declines,
+        "unchanged": unchanged,
+        "ratio": ratio,
+        "source": market_data_service.active_provider.provider_name,
+        "status": "LIVE" if market_data_service.is_live else "SIMULATED"
     }
 
 # --- Quantitative Analysis API ---
@@ -212,13 +198,13 @@ async def compute_indicators(req: IndicatorRequest):
         raise HTTPException(status_code=400, detail="Candles array cannot be empty")
     
     df = pd.DataFrame(req.candles)
-    close = df['close']
+    close = df['close'].astype(float)
     
     ema20 = calculate_ema(close, 20).tolist()
     ema50 = calculate_ema(close, 50).tolist()
     vwap = calculate_vwap(df).tolist() if 'high' in df and 'low' in df and 'volume' in df else close.tolist()
     rsi = calculate_rsi(close, 14).tolist()
-    rvol = calculate_relative_volume(df['volume'], 20).tolist() if 'volume' in df else [1.0] * len(df)
+    rvol = calculate_relative_volume(df['volume'].astype(float), 20).tolist() if 'volume' in df else [1.0] * len(df)
     levels = detect_support_resistance(df)
 
     return {
@@ -226,7 +212,7 @@ async def compute_indicators(req: IndicatorRequest):
         "ema20": [round(x, 2) for x in ema20],
         "ema50": [round(x, 2) for x in ema50],
         "vwap": [round(x, 2) for x in vwap],
-        "rsi14": [round(x, 1) for x in rsi],
+        "rsi14": [round(x, 1) if not pd.isna(x) else 50.0 for x in rsi],
         "rvol": [round(x, 2) for x in rvol],
         "supportLevels": levels["support"],
         "resistanceLevels": levels["resistance"]
@@ -238,99 +224,79 @@ async def analyze_regime(req: IndicatorRequest):
     result = classify_market_regime(df)
     return result
 
-from backend.app.ai_engine.chief_analyst import ChiefMarketAnalyst
-from backend.app.quant_engine.features import compute_market_features
-from backend.app.event_engine.detector import detect_market_events
-from backend.app.ai_engine.contracts import (
-    MarketSnapshot, TechnicalSnapshot, DerivativeSnapshot, NewsSnapshot, SectorSnapshot, MacroSnapshot, InstitutionalSnapshot,
-    DataFreshness
-)
-
-chief_market_analyst = ChiefMarketAnalyst(api_key=settings.gemini_api_key)
-
 # --- AI Market Intelligence Endpoints ---
 class AIAnalysisRequest(BaseModel):
     symbol: str
     name: Optional[str] = None
     sector: Optional[str] = "General"
-    price: float
+    price: Optional[float] = None
     change24h: Optional[float] = 0.0
-    niftyPrice: Optional[float] = 24580.0
-    pcr: Optional[float] = 1.18
+    niftyPrice: Optional[float] = None
+    pcr: Optional[float] = None
 
 @app.get("/api/intelligence/market-narrative")
 async def get_market_narrative():
-    """Returns today's overarching market regime and institutional narrative."""
+    """Returns overarching market regime and narrative based on authentic market data."""
+    nifty_quote = {}
+    vix_quote = {}
+    try:
+        nifty_quote = await market_data_service.get_quote("NIFTY 50")
+        vix_quote = await market_data_service.get_quote("INDIA VIX")
+    except Exception:
+        pass
+
     macro = MacroSnapshot(
-        nifty_50=24580.45,
-        nifty_change_pct=+0.42,
-        bank_nifty=51240.80,
-        bank_nifty_change_pct=+0.65,
-        india_vix=13.82,
-        india_vix_change_pct=-2.14
+        nifty_50=nifty_quote.get("ltp", 0.0) or 0.0,
+        nifty_change_pct=nifty_quote.get("change_percent", 0.0) or 0.0,
+        bank_nifty=0.0,
+        bank_nifty_change_pct=0.0,
+        india_vix=vix_quote.get("ltp", 0.0) or 0.0,
+        india_vix_change_pct=vix_quote.get("change_percent", 0.0) or 0.0,
+        freshness=DataFreshness.LIVE if market_data_service.is_live else DataFreshness.UNAVAILABLE
     )
-    narrative = chief_market_analyst.generate_market_narrative(
-        macro=macro,
-        sector_leaders=["Banking & Financials", "Automotive", "Energy & Oil"],
-        sector_laggards=["IT Services", "Metals"],
-        fii_cash_net=+1840.50,
-        dii_cash_net=+1210.80
-    )
-    return narrative
+    
+    return {
+        "status": "AVAILABLE" if macro.nifty_50 > 0 else "UNAVAILABLE",
+        "macro": macro.dict(),
+        "source": market_data_service.active_provider.provider_name
+    }
 
 @app.get("/api/intelligence/feed")
 @app.get("/api/intelligence/events")
-async def get_intelligence_feed(symbols: str = Query(default="RELIANCE.NS,TCS.NS,HDFCBANK.NS,ICICIBANK.NS,INFY.NS,TATAMOTORS.NS,SBIN.NS,MRF.NS")):
+async def get_intelligence_feed(symbols: str = Query(default="RELIANCE.NS,TCS.NS,HDFCBANK.NS,ICICIBANK.NS,INFY.NS,TATAMOTORS.NS,SBIN.NS")):
     """Returns live stream of detected market events sorted by Attention Score."""
     sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
     events = []
-    
-    macro = MacroSnapshot(
-        nifty_50=24580.45,
-        nifty_change_pct=+0.42,
-        bank_nifty=51240.80,
-        bank_nifty_change_pct=+0.65,
-        india_vix=13.82,
-        india_vix_change_pct=-2.14
-    )
 
     for sym in sym_list:
         try:
             quote = await market_data_service.get_quote(sym)
             candles_data = await market_data_service.get_candles(sym, "15m", 30)
-            price = quote.get("ltp", 1000.0)
-            prev_close = quote.get("close", price)
-            chg_pct = quote.get("change_percent", 0.0)
-            vwap = quote.get("vwap", price)
-            vol = quote.get("volume", 500000)
+            price = quote.get("ltp") or 0.0
+            prev_close = quote.get("previous_close") or price
+            chg_pct = quote.get("change_percent") or 0.0
+            vwap = quote.get("vwap") or price
+            vol = quote.get("volume") or 0
 
             mkt = MarketSnapshot(
                 symbol=sym,
                 ltp=price,
-                open=quote.get("open", price),
-                high=quote.get("high", price),
-                low=quote.get("low", price),
+                open=quote.get("open", price) or price,
+                high=quote.get("high", price) or price,
+                low=quote.get("low", price) or price,
                 previous_close=prev_close,
                 volume=vol,
                 vwap=vwap,
-                change=quote.get("change", 0.0),
-                change_percent=chg_pct
+                change=quote.get("change", 0.0) or 0.0,
+                change_percent=chg_pct,
+                freshness=DataFreshness.LIVE if quote.get("is_live") else DataFreshness.RECENT
             )
 
             tech = compute_market_features(candles_data, price, prev_close)
-            sec = SectorSnapshot(
-                sector_name="Automotive" if "TATAMOTORS" in sym or "MRF" in sym else "IT Services" if "TCS" in sym or "INFY" in sym else "Banking" if "BANK" in sym or "SBIN" in sym else "Energy & Oil",
-                change_percent=chg_pct * 0.8,
-                relative_strength=chg_pct - 0.42,
-                breadth_advances=18,
-                breadth_declines=8
-            )
 
             evs = detect_market_events(
                 market=mkt,
                 technical=tech,
-                sector=sec,
-                macro=macro,
                 is_nifty50=sym in ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "SBIN.NS", "TATAMOTORS.NS"]
             )
             events.extend(evs)
@@ -348,60 +314,50 @@ async def get_symbol_intelligence(symbol: str):
     quote = await market_data_service.get_quote(symbol)
     candles_data = await market_data_service.get_candles(symbol, "15m", 60)
     
-    price = quote.get("ltp", 1000.0)
-    prev_close = quote.get("close", price)
-    chg_pct = quote.get("change_percent", 0.0)
-    vwap = quote.get("vwap", price)
-    vol = quote.get("volume", 500000)
+    price = quote.get("ltp") or 0.0
+    prev_close = quote.get("previous_close") or price
+    chg_pct = quote.get("change_percent") or 0.0
+    vwap = quote.get("vwap") or price
+    vol = quote.get("volume") or 0
 
     mkt = MarketSnapshot(
         symbol=symbol,
         ltp=price,
-        open=quote.get("open", price),
-        high=quote.get("high", price),
-        low=quote.get("low", price),
+        open=quote.get("open", price) or price,
+        high=quote.get("high", price) or price,
+        low=quote.get("low", price) or price,
         previous_close=prev_close,
         volume=vol,
         vwap=vwap,
-        change=quote.get("change", 0.0),
-        change_percent=chg_pct
+        change=quote.get("change", 0.0) or 0.0,
+        change_percent=chg_pct,
+        freshness=DataFreshness.LIVE if quote.get("is_live") else DataFreshness.RECENT
     )
 
     tech = compute_market_features(candles_data, price, prev_close)
-    deriv = DerivativeSnapshot(
-        pcr=1.18 if "RELIANCE" in symbol or "TCS" in symbol else 0.92,
-        futures_oi_change=+4.8,
-        implied_volatility=14.2,
-        oi_pattern="Long Buildup" if chg_pct > 0 else "Short Buildup"
-    )
-    sec = SectorSnapshot(
-        sector_name="Automotive" if "TATAMOTORS" in symbol or "MRF" in symbol else "IT Services" if "TCS" in symbol or "INFY" in symbol else "Banking & Financials" if "BANK" in symbol or "SBIN" in symbol else "Energy & Oil",
-        change_percent=chg_pct * 0.75,
-        relative_strength=chg_pct - 0.42,
-        breadth_advances=22,
-        breadth_declines=10
-    )
-    macro = MacroSnapshot(
-        nifty_50=24580.45,
-        nifty_change_pct=+0.42,
-        bank_nifty=51240.80,
-        bank_nifty_change_pct=+0.65,
-        india_vix=13.82,
-        india_vix_change_pct=-2.14
-    )
-    inst = InstitutionalSnapshot(
-        fii_cash_net_cr=+1840.50,
-        dii_cash_net_cr=+1210.80,
-        as_of="Today"
-    )
+
+    # Query real option chain
+    deriv_snapshot = None
+    try:
+        chain = await market_data_service.get_option_chain(symbol)
+        if chain.get("status") == "AVAILABLE":
+            deriv_snapshot = DerivativeSnapshot(
+                pcr=chain.get("pcr"),
+                max_pain=chain.get("maxPainStrike"),
+                call_oi_total=chain.get("totalCallOI"),
+                put_oi_total=chain.get("totalPutOI"),
+                implied_volatility=chain.get("impliedVolatility"),
+                freshness=DataFreshness.LIVE
+            )
+        else:
+            deriv_snapshot = DerivativeSnapshot(freshness=DataFreshness.UNAVAILABLE)
+    except Exception:
+        deriv_snapshot = DerivativeSnapshot(freshness=DataFreshness.UNAVAILABLE)
 
     commentary = await chief_market_analyst.generate_commentary(
         market=mkt,
         technical=tech,
-        derivatives=deriv,
-        sector=sec,
-        macro=macro,
-        institutional=inst,
+        derivatives=deriv_snapshot,
         is_nifty50=symbol in ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "SBIN.NS", "TATAMOTORS.NS"]
     )
     return commentary
@@ -410,7 +366,6 @@ async def get_symbol_intelligence(symbol: str):
 @app.post("/api/ai/market-analysis")
 async def run_ai_market_analysis(req: AIAnalysisRequest):
     return await get_symbol_intelligence(req.symbol)
-
 
 @app.post("/api/ai/trading-coach")
 async def run_trading_coach(trades: List[Dict[str, Any]]):
@@ -432,16 +387,19 @@ async def place_paper_order(order: PaperOrderRequest):
 
 @app.get("/api/paper/positions")
 async def get_paper_positions():
-    return {
-        "positions": list(paper_engine.positions.values()),
-        "capital": paper_engine.capital
-    }
+    return paper_engine.get_portfolio_summary()
 
 @app.post("/api/paper/close/{pos_id}")
 async def close_paper_position(pos_id: str, payload: Dict[str, float]):
-    close_price = payload.get("close_price", 1000.0)
+    close_price = payload.get("close_price")
     res = paper_engine.close_position(pos_id, close_price)
     return res
+
+@app.post("/api/paper/reset")
+async def reset_paper_portfolio(payload: Optional[Dict[str, float]] = None):
+    init_cap = (payload.get("initialCapital") if payload else None) or settings.default_paper_capital
+    paper_engine.reset_portfolio(init_cap)
+    return paper_engine.get_portfolio_summary()
 
 # --- Journal Analytics API ---
 @app.post("/api/journal/analytics")
@@ -451,15 +409,20 @@ async def get_journal_analytics(entries: List[Dict[str, Any]]):
 # --- Backtest API ---
 class BacktestRequest(BaseModel):
     symbol: str
-    candles: List[Dict[str, Any]]
+    candles: Optional[List[Dict[str, Any]]] = []
     initialCapital: Optional[float] = 1000000.0
 
 @app.post("/api/backtest/run")
 async def run_backtest(req: BacktestRequest):
-    df = pd.DataFrame(req.candles)
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Candles data is required for backtest")
+    candles = req.candles
+    if not candles:
+        # Load historical candles from market data service
+        candles = await market_data_service.get_candles(req.symbol, "5m", 100)
     
+    if not candles or len(candles) < 15:
+        raise HTTPException(status_code=400, detail=f"Insufficient candle history available for {req.symbol} to execute backtest.")
+
+    df = pd.DataFrame(candles)
     hypothesis = StrategyHypothesis()
     evaluated_df = hypothesis.evaluate_signals(df)
 
@@ -475,7 +438,6 @@ async def websocket_ticks(websocket: WebSocket):
     logger.info(f"Frontend client connected to /ws/ticks. Active clients: {len(active_ws_connections)}")
     try:
         while True:
-            # Keep connection alive
             msg = await websocket.receive_text()
             if msg == "ping":
                 await websocket.send_text("pong")

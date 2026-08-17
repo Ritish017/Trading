@@ -20,10 +20,10 @@ INITIAL_PRICES = {
 
 class DevMockProvider(MarketDataProvider):
     """
-    Development Mock Provider used for fallback or offline testing.
-    Generates structured ticks obeying financial invariants.
+    Development Mock Provider used strictly for explicit SIMULATED testing mode.
+    Generates structured ticks obeying financial invariants with explicit SIMULATED metadata.
     """
-    provider_name = "DevMock"
+    provider_name = "MOCK"
 
     def __init__(self):
         self.prices = INITIAL_PRICES.copy()
@@ -33,7 +33,7 @@ class DevMockProvider(MarketDataProvider):
 
     async def connect(self) -> bool:
         self.is_connected = True
-        logger.info("DevMockProvider connected.")
+        logger.info("[MOCK PROVIDER] DevMockProvider connected in SIMULATED mode.")
         return True
 
     async def disconnect(self) -> None:
@@ -41,7 +41,7 @@ class DevMockProvider(MarketDataProvider):
         if self._ws_task:
             self._ws_task.cancel()
             self._ws_task = None
-        logger.info("DevMockProvider disconnected.")
+        logger.info("[MOCK PROVIDER] DevMockProvider disconnected.")
 
     async def subscribe(self, symbols: List[str]) -> None:
         self.subscribed_symbols = list(set(self.subscribed_symbols + symbols))
@@ -64,6 +64,7 @@ class DevMockProvider(MarketDataProvider):
             symbol=symbol,
             exchange="NSE",
             timestamp=time.time(),
+            received_at=time.time() * 1000.0,
             last_trade_time=time.time(),
             ltp=new_ltp,
             open=round(new_ltp * 0.998, 2),
@@ -76,8 +77,9 @@ class DevMockProvider(MarketDataProvider):
             volume=random.randint(100, 5000),
             bid=round(new_ltp - spread, 2),
             ask=round(new_ltp + spread, 2),
-            provider="DevMock",
+            provider="MOCK",
             is_live=False,
+            market_status="SIMULATED",
         )
 
     async def get_quote(self, symbol: str) -> Dict[str, Any]:
@@ -94,6 +96,7 @@ class DevMockProvider(MarketDataProvider):
             "timestamp": tick.timestamp,
             "source": "MOCK",
             "is_live": False,
+            "market_status": "SIMULATED",
         }
 
     async def get_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:
@@ -124,7 +127,9 @@ class DevMockProvider(MarketDataProvider):
                 "close": c,
                 "volume": vol,
                 "vwap": round((h + l + c) / 3, 2),
-                "source": "MOCK"
+                "source": "MOCK",
+                "is_live": False,
+                "market_status": "SIMULATED"
             })
             base = c
 
@@ -134,17 +139,22 @@ class DevMockProvider(MarketDataProvider):
         spot = self.prices.get(symbol, 24580.0)
         atm = round(spot / 50) * 50
         return {
+            "status": "SIMULATED",
+            "symbol": symbol,
             "underlying": symbol,
             "provider": "MOCK",
             "spotPrice": spot,
             "atmStrike": atm,
-            "maxPain": atm - 50,
+            "maxPainStrike": atm - 50,
             "pcr": 1.18,
             "totalCallOI": 4820000,
             "totalPutOI": 5680000,
             "impliedVolatility": 13.4,
-            "expiryDate": expiry or "2026-08-14",
-            "source": "MOCK"
+            "expiryDate": expiry or "SIMULATED",
+            "source": "MOCK",
+            "is_live": False,
+            "market_status": "SIMULATED",
+            "strikes": []
         }
 
     async def get_market_information(self, info_type: str, symbol: Optional[str] = None) -> Dict[str, Any]:
@@ -153,13 +163,15 @@ class DevMockProvider(MarketDataProvider):
                 "fiiCashNetCr": 1840.50,
                 "diiCashNetCr": 1210.20,
                 "timestamp": time.time(),
-                "source": "MOCK"
+                "source": "MOCK",
+                "is_live": False,
+                "market_status": "SIMULATED"
             }
         elif info_type == "pcr":
-            return {"symbol": symbol or "NIFTY", "pcr": 1.18, "source": "MOCK"}
+            return {"symbol": symbol or "NIFTY", "pcr": 1.18, "source": "MOCK", "is_live": False, "market_status": "SIMULATED"}
         elif info_type == "max-pain":
-            return {"symbol": symbol or "NIFTY", "maxPain": 24550.0, "source": "MOCK"}
-        return {"info_type": info_type, "symbol": symbol, "source": "MOCK"}
+            return {"symbol": symbol or "NIFTY", "maxPain": 24550.0, "source": "MOCK", "is_live": False, "market_status": "SIMULATED"}
+        return {"info_type": info_type, "symbol": symbol, "source": "MOCK", "is_live": False, "market_status": "SIMULATED"}
 
     async def connect_websocket(self, callback: Callable[[NormalizedTick], Awaitable[None]]) -> bool:
         self.is_connected = True

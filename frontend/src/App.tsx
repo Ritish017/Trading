@@ -239,7 +239,7 @@ export default function App() {
                   low: q.low ? Math.min(q.low, newPrice) : stock.low,
                   open: q.open || stock.open,
                   prevClose: prevClose,
-                  vwap: Number((stock.vwap * 0.9 + newPrice * 0.1).toFixed(2)),
+                  vwap: q.vwap || stock.vwap || newPrice,
                 };
               })
             );
@@ -456,7 +456,7 @@ export default function App() {
                     changePercent: Number(((priceDiff / prevClose) * 100).toFixed(2)),
                     high: Math.max(s.high, newPrice),
                     low: Math.min(s.low, newPrice),
-                    vwap: Number((s.vwap * 0.9 + newPrice * 0.1).toFixed(2)),
+                    vwap: tick.vwap || s.vwap || newPrice,
                   };
                 }
                 return s;
@@ -482,6 +482,19 @@ export default function App() {
     return () => {
       if (ws) ws.close();
     };
+  }, []);
+
+  // Fetch initial Paper Trading State from Backend
+  useEffect(() => {
+    fetch('/api/paper/positions')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.positions)) {
+          setPaperPositions(data.positions);
+          if (data.available_capital !== undefined) setPaperBalance(data.available_capital);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Sync Candlestick History and Positions PnL on Tick
@@ -516,7 +529,7 @@ export default function App() {
           high: Math.max(lastCandle.high, currentPrice),
           low: Math.min(lastCandle.low, currentPrice),
           close: currentPrice,
-          vwap: Number((lastCandle.vwap * 0.95 + currentPrice * 0.05).toFixed(2)),
+          vwap: selectedStock.vwap || lastCandle.vwap || currentPrice,
         };
         return {
           ...prev,
@@ -558,7 +571,7 @@ export default function App() {
     }
   };
 
-  const handlePlacePaperOrder = (order: {
+  const handlePlacePaperOrder = async (order: {
     symbol: string;
     productType: 'CNC (Delivery)' | 'MIS (Intraday)';
     side: 'BUY' | 'SELL';
@@ -567,46 +580,55 @@ export default function App() {
     stopLoss?: number;
   }) => {
     const targetStock = stocks.find((s) => s.symbol === order.symbol) || selectedStock;
-    const requiredCapital = targetStock.price * order.quantity;
-
-    if (order.side === 'BUY' && paperBalance < requiredCapital) {
-      alert('Insufficient Paper Trading Margin Balance!');
-      return;
+    try {
+      const res = await fetch('/api/paper/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: targetStock.symbol,
+          companyName: targetStock.name,
+          productType: order.productType,
+          side: order.side,
+          quantity: order.quantity,
+          price: targetStock.price,
+          targetPrice: order.targetPrice,
+          stopLoss: order.stopLoss,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'FILLED' && data.position) {
+          setPaperPositions((prev) => [data.position, ...prev]);
+          if (data.available_capital !== undefined) setPaperBalance(data.available_capital);
+        } else if (data.status === 'REJECTED') {
+          alert(`Order Rejected: ${data.reason}`);
+        }
+      }
+    } catch {
+      // fallback
     }
-
-    const newPos: PaperPosition = {
-      id: 'pos_' + Date.now(),
-      symbol: targetStock.symbol,
-      companyName: targetStock.name,
-      productType: order.productType,
-      side: order.side,
-      quantity: order.quantity,
-      entryPrice: targetStock.price,
-      currentPrice: targetStock.price,
-      unrealizedPnL: 0,
-      unrealizedPnLPercent: 0,
-      targetPrice: order.targetPrice,
-      stopLoss: order.stopLoss,
-      timestamp: Date.now(),
-    };
-
-    if (order.side === 'BUY') {
-      setPaperBalance((prev) => prev - requiredCapital);
-    }
-    setPaperPositions((prev) => [newPos, ...prev]);
   };
 
-  const handleClosePaperPosition = (id: string) => {
+  const handleClosePaperPosition = async (id: string, closePrice?: number) => {
     const pos = paperPositions.find((p) => p.id === id);
     if (!pos) return;
-
-    const returnAmount = pos.quantity * pos.currentPrice + pos.unrealizedPnL;
-    setPaperBalance((prev) => prev + returnAmount);
+    try {
+      const res = await fetch(`/api/paper/close/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ close_price: closePrice || pos.currentPrice }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.available_capital !== undefined) setPaperBalance(data.available_capital);
+      }
+    } catch {
+      // quiet
+    }
     setPaperPositions((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const handleAddCustomStock = (sym: string) => {
-
+  const handleAddCustomStock = async (sym: string) => {
     const clean = sym.trim().toUpperCase();
     const fullSym = clean.endsWith('.NS') || clean.endsWith('.BO') ? clean : `${clean}.NS`;
     const exists = (stocks || []).find((s) => s.symbol === fullSym || s.symbol === clean);
@@ -614,31 +636,41 @@ export default function App() {
       setSelectedSymbol(exists.symbol);
       return;
     }
+    let quoteData: any = null;
+    try {
+      const res = await fetch(`/api/market/quote/${encodeURIComponent(fullSym)}`);
+      if (res.ok) {
+        quoteData = await res.json();
+      }
+    } catch {}
+
+    const price = quoteData?.ltp || 1000.0;
+    const prevClose = quoteData?.previous_close || price;
     const newStock: NSEStock = {
       symbol: fullSym,
-      bseCode: '000000',
-      name: `${clean} Limited`,
-      sector: 'NSE Equities',
-      price: 1000.0,
-      change: 0,
-      changePercent: 0,
-      open: 1000.0,
-      high: 1000.0,
-      low: 1000.0,
-      prevClose: 1000.0,
-      volumeLakhs: 10.0,
+      bseCode: quoteData?.bse_code || '000000',
+      name: quoteData?.company_name || `${clean} Limited`,
+      sector: quoteData?.sector || 'NSE Equities',
+      price: price,
+      change: quoteData?.change || 0,
+      changePercent: quoteData?.change_percent || 0,
+      open: quoteData?.open || price,
+      high: quoteData?.high || price,
+      low: quoteData?.low || price,
+      prevClose: prevClose,
+      volumeLakhs: quoteData?.volume ? Number((quoteData.volume / 100000).toFixed(2)) : 10.0,
       turnoverCr: 50.0,
       marketCapCr: 10000,
       peRatio: 20.0,
       pbRatio: 2.0,
-      week52High: 1200.0,
-      week52Low: 800.0,
-      vwap: 1000.0,
-      upperCircuit: 1100.0,
-      lowerCircuit: 900.0,
+      week52High: quoteData?.week_52_high || Number((price * 1.2).toFixed(2)),
+      week52Low: quoteData?.week_52_low || Number((price * 0.8).toFixed(2)),
+      vwap: quoteData?.vwap || price,
+      upperCircuit: Number((prevClose * 1.1).toFixed(2)),
+      lowerCircuit: Number((prevClose * 0.9).toFixed(2)),
       isNifty50: false,
       isFavorite: true,
-      sparkline: [1000, 1000, 1000, 1000, 1000, 1000, 1000],
+      sparkline: [price, price, price, price, price, price, price],
     };
     setStocks((prev) => [newStock, ...(prev || [])]);
     setSelectedSymbol(fullSym);

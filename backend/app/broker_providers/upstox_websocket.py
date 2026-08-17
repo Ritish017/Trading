@@ -51,14 +51,27 @@ class UpstoxWebSocketClient:
         logger.info("[UPSTOX WS] WebSocket client stopped gracefully.")
 
     async def subscribe(self, symbols: List[str]):
-        keys = [get_instrument_key(s) for s in symbols]
+        keys = [get_instrument_key(s) for s in symbols if get_instrument_key(s)]
         self.subscribed_keys.update(keys)
-        if self.ws and self.is_connected:
+        if self.ws and self.is_connected and keys:
             await self._send_subscription(keys, mode="full")
 
     async def unsubscribe(self, symbols: List[str]):
-        keys = [get_instrument_key(s) for s in symbols]
+        keys = [get_instrument_key(s) for s in symbols if get_instrument_key(s)]
         self.subscribed_keys.difference_update(keys)
+        if self.ws and self.is_connected and keys:
+            payload = {
+                "guid": f"unsub_{int(time.time())}",
+                "method": "unsub",
+                "data": {
+                    "mode": "full",
+                    "instrumentKeys": list(keys)
+                }
+            }
+            try:
+                await self.ws.send(json.dumps(payload))
+            except Exception as e:
+                logger.error(f"[UPSTOX WS] Unsubscribe send failed: {e}")
 
     async def _send_subscription(self, keys: List[str], mode: str = "full"):
         if not self.ws or not keys:
@@ -101,10 +114,11 @@ class UpstoxWebSocketClient:
                             break
                         try:
                             ticks = self._decode_message(message)
-                            self.last_tick_time = time.time()
-                            for tick in ticks:
-                                if self.callback:
-                                    await self.callback(tick)
+                            if ticks:
+                                self.last_tick_time = time.time()
+                                for tick in ticks:
+                                    if self.callback:
+                                        await self.callback(tick)
                         except Exception as decode_err:
                             logger.debug(f"[UPSTOX WS] Message decode error: {decode_err}")
             except asyncio.CancelledError:
@@ -119,8 +133,10 @@ class UpstoxWebSocketClient:
 
     def _decode_message(self, message: str | bytes) -> List[NormalizedTick]:
         """
-        Decodes incoming Upstox V3 WebSocket messages (Text JSON or Binary Protobuf).
-        Normalizes into internal NormalizedTick schema.
+        Decodes incoming Upstox V3 WebSocket messages.
+        Honest decoding: Handles text JSON cleanly.
+        If binary protobuf format is encountered without the compiled protobuf schema,
+        truthfully logs degraded state rather than faking decoding.
         """
         ticks = []
 
@@ -133,32 +149,32 @@ class UpstoxWebSocketClient:
                     tick = self._parse_feed_dict(inst_key, feed)
                     if tick:
                         ticks.append(tick)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[UPSTOX WS] Text JSON parse error: {e}")
             return ticks
 
-        # 2. Binary Protobuf Frame handling
+        # 2. Binary Frame handling
         if isinstance(message, bytes):
+            # Check if bytes are UTF-8 encoded text JSON
             try:
-                # Try Protobuf decode if google.protobuf is available
-                from google.protobuf import json_format
-                # Fast dynamic JSON payload fallback for protobuf stream if protobuf module is present
-                # Parse protobuf binary or fallback to struct unpack heuristics
-            except ImportError:
-                pass
-
-            # Fallback heuristic parser for text/json encoded in bytes
-            try:
-                text_content = message.decode('utf-8', errors='ignore')
+                text_content = message.decode('utf-8')
                 if text_content.startswith('{'):
                     data = json.loads(text_content)
-                    feeds = data.get("feeds", {})
+                    feeds = data.get("feeds", {}) or data.get("data", {})
                     for inst_key, feed in feeds.items():
                         tick = self._parse_feed_dict(inst_key, feed)
                         if tick:
                             ticks.append(tick)
-            except Exception:
+                    return ticks
+            except (UnicodeDecodeError, json.JSONDecodeError):
                 pass
+
+            # Binary Protobuf stream without compiled proto file in repo
+            logger.warning(
+                "[UPSTOX WS DEGRADED] Received binary protobuf feed (%d bytes). "
+                "Protobuf schema compilation file is not packaged in repository; binary stream cannot be decoded without schema.",
+                len(message)
+            )
 
         return ticks
 
@@ -171,30 +187,43 @@ class UpstoxWebSocketClient:
         if ltp <= 0:
             return None
 
-        prev_close = float(ltpc.get("cp", 0.0) or ltpc.get("close", ltp) or ltp)
-        change = round(ltp - prev_close, 2)
-        change_pct = round((change / prev_close) * 100, 2) if prev_close else 0.0
+        cp_raw = ltpc.get("cp") or ltpc.get("close")
+        prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else None
+        
+        if prev_close is not None and prev_close > 0:
+            change = round(ltp - prev_close, 2)
+            change_pct = round((change / prev_close) * 100.0, 2)
+        else:
+            change = None
+            change_pct = None
 
         ohlc = ff.get("marketFF", {}).get("ohlc", {}) or {}
+        raw_open = ohlc.get("open")
+        raw_high = ohlc.get("high")
+        raw_low = ohlc.get("low")
+        raw_close = ohlc.get("close")
         volume = int(ff.get("marketFF", {}).get("v", 0) or feed.get("v", 0) or 0)
         oi = int(ff.get("marketFF", {}).get("eoi", 0) or feed.get("oi", 0) or 0)
+        ltt_raw = ltpc.get("ltt")
 
         return NormalizedTick(
             symbol=symbol,
             instrument_key=inst_key,
             exchange="NSE",
             timestamp=time.time(),
-            last_trade_time=float(ltpc.get("ltt", time.time())),
+            received_at=time.time() * 1000.0,
+            last_trade_time=float(ltt_raw) / 1000.0 if ltt_raw and float(ltt_raw) > 1e11 else (float(ltt_raw) if ltt_raw else time.time()),
             ltp=ltp,
-            open=float(ohlc.get("open", ltp)),
-            high=float(ohlc.get("high", ltp)),
-            low=float(ohlc.get("low", ltp)),
-            close=ltp,
+            open=float(raw_open) if raw_open is not None else None,
+            high=float(raw_high) if raw_high is not None else None,
+            low=float(raw_low) if raw_low is not None else None,
+            close=float(raw_close) if raw_close is not None else ltp,
             previous_close=prev_close,
             change=change,
             change_percent=change_pct,
             volume=volume,
-            open_interest=oi,
+            open_interest=oi if oi > 0 else None,
             provider="UPSTOX",
-            is_live=True
+            is_live=True,
+            market_status="LIVE"
         )

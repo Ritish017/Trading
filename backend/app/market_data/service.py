@@ -155,20 +155,43 @@ class MarketDataService:
     async def get_fii_dii(self) -> Dict[str, Any]:
         if hasattr(self.active_provider, "get_market_information"):
             return await self.active_provider.get_market_information("fii-dii")
-        return {"fiiCashNetCr": 1840.50, "diiCashNetCr": 1210.20, "source": "STATIC"}
+        return {
+            "status": "UNAVAILABLE",
+            "fiiCashNetCr": None,
+            "diiCashNetCr": None,
+            "source": self.active_provider.provider_name,
+            "is_live": False
+        }
 
     async def get_open_interest(self, symbol: str) -> Dict[str, Any]:
         if hasattr(self.active_provider, "get_market_information"):
             return await self.active_provider.get_market_information("oi", symbol)
-        return {"symbol": symbol, "open_interest": 0, "source": "STATIC"}
+        return {
+            "symbol": symbol,
+            "status": "UNAVAILABLE",
+            "open_interest": None,
+            "source": self.active_provider.provider_name
+        }
 
     async def get_pcr(self, symbol: str) -> Dict[str, Any]:
         chain = await self.get_option_chain(symbol)
-        return {"symbol": symbol, "pcr": chain.get("pcr", 1.0), "source": chain.get("source", "MOCK")}
+        pcr_val = chain.get("pcr")
+        return {
+            "symbol": symbol,
+            "pcr": pcr_val,
+            "status": "AVAILABLE" if pcr_val is not None else "UNAVAILABLE",
+            "source": chain.get("source", self.active_provider.provider_name)
+        }
 
     async def get_max_pain(self, symbol: str) -> Dict[str, Any]:
         chain = await self.get_option_chain(symbol)
-        return {"symbol": symbol, "maxPain": chain.get("maxPain", 0.0), "source": chain.get("source", "MOCK")}
+        mp_val = chain.get("maxPainStrike") or chain.get("maxPain")
+        return {
+            "symbol": symbol,
+            "maxPain": mp_val,
+            "status": "AVAILABLE" if mp_val is not None else "UNAVAILABLE",
+            "source": chain.get("source", self.active_provider.provider_name)
+        }
 
     def get_health_status(self) -> Dict[str, Any]:
         ws_conn = False

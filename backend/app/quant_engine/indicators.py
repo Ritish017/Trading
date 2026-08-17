@@ -77,14 +77,11 @@ def calculate_bollinger_bands(
 
 def detect_support_resistance(df: pd.DataFrame, num_levels: int = 3) -> Dict[str, List[float]]:
     """
-    Pivot Point & Historical Level Support & Resistance Finder
+    Pivot Point & Historical Level Support & Resistance Finder based on factual swing extrema.
+    Returns authentic levels or empty lists if data is insufficient.
     """
     if df.empty or len(df) < 5:
-        ltp = df['close'].iloc[-1] if not df.empty else 1000.0
-        return {
-            "support": [round(ltp * 0.98, 2), round(ltp * 0.96, 2)],
-            "resistance": [round(ltp * 1.02, 2), round(ltp * 1.05, 2)],
-        }
+        return {"support": [], "resistance": []}
 
     highs = df['high'].values
     lows = df['low'].values
@@ -103,8 +100,18 @@ def detect_support_resistance(df: pd.DataFrame, num_levels: int = 3) -> Dict[str
             if lows[i] < ltp:
                 sup.append(round(float(lows[i]), 2))
 
-    res = sorted(list(set(res)))[:num_levels] or [round(ltp * 1.02, 2), round(ltp * 1.05, 2)]
-    sup = sorted(list(set(sup)), reverse=True)[:num_levels] or [round(ltp * 0.98, 2), round(ltp * 0.96, 2)]
+    # If no local pivot was formed (e.g. strong monotonic trend), include session extremes
+    if not sup:
+        session_low = round(float(np.min(lows)), 2)
+        if session_low < ltp:
+            sup.append(session_low)
+    if not res:
+        session_high = round(float(np.max(highs)), 2)
+        if session_high > ltp:
+            res.append(session_high)
+
+    res = sorted(list(set(res)))[:num_levels]
+    sup = sorted(list(set(sup)), reverse=True)[:num_levels]
 
     return {"support": sup, "resistance": res}
 

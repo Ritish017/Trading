@@ -35,26 +35,16 @@ export const BacktestReplayPage: React.FC<BacktestReplayPageProps> = ({
         const data = await res.json();
         setResults(data);
       } else {
-        // Mock fallback results for UI demonstration
+        const err = await res.json().catch(() => ({}));
         setResults({
-          totalTrades: 42,
-          winRate: 64.28,
-          profitFactor: 2.14,
-          netProfit: 184520,
-          maxDrawdown: 4.82,
-          sharpeRatio: 1.84,
-          cagr: 28.4,
+          error: true,
+          message: err.detail || 'Insufficient historical data or market feed offline for backtesting this instrument.'
         });
       }
-    } catch {
+    } catch (e: any) {
       setResults({
-        totalTrades: 42,
-        winRate: 64.28,
-        profitFactor: 2.14,
-        netProfit: 184520,
-        maxDrawdown: 4.82,
-        sharpeRatio: 1.84,
-        cagr: 28.4,
+        error: true,
+        message: 'Network error connecting to quantitative backtest service.'
       });
     } finally {
       setIsRunning(false);
@@ -161,41 +151,51 @@ export const BacktestReplayPage: React.FC<BacktestReplayPageProps> = ({
           </div>
 
           {results ? (
+            results.error ? (
+              <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-mono">
+                <div className="font-bold mb-1">Backtest Execution Notice</div>
+                <div>{results.message}</div>
+              </div>
+            ) : (
             <div className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
                 <div className="p-3 bg-[#14151b] rounded-xl border border-stone-800">
                   <span className="text-[9px] uppercase text-stone-500">Net Profit</span>
-                  <div className="text-base font-black text-emerald-400">+₹{results.netProfit.toLocaleString()}</div>
+                  <div className="text-base font-black text-emerald-400">
+                    {results.netProfit >= 0 ? '+' : ''}₹{Number(results.netProfit || 0).toLocaleString()}
+                  </div>
                 </div>
 
                 <div className="p-3 bg-[#14151b] rounded-xl border border-stone-800">
                   <span className="text-[9px] uppercase text-stone-500">Win Rate</span>
-                  <div className="text-base font-black text-stone-100">{results.winRate}%</div>
+                  <div className="text-base font-black text-stone-100">{results.winRate || results.win_rate_pct || 0}%</div>
                 </div>
 
                 <div className="p-3 bg-[#14151b] rounded-xl border border-stone-800">
                   <span className="text-[9px] uppercase text-stone-500">Profit Factor</span>
-                  <div className="text-base font-black text-amber-400">{results.profitFactor}x</div>
+                  <div className="text-base font-black text-amber-400">{results.profitFactor || results.profit_factor || 0}x</div>
                 </div>
 
                 <div className="p-3 bg-[#14151b] rounded-xl border border-stone-800">
                   <span className="text-[9px] uppercase text-stone-500">Sharpe Ratio</span>
-                  <div className="text-base font-black text-sky-400">{results.sharpeRatio}</div>
+                  <div className="text-base font-black text-sky-400">{results.sharpeRatio || results.sharpe_ratio || 0}</div>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 font-mono text-xs">
                 <div className="p-3 bg-[#14151b] rounded-xl border border-stone-800">
                   <span className="text-[10px] text-stone-400">Total Trades:</span>
-                  <span className="font-bold text-white ml-2">{results.totalTrades}</span>
+                  <span className="font-bold text-white ml-2">{results.totalTrades || results.total_trades || 0}</span>
                 </div>
                 <div className="p-3 bg-[#14151b] rounded-xl border border-stone-800">
                   <span className="text-[10px] text-stone-400">Max Drawdown:</span>
-                  <span className="font-bold text-rose-400 ml-2">-{results.maxDrawdown}%</span>
+                  <span className="font-bold text-rose-400 ml-2">-{results.maxDrawdown || results.max_drawdown_pct || 0}%</span>
                 </div>
                 <div className="p-3 bg-[#14151b] rounded-xl border border-stone-800">
-                  <span className="text-[10px] text-stone-400">Projected CAGR:</span>
-                  <span className="font-bold text-emerald-400 ml-2">+{results.cagr}%</span>
+                  <span className="text-[10px] text-stone-400">Walk Forward:</span>
+                  <span className={`font-bold ml-2 ${results.walk_forward_status === 'PASS' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {results.walk_forward_status || 'PASS'}
+                  </span>
                 </div>
               </div>
 
@@ -205,10 +205,11 @@ export const BacktestReplayPage: React.FC<BacktestReplayPageProps> = ({
                   <span>Quantitative Model Evaluation</span>
                 </div>
                 <p className="text-[11px] text-stone-400 leading-relaxed font-sans">
-                  The strategy demonstrated robust risk-adjusted returns during the 30-day lookback with strong profit factor and controlled drawdown below 5%.
+                  Total return: {results.totalReturnPct || results.total_return_pct || 0}% across {results.totalTrades || results.total_trades || 0} executed trades with {results.walk_forward_status === 'PASS' ? 'verified out-of-sample stability' : 'out-of-sample review required'}.
                 </p>
               </div>
             </div>
+            )
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-2 text-stone-500 font-mono text-xs">
               <BarChart2 className="w-8 h-8 text-stone-600" />

@@ -1,21 +1,39 @@
 import React from 'react';
 import { FIIDIINetFlow } from '../types/indianMarket';
-import { Globe, Landmark, Clock, ShieldCheck } from 'lucide-react';
-import { INITIAL_FII_DII_FLOWS } from '../data/indianMarketData';
+import { Globe, Landmark, AlertCircle } from 'lucide-react';
 
 interface FIIDIITrackerProps {
   flows?: FIIDIINetFlow[];
-  flow?: FIIDIINetFlow;
+  flow?: FIIDIINetFlow | null;
 }
 
 export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows, flow }) => {
-  const latest = flow || (flows && flows[0]) || INITIAL_FII_DII_FLOWS[0] || {
-    date: '10 Aug 2026',
-    fiiCashNetCr: +1840.50,
-    diiCashNetCr: +1210.80,
-    fiiIndexFuturesCr: +680.20,
-    fiiIndexOptionsCr: +3450.00,
-  };
+  const latest = flow || (flows && flows[0]);
+
+  if (!latest || (latest as any).status === 'UNAVAILABLE' || latest.fiiCashNetCr === undefined) {
+    return (
+      <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-4 select-none flex flex-col justify-between">
+        <div className="flex items-center justify-between mb-3 border-b border-stone-800/60 pb-2">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 rounded-xl bg-stone-800 text-stone-400 flex items-center justify-center font-bold">
+              <Globe className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-white">FII & DII Institutional Net Flows</h3>
+              <span className="text-[10px] text-stone-400">Cash & Derivatives Positioning</span>
+            </div>
+          </div>
+          <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-stone-800 text-stone-400 font-bold border border-stone-700">
+            PENDING SETTLEMENT
+          </span>
+        </div>
+        <div className="bg-[#14151b] p-4 rounded-xl border border-stone-800 flex items-center space-x-3 text-stone-400 text-xs font-mono">
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>FII & DII clearing flow data updates post 17:30 IST from official exchange settlement files.</span>
+        </div>
+      </div>
+    );
+  }
 
   const fiiCash = latest.fiiCashNetCr ?? 0;
   const diiCash = latest.diiCashNetCr ?? 0;
@@ -51,12 +69,12 @@ export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows, flow }) => 
               <Globe className="w-3 h-3 text-sky-400" />
               <span>FII CASH NET</span>
             </span>
-            <span className="font-mono text-[9px]">{latest.date || '10 Aug 2026'}</span>
+            <span className="font-mono text-[9px]">{latest.date || 'Today'}</span>
           </div>
           <div className={`text-base font-black font-mono ${fiiCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {fiiCash >= 0 ? '+' : ''}₹{fiiCash.toLocaleString()} Cr
           </div>
-          <div className="text-[9px] text-stone-500 mt-0.5">Updated: End of Day</div>
+          <div className="text-[9px] text-stone-500 mt-0.5">Official Settlement</div>
         </div>
 
         {/* DII Cash Net */}
@@ -66,12 +84,12 @@ export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows, flow }) => 
               <Landmark className="w-3 h-3 text-purple-400" />
               <span>DII CASH NET</span>
             </span>
-            <span className="font-mono text-[9px]">{latest.date || '10 Aug 2026'}</span>
+            <span className="font-mono text-[9px]">{latest.date || 'Today'}</span>
           </div>
           <div className={`text-base font-black font-mono ${diiCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {diiCash >= 0 ? '+' : ''}₹{diiCash.toLocaleString()} Cr
           </div>
-          <div className="text-[9px] text-stone-500 mt-0.5">Updated: End of Day</div>
+          <div className="text-[9px] text-stone-500 mt-0.5">Official Settlement</div>
         </div>
       </div>
 

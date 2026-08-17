@@ -106,11 +106,13 @@ class UpstoxRESTClient:
     async def get_full_quote(self, symbol: str) -> Dict[str, Any]:
         """Fetch full market quote snapshot for an instrument."""
         inst_key = get_instrument_key(symbol)
+        if not inst_key:
+            raise ValueError(f"Unknown or unresolved instrument symbol: {symbol}")
+
         endpoint = f"/v2/market-quote/quotes?instrument_key={inst_key}"
         res = await self._request("GET", endpoint)
         raw_data = res.get("data", {})
         
-        # Upstox returns keys formatted as "NSE_EQ:INE002A01018" or "NSE_INDEX:Nifty 50"
         quote_body = None
         for k, v in raw_data.items():
             quote_body = v
@@ -121,17 +123,30 @@ class UpstoxRESTClient:
             ohlc_res = await self._request("GET", f"/v2/market-quote/ohlc?instrument_key={inst_key}&interval=1d")
             quote_body = ohlc_res.get("data", {}).get(inst_key.replace("|", ":"), {})
 
+        if not quote_body:
+            raise ValueError(f"No market quote data returned from Upstox for {symbol}")
+
         ohlc = quote_body.get("ohlc", {})
         depth = quote_body.get("depth", {})
         bids = depth.get("buy", [])
         asks = depth.get("sell", [])
 
         ltp = float(quote_body.get("last_price", 0.0) or quote_body.get("close", 0.0))
-        prev_close = float(ohlc.get("close", ltp) or ltp)
-        change = round(ltp - prev_close, 2)
-        change_pct = round((change / prev_close) * 100, 2) if prev_close else 0.0
+        cp_raw = ohlc.get("close")
+        prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else (ltp if ltp > 0 else None)
+        
+        if prev_close is not None and prev_close > 0:
+            change = round(ltp - prev_close, 2)
+            change_pct = round((change / prev_close) * 100, 2)
+        else:
+            change = 0.0
+            change_pct = 0.0
 
-        meta = get_instrument_metadata(symbol)
+        meta = get_instrument_metadata(symbol) or {}
+
+        raw_open = ohlc.get("open")
+        raw_high = ohlc.get("high")
+        raw_low = ohlc.get("low")
 
         return {
             "symbol": symbol,
@@ -139,17 +154,17 @@ class UpstoxRESTClient:
             "exchange": meta.get("exchange", "NSE"),
             "instrument_type": meta.get("instrument_type", "EQUITY"),
             "ltp": ltp,
-            "open": float(ohlc.get("open", ltp) or ltp),
-            "high": float(ohlc.get("high", ltp) or ltp),
-            "low": float(ohlc.get("low", ltp) or ltp),
+            "open": float(raw_open) if raw_open is not None else ltp,
+            "high": float(raw_high) if raw_high is not None else ltp,
+            "low": float(raw_low) if raw_low is not None else ltp,
             "close": ltp,
             "previous_close": prev_close,
             "change": change,
             "change_percent": change_pct,
             "volume": int(quote_body.get("volume", 0) or 0),
             "open_interest": int(quote_body.get("oi", 0) or 0),
-            "bid": float(bids[0].get("price", 0.0) or 0.0) if bids else None,
-            "ask": float(asks[0].get("price", 0.0) or 0.0) if asks else None,
+            "bid": float(bids[0].get("price", 0.0)) if bids and bids[0].get("price") is not None else None,
+            "ask": float(asks[0].get("price", 0.0)) if asks and asks[0].get("price") is not None else None,
             "timestamp": parse_upstox_timestamp(quote_body.get("timestamp")),
             "source": "UPSTOX",
             "is_live": True
@@ -159,7 +174,9 @@ class UpstoxRESTClient:
         """Fetch market quotes for multiple symbols in a single Upstox API request."""
         if not symbols:
             return []
-        keys = [get_instrument_key(s) for s in symbols]
+        keys = [get_instrument_key(s) for s in symbols if get_instrument_key(s)]
+        if not keys:
+            return []
         comma_keys = ",".join(keys)
         endpoint = f"/v2/market-quote/quotes?instrument_key={comma_keys}"
         try:
@@ -172,6 +189,8 @@ class UpstoxRESTClient:
         results = []
         for symbol in symbols:
             inst_key = get_instrument_key(symbol)
+            if not inst_key:
+                continue
             inst_colon = inst_key.replace("|", ":")
             quote_body = raw_data.get(inst_key) or raw_data.get(inst_colon) or {}
             
@@ -181,10 +200,20 @@ class UpstoxRESTClient:
                 bids = depth.get("buy", [])
                 asks = depth.get("sell", [])
                 ltp = float(quote_body.get("last_price", 0.0) or quote_body.get("close", 0.0))
-                prev_close = float(ohlc.get("close", ltp) or ltp)
-                change = round(ltp - prev_close, 2)
-                change_pct = round((change / prev_close) * 100, 2) if prev_close else 0.0
-                meta = get_instrument_metadata(symbol)
+                cp_raw = ohlc.get("close")
+                prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else (ltp if ltp > 0 else None)
+                
+                if prev_close is not None and prev_close > 0:
+                    change = round(ltp - prev_close, 2)
+                    change_pct = round((change / prev_close) * 100, 2)
+                else:
+                    change = 0.0
+                    change_pct = 0.0
+
+                meta = get_instrument_metadata(symbol) or {}
+                raw_open = ohlc.get("open")
+                raw_high = ohlc.get("high")
+                raw_low = ohlc.get("low")
 
                 results.append({
                     "symbol": symbol,
@@ -192,23 +221,22 @@ class UpstoxRESTClient:
                     "exchange": meta.get("exchange", "NSE"),
                     "instrument_type": meta.get("instrument_type", "EQUITY"),
                     "ltp": ltp,
-                    "open": float(ohlc.get("open", ltp) or ltp),
-                    "high": float(ohlc.get("high", ltp) or ltp),
-                    "low": float(ohlc.get("low", ltp) or ltp),
+                    "open": float(raw_open) if raw_open is not None else ltp,
+                    "high": float(raw_high) if raw_high is not None else ltp,
+                    "low": float(raw_low) if raw_low is not None else ltp,
                     "close": ltp,
                     "previous_close": prev_close,
                     "change": change,
                     "change_percent": change_pct,
                     "volume": int(quote_body.get("volume", 0) or 0),
                     "open_interest": int(quote_body.get("oi", 0) or 0),
-                    "bid": float(bids[0].get("price", 0.0) or 0.0) if bids else None,
-                    "ask": float(asks[0].get("price", 0.0) or 0.0) if asks else None,
+                    "bid": float(bids[0].get("price", 0.0)) if bids and bids[0].get("price") is not None else None,
+                    "ask": float(asks[0].get("price", 0.0)) if asks and asks[0].get("price") is not None else None,
                     "timestamp": parse_upstox_timestamp(quote_body.get("timestamp")),
                     "source": "UPSTOX",
                     "is_live": True
                 })
             else:
-                # Fallback to single get_full_quote if symbol wasn't returned in batch
                 try:
                     single = await self.get_full_quote(symbol)
                     results.append(single)
@@ -220,13 +248,12 @@ class UpstoxRESTClient:
     async def get_historical_candles(
         self, symbol: str, interval: str = "5m", to_date: Optional[str] = None, from_date: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Fetch historical candle series with multi-day support and real market fallback."""
+        """Fetch historical candle series with provenance tracking (UPSTOX or YAHOO_FINANCE fallback)."""
         import urllib.parse
         import datetime
 
         inst_key = get_instrument_key(symbol)
-        encoded_key = urllib.parse.quote(inst_key, safe="")
-
+        
         # Upstox only natively supports: 1minute, 30minute, day, week, month
         upstox_supported_map = {
             "1m": "1minute",
@@ -235,9 +262,10 @@ class UpstoxRESTClient:
         }
         mapped_interval = upstox_supported_map.get(interval)
 
-        # 1. If Upstox natively supports the interval, try Upstox API first
-        if mapped_interval:
+        # 1. If Upstox natively supports the interval and inst_key is known, try Upstox API first
+        if mapped_interval and inst_key:
             try:
+                encoded_key = urllib.parse.quote(inst_key, safe="")
                 endpoint = f"/v2/historical-candle/{encoded_key}/{mapped_interval}/{to_date}/{from_date}"
                 res = await self._request("GET", endpoint)
                 raw_candles = res.get("data", {}).get("candles", [])
@@ -258,16 +286,17 @@ class UpstoxRESTClient:
                             "high": float(c[2]),
                             "low": float(c[3]),
                             "close": float(c[4]),
-                            "volume": int(c[5]) if len(c) > 5 else 1000,
-                            "source": "UPSTOX"
+                            "volume": int(c[5]) if len(c) > 5 else 0,
+                            "source": "UPSTOX",
+                            "is_live": True
                         })
                     normalized.reverse()
                     if normalized:
                         return normalized
             except Exception as e:
-                logger.info(f"[UPSTOX REST] Native candle query for {symbol} ({interval}) skipped to market feed: {str(e)}")
+                logger.info(f"[UPSTOX REST] Native candle query for {symbol} ({interval}) failed/skipped: {str(e)}")
 
-        # 2. Fast Authentic Market Feed (Yahoo Finance Chart Engine)
+        # 2. Authentic Market Feed Fallback (Yahoo Finance Chart Engine)
         try:
             ticker_map = {
                 "NIFTY 50": "^NSEI",
@@ -306,7 +335,7 @@ class UpstoxRESTClient:
                             c = float(closes[i])
                             h = float(highs[i]) if highs[i] is not None else max(o, c)
                             l = float(lows[i]) if lows[i] is not None else min(o, c)
-                            v = int(volumes[i]) if i < len(volumes) and volumes[i] is not None else 1000
+                            v = int(volumes[i]) if i < len(volumes) and volumes[i] is not None else 0
                             yf_candles.append({
                                 "timestamp": int(t),
                                 "time": int(t),
@@ -315,20 +344,28 @@ class UpstoxRESTClient:
                                 "low": round(l, 2),
                                 "close": round(c, 2),
                                 "volume": v,
-                                "source": "NSE_MARKET_FEED"
+                                "source": "YAHOO_FINANCE",
+                                "is_live": False
                             })
                     if yf_candles:
                         return yf_candles
         except Exception as e:
-            logger.error(f"[MARKET FEED] Fallback candle fetch failed for {symbol}: {str(e)}")
+            logger.error(f"[YAHOO_FINANCE FEED] Historical candle fetch failed for {symbol}: {str(e)}")
 
         return []
 
-
-
     async def get_option_chain(self, symbol: str, expiry_date: Optional[str] = None) -> Dict[str, Any]:
-        """Fetch Option Chain snapshot for an underlying symbol."""
+        """Fetch Option Chain snapshot for an underlying symbol without synthetic fallbacks."""
         inst_key = get_instrument_key(symbol)
+        if not inst_key:
+            return {
+                "status": "UNAVAILABLE",
+                "source": "UPSTOX",
+                "reason": "UNKNOWN_INSTRUMENT_KEY",
+                "symbol": symbol,
+                "strikes": []
+            }
+
         endpoint = f"/v2/option/chain?instrument_key={inst_key}"
         if expiry_date:
             endpoint += f"&expiry_date={expiry_date}"
@@ -337,12 +374,30 @@ class UpstoxRESTClient:
             res = await self._request("GET", endpoint)
             chain_data = res.get("data", [])
         except Exception as e:
-            logger.error(f"[UPSTOX REST] Option chain fetch failed for {symbol}: {str(e)}")
+            logger.warning(f"[UPSTOX REST] Option chain fetch unavailable for {symbol}: {str(e)}")
             chain_data = []
+
+        if not chain_data:
+            return {
+                "status": "UNAVAILABLE",
+                "source": "UPSTOX",
+                "reason": "OPTION_CHAIN_DATA_UNAVAILABLE",
+                "symbol": symbol,
+                "spotPrice": None,
+                "atmStrike": None,
+                "pcr": None,
+                "maxPainStrike": None,
+                "totalCallOI": None,
+                "totalPutOI": None,
+                "impliedVolatility": None,
+                "expiryDate": expiry_date or "UNAVAILABLE",
+                "strikes": []
+            }
 
         total_call_oi = 0
         total_put_oi = 0
         strikes_payload = []
+        iv_list = []
 
         for item in chain_data:
             strike_price = float(item.get("strike_price", 0.0))
@@ -354,42 +409,68 @@ class UpstoxRESTClient:
             total_call_oi += c_oi
             total_put_oi += p_oi
 
+            c_iv = float(call_data.get("iv")) if call_data.get("iv") is not None else None
+            p_iv = float(put_data.get("iv")) if put_data.get("iv") is not None else None
+            if c_iv and c_iv > 0:
+                iv_list.append(c_iv)
+            if p_iv and p_iv > 0:
+                iv_list.append(p_iv)
+
             strikes_payload.append({
                 "strike": strike_price,
                 "call": {
                     "ltp": float(call_data.get("ltp", 0.0) or 0.0),
                     "oi": c_oi,
                     "volume": int(call_data.get("volume", 0) or 0),
-                    "iv": float(call_data.get("iv", 0.0) or 0.0) if call_data.get("iv") is not None else None,
+                    "iv": c_iv,
                 },
                 "put": {
                     "ltp": float(put_data.get("ltp", 0.0) or 0.0),
                     "oi": p_oi,
                     "volume": int(put_data.get("volume", 0) or 0),
-                    "iv": float(put_data.get("iv", 0.0) or 0.0) if put_data.get("iv") is not None else None,
+                    "iv": p_iv,
                 }
             })
 
-        spot_price = 24580.0
+        spot_price = None
         try:
             q = await self.get_full_quote(symbol)
-            spot_price = q.get("ltp") or spot_price
+            spot_price = q.get("ltp")
         except Exception:
             pass
 
-        atm = round(spot_price / 50.0) * 50
-        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 1.18
+        atm = round(spot_price / 50.0) * 50 if spot_price else (strikes_payload[len(strikes_payload) // 2]["strike"] if strikes_payload else None)
+        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else None
+        
+        # Real Max Pain calculation from strikes
+        max_pain = None
+        if strikes_payload:
+            min_loss = float("inf")
+            for target in strikes_payload:
+                t_strike = target["strike"]
+                loss = 0.0
+                for s_item in strikes_payload:
+                    s_price = s_item["strike"]
+                    loss += max(0.0, t_strike - s_price) * s_item["call"]["oi"]
+                    loss += max(0.0, s_price - t_strike) * s_item["put"]["oi"]
+                if loss < min_loss:
+                    min_loss = loss
+                    max_pain = t_strike
+
+        avg_iv = round(sum(iv_list) / len(iv_list), 2) if iv_list else None
 
         return {
+            "status": "AVAILABLE",
             "symbol": symbol,
             "spotPrice": spot_price,
             "atmStrike": atm,
             "pcr": pcr,
-            "maxPainStrike": atm - 50,
-            "totalCallOI": total_call_oi or 4820000,
-            "totalPutOI": total_put_oi or 5680000,
-            "impliedVolatility": 13.4,
+            "maxPainStrike": max_pain,
+            "totalCallOI": total_call_oi,
+            "totalPutOI": total_put_oi,
+            "impliedVolatility": avg_iv,
             "expiryDate": expiry_date or "NEAR",
             "strikes": strikes_payload,
-            "source": "UPSTOX" if chain_data else "UPSTOX_HYBRID"
+            "source": "UPSTOX",
+            "is_live": True
         }

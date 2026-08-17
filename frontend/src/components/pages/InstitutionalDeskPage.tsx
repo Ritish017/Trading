@@ -29,7 +29,7 @@ export const InstitutionalDeskPage: React.FC<InstitutionalDeskPageProps> = ({
           <div>
             <span className="text-[10px] uppercase font-mono text-stone-400">FII Net Cash (Today)</span>
             <div className="text-base font-black font-mono text-emerald-400">
-              +₹{(fiiDiiFlow?.fiiCashNetCr ?? 1840.5).toLocaleString()} Cr
+              {fiiDiiFlow?.fiiCashNetCr !== undefined ? `${fiiDiiFlow.fiiCashNetCr >= 0 ? '+' : ''}₹${fiiDiiFlow.fiiCashNetCr.toLocaleString()} Cr` : 'Pending (EOD)'}
             </div>
           </div>
           <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
@@ -41,8 +41,8 @@ export const InstitutionalDeskPage: React.FC<InstitutionalDeskPageProps> = ({
         <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-3.5 flex items-center justify-between">
           <div>
             <span className="text-[10px] uppercase font-mono text-stone-400">DII Net Cash (Today)</span>
-            <div className="text-base font-black font-mono text-emerald-400">
-              +₹{(fiiDiiFlow?.diiCashNetCr ?? 1210.8).toLocaleString()} Cr
+            <div className="text-base font-black font-mono text-purple-400">
+              {fiiDiiFlow?.diiCashNetCr !== undefined ? `${fiiDiiFlow.diiCashNetCr >= 0 ? '+' : ''}₹${fiiDiiFlow.diiCashNetCr.toLocaleString()} Cr` : 'Pending (EOD)'}
             </div>
           </div>
           <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
@@ -55,7 +55,7 @@ export const InstitutionalDeskPage: React.FC<InstitutionalDeskPageProps> = ({
           <div>
             <span className="text-[10px] uppercase font-mono text-stone-400">Market Breadth (A : D)</span>
             <div className="text-base font-black font-mono text-sky-400">
-              {adv} A : {dec} D ({ratio}x)
+              {breadth?.advances !== undefined ? `${breadth.advances} A : ${breadth.declines} D (${breadth.ratio}x)` : 'Active Stream'}
             </div>
           </div>
           <div className="p-2 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400">
@@ -63,14 +63,12 @@ export const InstitutionalDeskPage: React.FC<InstitutionalDeskPageProps> = ({
           </div>
         </div>
 
-        {/* Card 4: 52W Highs / Lows */}
+        {/* Card 4: Source Status */}
         <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-3.5 flex items-center justify-between">
           <div>
-            <span className="text-[10px] uppercase font-mono text-stone-400">52-Week High / Low</span>
+            <span className="text-[10px] uppercase font-mono text-stone-400">Institutional Feed</span>
             <div className="text-base font-black font-mono text-stone-100 flex items-center space-x-2">
-              <span className="text-emerald-400">{breadth?.new52WeekHighs ?? 142}H</span>
-              <span>/</span>
-              <span className="text-rose-400">{breadth?.new52WeekLows ?? 18}L</span>
+              <span className="text-amber-400 text-xs">Official NSE/Clearing</span>
             </div>
           </div>
           <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">

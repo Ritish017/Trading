@@ -19,15 +19,15 @@ class MarketResearchAgent:
 
     async def analyze_stock_intelligence(self, market_snapshot: Dict[str, Any]) -> Dict[str, Any]:
         symbol = market_snapshot.get("symbol", "RELIANCE.NS")
-        price = market_snapshot.get("price", 2845.50)
+        price = market_snapshot.get("price") or market_snapshot.get("ltp") or 0.0
         name = market_snapshot.get("name", symbol)
         sector = market_snapshot.get("sector", "General")
-        nifty = market_snapshot.get("niftyPrice", 24580)
-        pcr = market_snapshot.get("pcr", 1.18)
+        nifty = market_snapshot.get("niftyPrice") or market_snapshot.get("nifty_50")
+        pcr = market_snapshot.get("pcr")
 
         if not self.client:
-            logger.info(f"Gemini API key missing. Generating quantitative local AI report for {symbol}.")
-            return self._generate_local_fallback(symbol, name, sector, price, nifty, pcr)
+            logger.info(f"Gemini API client not configured or key omitted. Generating deterministic AI report for {symbol}.")
+            return self._generate_local_fallback(symbol, name, sector, price, nifty, pcr, market_snapshot)
 
         prompt = f"""
 You are a Senior Quantitative Data Engineer and Technical Analyst specializing in Indian Equities (NSE / BSE).
@@ -35,9 +35,8 @@ Provide a structured JSON evaluation for stock "{name} ({symbol})" in sector "{s
 
 Market Snapshot Context:
 - Current Price: ₹{price}
-- NIFTY 50 Level: {nifty}
-- Put-Call Ratio (PCR): {pcr}
-- Institutional Flow: FII Cash Net +₹1,840 Cr, DII Net +₹1,210 Cr
+- NIFTY 50 Level: {nifty if nifty else 'Unavailable'}
+- Put-Call Ratio (PCR): {pcr if pcr else 'Unavailable'}
 
 Return ONLY valid JSON matching this schema:
 {{
@@ -45,30 +44,27 @@ Return ONLY valid JSON matching this schema:
   "name": "{name}",
   "sector": "{sector}",
   "marketStance": "Bullish Accumulation",
-  "confidence": 88,
-  "niftyCorrel": "0.82 High Positive",
-  "fiiDiiSentiment": "FII Buying Acceleration",
-  "executiveSummary": "Strong institutional order flow driven by quarterly earnings resilience.",
-  "supportLevels": [{round(price * 0.975, 2)}, {round(price * 0.95, 2)}],
-  "resistanceLevels": [{round(price * 1.025, 2)}, {round(price * 1.05, 2)}],
+  "confidence": 80,
+  "niftyCorrel": "Positive Beta",
+  "fiiDiiSentiment": "Institutional Neutral",
+  "executiveSummary": "Factual market evaluation based on current price structure.",
+  "supportLevels": [],
+  "resistanceLevels": [],
   "technicalMetrics": {{
-    "rsi14": 58.4,
-    "ema20": {round(price * 0.985, 2)},
-    "ema50": {round(price * 0.96, 2)},
-    "vwap": {round(price * 0.995, 2)},
-    "pcrSignal": "Bullish Put Writing at {round(price * 0.98, 2)}"
+    "rsi14": 55.0,
+    "ema20": {price},
+    "ema50": {price},
+    "vwap": {price},
+    "pcrSignal": "Neutral"
   }},
-  "catalysts": [
-    "Q3 YoY Revenue Growth beat consensus estimates",
-    "FII Net cash inflows reached 3-week peak in {sector} basket"
-  ],
+  "catalysts": [],
   "tacticalTradeSetup": {{
-    "action": "Buy / Delivery CNC",
-    "entryZone": "₹{round(price * 0.99, 2)} - ₹{price}",
-    "target1": "₹{round(price * 1.04, 2)}",
-    "target2": "₹{round(price * 1.08, 2)}",
-    "stopLoss": "₹{round(price * 0.965, 2)}",
-    "riskReward": "1 : 2.8"
+    "action": "MONITOR",
+    "entryZone": "₹{price}",
+    "target1": "₹{round(price * 1.03, 2) if price else 0}",
+    "target2": "₹{round(price * 1.06, 2) if price else 0}",
+    "stopLoss": "₹{round(price * 0.97, 2) if price else 0}",
+    "riskReward": "1 : 2.0"
   }}
 }}
 """
@@ -82,40 +78,49 @@ Return ONLY valid JSON matching this schema:
             return json.loads(cleaned)
         except Exception as err:
             logger.error(f"Gemini API error during AI analysis: {err}")
-            return self._generate_local_fallback(symbol, name, sector, price, nifty, pcr)
+            return self._generate_local_fallback(symbol, name, sector, price, nifty, pcr, market_snapshot)
 
     def _generate_local_fallback(
-        self, symbol: str, name: str, sector: str, price: float, nifty: float, pcr: float
+        self, symbol: str, name: str, sector: str, price: float, nifty: Optional[float], pcr: Optional[float], raw_snapshot: Dict[str, Any]
     ) -> Dict[str, Any]:
+        tech = raw_snapshot.get("technicalMetrics", {})
+        rsi = tech.get("rsi14") or raw_snapshot.get("rsi_14") or 50.0
+        ema20 = tech.get("ema20") or raw_snapshot.get("ema_20") or (price if price > 0 else 0.0)
+        vwap = tech.get("vwap") or raw_snapshot.get("vwap") or (price if price > 0 else 0.0)
+        sups = raw_snapshot.get("supportLevels") or []
+        resis = raw_snapshot.get("resistanceLevels") or []
+
+        stance = "Bullish Accumulation" if price > vwap and rsi > 50 else ("Distribution Pressure" if price < vwap and rsi < 50 else "Consolidation Range")
+        confidence = 75 if price > 0 else 0
+
         return {
             "symbol": symbol,
             "name": name,
             "sector": sector,
-            "marketStance": "Bullish Accumulation",
-            "confidence": 84,
-            "niftyCorrel": "0.84 Positive Beta",
-            "fiiDiiSentiment": "FII Net Buy in F&O Segment",
-            "executiveSummary": f"Quantitative structure for {name} indicates healthy support around VWAP with stable sector momentum in {sector}.",
-            "supportLevels": [round(price * 0.98, 2), round(price * 0.96, 2)],
-            "resistanceLevels": [round(price * 1.02, 2), round(price * 1.05, 2)],
+            "marketStance": stance,
+            "confidence": confidence,
+            "niftyCorrel": "Positive Beta" if nifty else "Unavailable",
+            "fiiDiiSentiment": "Balanced / Neutral",
+            "executiveSummary": f"Quantitative structure for {name} ({sector}) at ₹{price:,.2f}. Evaluating price vs VWAP (₹{vwap:,.2f}) and momentum.",
+            "supportLevels": sups,
+            "resistanceLevels": resis,
             "technicalMetrics": {
-                "rsi14": 58.6,
-                "ema20": round(price * 0.985, 2),
-                "ema50": round(price * 0.965, 2),
-                "vwap": round(price * 0.995, 2),
-                "pcrSignal": f"Bullish Put Writing at ₹{round(price * 0.98, 2)}"
+                "rsi14": rsi,
+                "ema20": ema20,
+                "ema50": ema20,
+                "vwap": vwap,
+                "pcrSignal": f"PCR {pcr:.2f}" if pcr else "Unavailable"
             },
             "catalysts": [
-                f"Consolidation above 20-day EMA indicates strong institutional support.",
-                f"Derivatives PCR at {pcr} confirms bullish put writing bias."
+                f"Session price action relative to dynamic VWAP benchmark."
             ],
             "tacticalTradeSetup": {
-                "action": "BUY (Delivery CNC / MIS Intraday)",
-                "entryZone": f"₹{round(price * 0.99, 2)} - ₹{price}",
-                "target1": f"₹{round(price * 1.04, 2)}",
-                "target2": f"₹{round(price * 1.08, 2)}",
-                "stopLoss": f"₹{round(price * 0.97, 2)}",
-                "riskReward": "1 : 2.5"
+                "action": "MONITOR / RANGE_SETUP",
+                "entryZone": f"₹{price:,.2f}",
+                "target1": f"₹{round(price * 1.03, 2) if price else 0}",
+                "target2": f"₹{round(price * 1.06, 2) if price else 0}",
+                "stopLoss": f"₹{round(price * 0.97, 2) if price else 0}",
+                "riskReward": "1 : 2.0"
             }
         }
 

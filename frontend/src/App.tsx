@@ -562,10 +562,45 @@ export default function App() {
     setIsAIModalOpen(true);
     try {
       const targetStock = stocks.find((s) => s.symbol === symbol) || selectedStock;
-      const report = generateLocalIndianAIReport(targetStock);
-      setAiReport(report);
+      const res = await fetch(`/api/intelligence/symbol/${encodeURIComponent(targetStock.symbol)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAiReport({
+          symbol: targetStock.symbol,
+          name: data.company_name || targetStock.name,
+          sector: data.sector || targetStock.sector,
+          marketStance: data.market_regime || data.classification || 'Neutral Consolidation',
+          confidence: Math.round((data.confidence || 0) * 100),
+          niftyCorrel: data.macro_context || 'Market Baseline',
+          fiiDiiSentiment: data.why_it_matters || 'Neutral Settlement',
+          executiveSummary: data.what_changed || data.headline || 'Quantitative market structure analysis.',
+          supportLevels: data.bearish_confirmation || [],
+          resistanceLevels: data.bullish_confirmation || [],
+          technicalMetrics: {
+            rsi14: undefined,
+            ema20: undefined,
+            ema50: undefined,
+            vwap: targetStock.vwap,
+            pcrSignal: data.likely_drivers?.[0] || 'Neutral',
+          },
+          catalysts: data.likely_drivers || [data.headline],
+          tacticalTradeSetup: {
+            action: data.importance || 'MONITOR',
+            entryZone: `₹${targetStock.price.toFixed(2)}`,
+            target1: data.bullish_confirmation?.[0] || `₹${targetStock.high.toFixed(2)}`,
+            target2: `₹${targetStock.high.toFixed(2)}`,
+            stopLoss: data.bearish_confirmation?.[0] || `₹${targetStock.low.toFixed(2)}`,
+            riskReward: '1 : 2.0',
+          },
+        });
+      } else {
+        const fallback = generateLocalIndianAIReport(targetStock);
+        setAiReport(fallback);
+      }
     } catch {
-      // quiet fallback
+      const targetStock = stocks.find((s) => s.symbol === symbol) || selectedStock;
+      const fallback = generateLocalIndianAIReport(targetStock);
+      setAiReport(fallback);
     } finally {
       setIsAILoading(false);
     }

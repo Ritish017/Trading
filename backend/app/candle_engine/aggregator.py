@@ -66,7 +66,22 @@ class CandleAggregator:
         source = tick.provider or "GENERIC"
 
         # Determine volume contribution for this tick
-        delta_vol = raw_vol if raw_vol > 0 else 1
+        if getattr(tick, "is_cumulative_volume", False):
+            last_vol = self.last_tick_volume.get(symbol)
+            if last_vol is None:
+                # First tick of session: initialize baseline, no artificial jump
+                self.last_tick_volume[symbol] = raw_vol
+                delta_vol = 0
+            elif raw_vol >= last_vol:
+                delta_vol = raw_vol - last_vol
+                self.last_tick_volume[symbol] = raw_vol
+            else:
+                # Session reset or rollover
+                delta_vol = raw_vol if raw_vol > 0 else 0
+                self.last_tick_volume[symbol] = raw_vol
+        else:
+            # Discrete per-tick trade volume
+            delta_vol = raw_vol if raw_vol > 0 else 0
 
         if symbol not in self.active_candles:
             self.active_candles[symbol] = {}

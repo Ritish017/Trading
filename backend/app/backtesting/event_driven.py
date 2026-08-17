@@ -123,7 +123,15 @@ class EventDrivenBacktester:
         # Sharpe & CAGR
         returns = eq_series.pct_change().dropna()
         sharpe = round(float(np.sqrt(252) * (returns.mean() / (returns.std() + 1e-9))), 2) if len(returns) > 1 else 0.0
-        cagr = round(total_return_pct * 1.2, 1)
+        
+        # Standard Annualization based on trading duration
+        # Assume 75 5m candles per Indian trading day (09:15 to 15:30 IST)
+        num_trading_days = max(1.0, len(df) / 75.0) if len(df) > 75 else max(1.0, float(len(df)))
+        years = max(num_trading_days / 252.0, 0.05)
+        if capital > 0:
+            cagr = round((((capital / self.initial_capital) ** (1.0 / years)) - 1.0) * 100.0, 2)
+        else:
+            cagr = -100.0
 
         # Walk-Forward Validation (70% In-Sample / 30% Out-Of-Sample)
         split_idx = int(len(df) * 0.70)

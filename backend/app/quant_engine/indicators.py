@@ -129,7 +129,7 @@ def calculate_stochastic(
     lowest_low = df['low'].rolling(window=k_period).min()
     highest_high = df['high'].rolling(window=k_period).max()
     denom = highest_high - lowest_low
-    stoch_k = np.where(denom != 0, ((df['close'] - lowest_low) / denom) * 100.0, 50.0)
+    stoch_k = np.where(denom != 0, ((df['close'] - lowest_low) / denom) * 100.0, np.nan)
     k_series = pd.Series(stoch_k, index=df.index)
     d_series = k_series.rolling(window=d_period).mean()
     return k_series, d_series
@@ -137,5 +137,6 @@ def calculate_stochastic(
 def calculate_relative_volume(series: pd.Series, period: int = 20) -> pd.Series:
     """Relative Volume (RVOL) = Current Volume / Average Volume(period)"""
     avg_vol = series.rolling(window=period).mean()
-    return np.where(avg_vol > 0, series / avg_vol, 1.0)
+    rvol = np.where(avg_vol > 0, series / avg_vol, np.nan)
+    return pd.Series(rvol, index=series.index)
 

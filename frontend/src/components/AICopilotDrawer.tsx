@@ -47,29 +47,34 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
           },
         ]);
       } else {
-        const res = await fetch('/api/ai/market-analysis', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            symbol: selectedSymbol,
-            price: 2845.5,
-          }),
-        });
-        const data = await res.json();
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            text: `Market Intelligence Report for ${selectedSymbol}:\nStance: ${data.marketStance} (${data.confidence}% confidence)\nExecutive Summary: ${data.executiveSummary}\nSupport Levels: ${data.supportLevels?.join(', ')}\nResistance Levels: ${data.resistanceLevels?.join(', ')}`,
-          },
-        ]);
+        const res = await fetch(`/api/intelligence/symbol/${encodeURIComponent(selectedSymbol)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const stance = data.market_regime || data.classification || 'Consolidation';
+          const conf = Math.round((data.confidence || 0) * 100);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              text: `Market Intelligence Report for ${selectedSymbol}:\nHeadline: ${data.headline || 'Quantitative Summary'}\nStance: ${stance} (${conf}% confidence)\nWhat Changed: ${data.what_changed || 'Price action within dynamic range.'}\nWhy It Matters: ${data.why_it_matters || 'N/A'}\nLikely Drivers:\n${(data.likely_drivers || []).map((d: string) => `- ${d}`).join('\n')}`,
+            },
+          ]);
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              text: `Market intelligence feed offline or insufficient data for ${selectedSymbol}.`,
+            },
+          ]);
+        }
       }
     } catch {
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          text: `Analyzed quantitative metrics for ${selectedSymbol}. VWAP and 20-day EMA confirm bullish bias. PCR ratio indicates put writing support.`,
+          text: `Quantitative intelligence service currently unavailable for ${selectedSymbol}. Please verify backend network connectivity.`,
         },
       ]);
     } finally {

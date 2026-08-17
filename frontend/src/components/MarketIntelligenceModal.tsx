@@ -63,39 +63,43 @@ export const MarketIntelligenceModal: React.FC<MarketIntelligenceModalProps> = (
             {/* Quantitative Score Cards First */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 font-mono text-xs">
               <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
-                <span className="text-[9px] text-stone-400 font-sans uppercase">Market Regime</span>
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Market Stance</span>
                 <div className="font-extrabold text-amber-400 text-sm mt-0.5">{report.marketStance}</div>
                 <div className="text-[9px] text-stone-500">{report.confidence}% Model Confidence</div>
               </div>
 
               <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
-                <span className="text-[9px] text-stone-400 font-sans uppercase">Technical Score</span>
-                <div className="font-extrabold text-emerald-400 text-sm mt-0.5">82 / 100</div>
-                <div className="text-[9px] text-stone-500">RSI(14): {report.technicalMetrics.rsi14}</div>
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Technical Momentum</span>
+                <div className="font-extrabold text-emerald-400 text-sm mt-0.5">
+                  {report.technicalMetrics.rsi14 ? `RSI ${report.technicalMetrics.rsi14}` : 'Price Action'}
+                </div>
+                <div className="text-[9px] text-stone-500">
+                  {report.technicalMetrics.ema20 ? `EMA20: ₹${report.technicalMetrics.ema20}` : 'Active Session Trend'}
+                </div>
               </div>
 
               <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
                 <span className="text-[9px] text-stone-400 font-sans uppercase">Options Positioning</span>
-                <div className="font-extrabold text-sky-400 text-sm mt-0.5">74 / 100</div>
-                <div className="text-[9px] text-stone-500">{report.technicalMetrics.pcrSignal}</div>
+                <div className="font-extrabold text-sky-400 text-sm mt-0.5 truncate">{report.technicalMetrics.pcrSignal || 'Balanced'}</div>
+                <div className="text-[9px] text-stone-500">Derivatives Flow</div>
               </div>
 
               <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
-                <span className="text-[9px] text-stone-400 font-sans uppercase">Volume Ratio</span>
-                <div className="font-extrabold text-indigo-400 text-sm mt-0.5">79 / 100</div>
-                <div className="text-[9px] text-stone-500">VWAP Line: ₹{report.technicalMetrics.vwap}</div>
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Volume Benchmark</span>
+                <div className="font-extrabold text-indigo-400 text-sm mt-0.5">₹{report.technicalMetrics.vwap?.toLocaleString() || stock.vwap.toLocaleString()}</div>
+                <div className="text-[9px] text-stone-500">Session VWAP Anchor</div>
               </div>
 
               <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
-                <span className="text-[9px] text-stone-400 font-sans uppercase">Institutional Alignment</span>
-                <div className="font-extrabold text-purple-400 text-sm mt-0.5">63 / 100</div>
-                <div className="text-[9px] text-stone-500">{report.fiiDiiSentiment}</div>
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Institutional Bias</span>
+                <div className="font-extrabold text-purple-400 text-sm mt-0.5 truncate">{report.fiiDiiSentiment || 'Neutral'}</div>
+                <div className="text-[9px] text-stone-500">Clearing Status</div>
               </div>
 
               <div className="bg-[#14151b] p-3 rounded-xl border border-stone-800">
-                <span className="text-[9px] text-stone-400 font-sans uppercase">Risk Level</span>
-                <div className="font-extrabold text-orange-400 text-sm mt-0.5">Medium Risk</div>
-                <div className="text-[9px] text-stone-500">NIFTY Correl: {report.niftyCorrel}</div>
+                <span className="text-[9px] text-stone-400 font-sans uppercase">Index Benchmark</span>
+                <div className="font-extrabold text-orange-400 text-sm mt-0.5 truncate">{report.niftyCorrel || 'NSE Benchmark'}</div>
+                <div className="text-[9px] text-stone-500">Market Correlation</div>
               </div>
             </div>
 

@@ -200,20 +200,20 @@ async def compute_indicators(req: IndicatorRequest):
     df = pd.DataFrame(req.candles)
     close = df['close'].astype(float)
     
-    ema20 = calculate_ema(close, 20).tolist()
-    ema50 = calculate_ema(close, 50).tolist()
+    ema20 = calculate_ema(close, 20).tolist() if len(close) >= 20 else [None] * len(close)
+    ema50 = calculate_ema(close, 50).tolist() if len(close) >= 50 else [None] * len(close)
     vwap = calculate_vwap(df).tolist() if 'high' in df and 'low' in df and 'volume' in df else close.tolist()
     rsi = calculate_rsi(close, 14).tolist()
-    rvol = calculate_relative_volume(df['volume'].astype(float), 20).tolist() if 'volume' in df else [1.0] * len(df)
+    rvol = calculate_relative_volume(df['volume'].astype(float), 20).tolist() if 'volume' in df else [None] * len(df)
     levels = detect_support_resistance(df)
 
     return {
         "symbol": req.symbol,
-        "ema20": [round(x, 2) for x in ema20],
-        "ema50": [round(x, 2) for x in ema50],
-        "vwap": [round(x, 2) for x in vwap],
-        "rsi14": [round(x, 1) if not pd.isna(x) else 50.0 for x in rsi],
-        "rvol": [round(x, 2) for x in rvol],
+        "ema20": [round(x, 2) if x is not None and not pd.isna(x) else None for x in ema20],
+        "ema50": [round(x, 2) if x is not None and not pd.isna(x) else None for x in ema50],
+        "vwap": [round(x, 2) if not pd.isna(x) else None for x in vwap],
+        "rsi14": [round(x, 1) if not pd.isna(x) else None for x in rsi],
+        "rvol": [round(x, 2) if not pd.isna(x) else None for x in rvol],
         "supportLevels": levels["support"],
         "resistanceLevels": levels["resistance"]
     }

@@ -199,6 +199,19 @@ class ChiefMarketAnalyst:
         confirming = [e for e in all_evidence if (chg >= 0 and e.type in ["PRICE", "VOLUME"]) or (chg < 0 and e.type in ["PRICE", "VOLUME"])]
         contradicting = [e for e in all_evidence if "EMA20 > EMA50" in e.statement and chg < 0]
 
+        # Compute factual evidence-based confidence
+        if market.freshness == DataFreshness.UNAVAILABLE or price <= 0:
+            computed_confidence = 0.0
+        else:
+            valid_count = len(all_evidence)
+            base_conf = min(1.0, valid_count / 5.0)
+            if contradiction_report.has_contradiction:
+                base_conf *= 0.75
+            computed_confidence = round(base_conf, 2)
+
+        bullish_triggers = [f"Sustained volume above ₹{technical.resistance_levels[0]:,.2f}"] if technical.resistance_levels else ["Price discovery above session highs"]
+        bearish_triggers = [f"Break below support at ₹{technical.support_levels[0]:,.2f}"] if technical.support_levels else ["Price discovery below session lows"]
+
         return AICommentary(
             id=f"COM_{uuid.uuid4().hex[:8].upper()}",
             symbol=market.symbol,
@@ -215,15 +228,15 @@ class ChiefMarketAnalyst:
             likely_drivers=drivers,
             confirming_evidence=confirming,
             contradicting_evidence=contradicting,
-            company_context=f"{market.symbol.split('.')[0]} is trading at ₹{price:,.2f} with 52W Range ₹{price*0.75:,.0f} - ₹{price*1.2:,.0f}.",
+            company_context=f"{market.symbol.split('.')[0]} is trading at ₹{price:,.2f} in the {sec_name} segment.",
             sector_context=f"{sec_name} sector is {'gaining' if (sector and sector.change_percent >= 0) else 'losing'} momentum.",
             macro_context=f"NIFTY 50 is {macro.nifty_change_pct:+.2f}% with India VIX at {macro.india_vix:.1f}." if macro else "Broader macro indices stable.",
             why_should_i_care=why_care,
             what_to_watch=watch,
-            bullish_confirmation=[f"Sustained volume above ₹{technical.resistance_levels[0] if technical.resistance_levels else price*1.02:,.2f}"],
-            bearish_confirmation=[f"Break below support at ₹{technical.support_levels[0] if technical.support_levels else price*0.98:,.2f}"],
+            bullish_confirmation=bullish_triggers,
+            bearish_confirmation=bearish_triggers,
             uncertainties=[contradiction_report.synthesis_note] if contradiction_report.has_contradiction else [],
-            confidence=0.88,
+            confidence=computed_confidence,
             timestamp=now_str,
             data_freshness=market.freshness,
             sources=["NSE_FEED", "QUANT_ENGINE", "F&O_NSE", "SECTOR_INDEX"]

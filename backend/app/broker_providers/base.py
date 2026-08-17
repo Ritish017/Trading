@@ -25,9 +25,10 @@ class NormalizedTick(BaseModel):
     close: Optional[float] = None
     open_interest: Optional[int] = None
     oi_change: Optional[int] = None
+    is_cumulative_volume: bool = False
     provider: str = "GENERIC"
-    is_live: bool = True
-    market_status: str = "LIVE"
+    is_live: bool = False
+    market_status: str = "UNKNOWN"
 
     @property
     def instrument_id(self) -> Optional[str]:

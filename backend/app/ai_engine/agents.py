@@ -84,14 +84,35 @@ Return ONLY valid JSON matching this schema:
         self, symbol: str, name: str, sector: str, price: float, nifty: Optional[float], pcr: Optional[float], raw_snapshot: Dict[str, Any]
     ) -> Dict[str, Any]:
         tech = raw_snapshot.get("technicalMetrics", {})
-        rsi = tech.get("rsi14") or raw_snapshot.get("rsi_14") or 50.0
-        ema20 = tech.get("ema20") or raw_snapshot.get("ema_20") or (price if price > 0 else 0.0)
-        vwap = tech.get("vwap") or raw_snapshot.get("vwap") or (price if price > 0 else 0.0)
+        rsi = tech.get("rsi14") or raw_snapshot.get("rsi_14")
+        ema20 = tech.get("ema20") or raw_snapshot.get("ema_20")
+        ema50 = tech.get("ema50") or raw_snapshot.get("ema_50")
+        vwap = tech.get("vwap") or raw_snapshot.get("vwap")
         sups = raw_snapshot.get("supportLevels") or []
         resis = raw_snapshot.get("resistanceLevels") or []
 
-        stance = "Bullish Accumulation" if price > vwap and rsi > 50 else ("Distribution Pressure" if price < vwap and rsi < 50 else "Consolidation Range")
-        confidence = 75 if price > 0 else 0
+        # Deterministic confidence based on factual dimension completeness
+        points = 0
+        if price > 0:
+            points += 25
+        if vwap is not None and vwap > 0:
+            points += 25
+        if ema20 is not None and ema20 > 0:
+            points += 25
+        if rsi is not None:
+            points += 25
+        confidence = points
+
+        if vwap is not None and rsi is not None and price > 0:
+            stance = "Bullish Accumulation" if price > vwap and rsi > 50 else ("Distribution Pressure" if price < vwap and rsi < 50 else "Consolidation Range")
+        elif price > 0:
+            stance = "Consolidation / Range Discovery"
+        else:
+            stance = "UNAVAILABLE"
+
+        vwap_str = f"₹{vwap:,.2f}" if vwap else "Unavailable"
+        t1 = f"₹{resis[0]:,.2f}" if resis else "Pending Resistance Level"
+        s1 = f"₹{sups[0]:,.2f}" if sups else "Pending Support Level"
 
         return {
             "symbol": symbol,
@@ -100,27 +121,27 @@ Return ONLY valid JSON matching this schema:
             "marketStance": stance,
             "confidence": confidence,
             "niftyCorrel": "Positive Beta" if nifty else "Unavailable",
-            "fiiDiiSentiment": "Balanced / Neutral",
-            "executiveSummary": f"Quantitative structure for {name} ({sector}) at ₹{price:,.2f}. Evaluating price vs VWAP (₹{vwap:,.2f}) and momentum.",
+            "fiiDiiSentiment": "Neutral Settlement",
+            "executiveSummary": f"Quantitative structure for {name} ({sector}) at ₹{price:,.2f}. Dynamic VWAP benchmark: {vwap_str}.",
             "supportLevels": sups,
             "resistanceLevels": resis,
             "technicalMetrics": {
                 "rsi14": rsi,
                 "ema20": ema20,
-                "ema50": ema20,
+                "ema50": ema50,
                 "vwap": vwap,
                 "pcrSignal": f"PCR {pcr:.2f}" if pcr else "Unavailable"
             },
             "catalysts": [
-                f"Session price action relative to dynamic VWAP benchmark."
+                f"Active price discovery relative to volume-weighted benchmark."
             ],
             "tacticalTradeSetup": {
-                "action": "MONITOR / RANGE_SETUP",
-                "entryZone": f"₹{price:,.2f}",
-                "target1": f"₹{round(price * 1.03, 2) if price else 0}",
-                "target2": f"₹{round(price * 1.06, 2) if price else 0}",
-                "stopLoss": f"₹{round(price * 0.97, 2) if price else 0}",
-                "riskReward": "1 : 2.0"
+                "action": "MONITOR" if stance != "UNAVAILABLE" else "DATA_UNAVAILABLE",
+                "entryZone": f"₹{price:,.2f}" if price > 0 else "N/A",
+                "target1": t1,
+                "target2": f"₹{resis[1]:,.2f}" if len(resis) > 1 else t1,
+                "stopLoss": s1,
+                "riskReward": "1 : 2.0" if (resis and sups) else "N/A"
             }
         }
 

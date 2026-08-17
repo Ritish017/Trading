@@ -222,6 +222,7 @@ class UpstoxWebSocketClient:
             change=change,
             change_percent=change_pct,
             volume=volume,
+            is_cumulative_volume=True,
             open_interest=oi if oi > 0 else None,
             provider="UPSTOX",
             is_live=True,

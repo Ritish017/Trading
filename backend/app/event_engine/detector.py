@@ -73,6 +73,7 @@ def detect_market_events(
                 timestamp=now_str
             ))
 
+        selling_conf = round(min(0.98, max(0.50, (abs(chg_pct) / 3.0) * 0.5 + (rvol / 3.0) * 0.5)), 2)
         events.append(MarketEvent(
             event_id=f"EV_{uuid.uuid4().hex[:8].upper()}",
             event_type="UNUSUAL_SELLING",
@@ -81,7 +82,7 @@ def detect_market_events(
             sector=sector.sector_name if sector else "NSE Equities",
             timestamp=now_str,
             severity=min(95, int(abs(chg_pct) * 15 + rvol * 10)),
-            confidence=0.92,
+            confidence=selling_conf,
             attention_score=attention.total_score,
             classification=attention.classification,
             evidence=evidence,
@@ -115,6 +116,7 @@ def detect_market_events(
                 source="F&O_FEED",
                 timestamp=now_str
             ))
+        buying_conf = round(min(0.98, max(0.50, (chg_pct / 3.0) * 0.5 + (rvol / 3.0) * 0.5)), 2)
         events.append(MarketEvent(
             event_id=f"EV_{uuid.uuid4().hex[:8].upper()}",
             event_type="UNUSUAL_BUYING",
@@ -123,7 +125,7 @@ def detect_market_events(
             sector=sector.sector_name if sector else "NSE Equities",
             timestamp=now_str,
             severity=min(95, int(chg_pct * 15 + rvol * 10)),
-            confidence=0.91,
+            confidence=buying_conf,
             attention_score=attention.total_score,
             classification=attention.classification,
             evidence=evidence,
@@ -133,10 +135,11 @@ def detect_market_events(
         ))
 
     # 2. Detect VWAP Cross or Rejection
-    if market.vwap > 0:
+    if market.vwap and market.vwap > 0:
         vwap_diff_pct = (price - market.vwap) / market.vwap * 100
         if abs(vwap_diff_pct) >= 1.2:
             direction = "ABOVE" if vwap_diff_pct > 0 else "BELOW"
+            vwap_conf = round(min(0.95, max(0.50, abs(vwap_diff_pct) / 2.0)), 2)
             events.append(MarketEvent(
                 event_id=f"EV_{uuid.uuid4().hex[:8].upper()}",
                 event_type="VWAP_DEVIATION",
@@ -144,7 +147,7 @@ def detect_market_events(
                 company_name=market.symbol.split('.')[0],
                 timestamp=now_str,
                 severity=60,
-                confidence=0.88,
+                confidence=vwap_conf,
                 attention_score=attention.total_score,
                 classification=attention.classification,
                 evidence=[
@@ -230,6 +233,7 @@ def detect_market_events(
                     )
                 )
 
+            cons_conf = round(min(0.85, 0.40 + (len(evidence_items) * 0.20)), 2)
             events.append(MarketEvent(
                 event_id=f"EV_{uuid.uuid4().hex[:8].upper()}",
                 event_type="ORDERLY_CONSOLIDATION",
@@ -238,7 +242,7 @@ def detect_market_events(
                 sector=sector.sector_name if sector else "NSE Equities",
                 timestamp=now_str,
                 severity=30,
-                confidence=0.85,
+                confidence=cons_conf,
                 attention_score=attention.total_score,
                 classification=attention.classification,
                 evidence=evidence_items,

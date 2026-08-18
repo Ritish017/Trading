@@ -46,15 +46,15 @@ class MarketSnapshot(BaseModel):
     exchange: str = "NSE"
     timestamp: float = Field(default_factory=time.time)
     ltp: float
-    open: float
-    high: float
-    low: float
-    previous_close: float
-    volume: int
-    vwap: float
-    change: float
-    change_percent: float
-    freshness: DataFreshness = DataFreshness.LIVE
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    previous_close: Optional[float] = None
+    volume: int = 0
+    vwap: Optional[float] = None
+    change: Optional[float] = None
+    change_percent: Optional[float] = None
+    freshness: DataFreshness = DataFreshness.UNAVAILABLE
     source: str = "NSE_FEED"
 
 class TechnicalSnapshot(BaseModel):
@@ -75,7 +75,7 @@ class TechnicalSnapshot(BaseModel):
     relative_volume: Optional[float] = None
     support_levels: List[float] = Field(default_factory=list)
     resistance_levels: List[float] = Field(default_factory=list)
-    freshness: DataFreshness = DataFreshness.LIVE
+    freshness: DataFreshness = DataFreshness.UNAVAILABLE
 
 class DerivativeSnapshot(BaseModel):
     futures_price: Optional[float] = None
@@ -91,7 +91,7 @@ class DerivativeSnapshot(BaseModel):
     implied_volatility: Optional[float] = None
     option_walls: Dict[str, Any] = Field(default_factory=dict)
     oi_pattern: Optional[str] = None # Long Buildup, Short Covering, Short Buildup, Long Unwinding
-    freshness: DataFreshness = DataFreshness.LIVE
+    freshness: DataFreshness = DataFreshness.UNAVAILABLE
 
 class NewsSnapshot(BaseModel):
     id: str
@@ -100,11 +100,11 @@ class NewsSnapshot(BaseModel):
     published_at: str
     url: Optional[str] = None
     sentiment: str = "Neutral" # Positive, Neutral, Negative
-    sentiment_confidence: float = 0.8
+    sentiment_confidence: float = 0.0
     entities: List[str] = Field(default_factory=list)
     sectors: List[str] = Field(default_factory=list)
     event_type: str = "GENERAL" # EARNINGS, REGULATORY, ORDER_WIN, CORPORATE_ACTION, GENERAL
-    freshness: DataFreshness = DataFreshness.LIVE
+    freshness: DataFreshness = DataFreshness.UNAVAILABLE
 
 class SectorSnapshot(BaseModel):
     sector_name: str
@@ -114,30 +114,30 @@ class SectorSnapshot(BaseModel):
     breadth_declines: int
     leaders: List[str] = Field(default_factory=list)
     laggards: List[str] = Field(default_factory=list)
-    freshness: DataFreshness = DataFreshness.LIVE
+    freshness: DataFreshness = DataFreshness.UNAVAILABLE
 
 class MacroSnapshot(BaseModel):
-    nifty_50: float
-    nifty_change_pct: float
-    bank_nifty: float
-    bank_nifty_change_pct: float
-    india_vix: float
-    india_vix_change_pct: float
-    brent_crude_usd: Optional[float] = 84.50
-    usd_inr: Optional[float] = 83.95
-    gold_inr: Optional[float] = 71200.0
+    nifty_50: Optional[float] = None
+    nifty_change_pct: Optional[float] = None
+    bank_nifty: Optional[float] = None
+    bank_nifty_change_pct: Optional[float] = None
+    india_vix: Optional[float] = None
+    india_vix_change_pct: Optional[float] = None
+    brent_crude_usd: Optional[float] = None
+    usd_inr: Optional[float] = None
+    gold_inr: Optional[float] = None
     global_sentiment: str = "Neutral" # Risk-On, Neutral, Risk-Off
-    freshness: DataFreshness = DataFreshness.LIVE
+    freshness: DataFreshness = DataFreshness.UNAVAILABLE
 
 class InstitutionalSnapshot(BaseModel):
-    fii_cash_net_cr: float
-    dii_cash_net_cr: float
+    fii_cash_net_cr: Optional[float] = None
+    dii_cash_net_cr: Optional[float] = None
     fii_index_futures_cr: Optional[float] = None
     fii_index_options_cr: Optional[float] = None
     fii_stock_futures_cr: Optional[float] = None
     institutional_trend: str = "Neutral"
     as_of: str = "Today"
-    freshness: DataFreshness = DataFreshness.LIVE
+    freshness: DataFreshness = DataFreshness.UNAVAILABLE
 
 # --- Traceable Evidence & Events ---
 
@@ -147,7 +147,7 @@ class EvidenceItem(BaseModel):
     value: Any
     source: str
     timestamp: str
-    freshness: DataFreshness = DataFreshness.LIVE
+    freshness: DataFreshness = DataFreshness.UNAVAILABLE
 
 class MarketEvent(BaseModel):
     event_id: str
@@ -218,7 +218,7 @@ class AICommentary(BaseModel):
     
     confidence: float
     timestamp: str
-    data_freshness: DataFreshness = DataFreshness.LIVE
+    data_freshness: DataFreshness = DataFreshness.UNAVAILABLE
     sources: List[str] = Field(default_factory=list)
 
 class MarketNarrative(BaseModel):

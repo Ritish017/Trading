@@ -29,42 +29,54 @@ class MarketResearchAgent:
             logger.info(f"Gemini API client not configured or key omitted. Generating deterministic AI report for {symbol}.")
             return self._generate_local_fallback(symbol, name, sector, price, nifty, pcr, market_snapshot)
 
-        prompt = f"""
-You are a Senior Quantitative Data Engineer and Technical Analyst specializing in Indian Equities (NSE / BSE).
-Provide a structured JSON evaluation for stock "{name} ({symbol})" in sector "{sector}".
+        tech = market_snapshot.get("technicalMetrics", {})
+        actual_rsi = tech.get("rsi14") or market_snapshot.get("rsi_14")
+        actual_ema20 = tech.get("ema20") or market_snapshot.get("ema_20")
+        actual_ema50 = tech.get("ema50") or market_snapshot.get("ema_50")
+        actual_vwap = tech.get("vwap") or market_snapshot.get("vwap")
+        actual_sups = market_snapshot.get("supportLevels") or []
+        actual_resis = market_snapshot.get("resistanceLevels") or []
 
-Market Snapshot Context:
-- Current Price: ₹{price}
-- NIFTY 50 Level: {nifty if nifty else 'Unavailable'}
+        prompt = f"""
+You are a Senior Quantitative Analyst specializing in Indian Equities (NSE / BSE).
+Interpret ONLY the verified factual evidence below. Do not estimate, infer, approximate, or invent missing financial metrics. If a metric is null or unavailable, keep it as null.
+
+VERIFIED FACTUAL CONTEXT:
+- Stock: {name} ({symbol}) | Sector: {sector}
+- Current Price: ₹{price if price > 0 else 'Unavailable'}
+- NIFTY 50 Benchmark: {nifty if nifty else 'Unavailable'}
 - Put-Call Ratio (PCR): {pcr if pcr else 'Unavailable'}
+- Technical Metrics: RSI(14)={actual_rsi}, EMA20={actual_ema20}, EMA50={actual_ema50}, VWAP={actual_vwap}
+- Support Levels: {actual_sups if actual_sups else 'None'}
+- Resistance Levels: {actual_resis if actual_resis else 'None'}
 
 Return ONLY valid JSON matching this schema:
 {{
   "symbol": "{symbol}",
   "name": "{name}",
   "sector": "{sector}",
-  "marketStance": "Bullish Accumulation",
-  "confidence": 80,
-  "niftyCorrel": "Positive Beta",
-  "fiiDiiSentiment": "Institutional Neutral",
-  "executiveSummary": "Factual market evaluation based on current price structure.",
-  "supportLevels": [],
-  "resistanceLevels": [],
+  "marketStance": "Bullish Accumulation / Distribution Pressure / Neutral Consolidation / UNAVAILABLE",
+  "confidence": <integer 0 to 100 based strictly on data completeness and signal strength>,
+  "niftyCorrel": "Positive Beta / Negative Beta / Unavailable",
+  "fiiDiiSentiment": "Institutional Inflow / Institutional Outflow / Neutral / Unavailable",
+  "executiveSummary": "Factual market evaluation based strictly on verified inputs.",
+  "supportLevels": {json.dumps(actual_sups)},
+  "resistanceLevels": {json.dumps(actual_resis)},
   "technicalMetrics": {{
-    "rsi14": 55.0,
-    "ema20": {price},
-    "ema50": {price},
-    "vwap": {price},
-    "pcrSignal": "Neutral"
+    "rsi14": {json.dumps(actual_rsi)},
+    "ema20": {json.dumps(actual_ema20)},
+    "ema50": {json.dumps(actual_ema50)},
+    "vwap": {json.dumps(actual_vwap)},
+    "pcrSignal": {json.dumps(f"PCR {pcr:.2f}" if pcr else "Unavailable")}
   }},
   "catalysts": [],
   "tacticalTradeSetup": {{
-    "action": "MONITOR",
-    "entryZone": "₹{price}",
-    "target1": "₹{round(price * 1.03, 2) if price else 0}",
-    "target2": "₹{round(price * 1.06, 2) if price else 0}",
-    "stopLoss": "₹{round(price * 0.97, 2) if price else 0}",
-    "riskReward": "1 : 2.0"
+    "action": "MONITOR / BUY / SELL / DATA_UNAVAILABLE",
+    "entryZone": {json.dumps(f"₹{price:,.2f}" if price > 0 else None)},
+    "target1": {json.dumps(f"₹{actual_resis[0]:,.2f}" if actual_resis else None)},
+    "target2": {json.dumps(f"₹{actual_resis[1]:,.2f}" if len(actual_resis) > 1 else None)},
+    "stopLoss": {json.dumps(f"₹{actual_sups[0]:,.2f}" if actual_sups else None)},
+    "riskReward": {json.dumps("1 : 2.0" if (actual_resis and actual_sups) else None)}
   }}
 }}
 """
@@ -91,7 +103,7 @@ Return ONLY valid JSON matching this schema:
         sups = raw_snapshot.get("supportLevels") or []
         resis = raw_snapshot.get("resistanceLevels") or []
 
-        # Deterministic confidence based on factual dimension completeness
+        # Deterministic confidence based strictly on factual dimension completeness
         points = 0
         if price > 0:
             points += 25
@@ -111,8 +123,8 @@ Return ONLY valid JSON matching this schema:
             stance = "UNAVAILABLE"
 
         vwap_str = f"₹{vwap:,.2f}" if vwap else "Unavailable"
-        t1 = f"₹{resis[0]:,.2f}" if resis else "Pending Resistance Level"
-        s1 = f"₹{sups[0]:,.2f}" if sups else "Pending Support Level"
+        t1 = f"₹{resis[0]:,.2f}" if resis else None
+        s1 = f"₹{sups[0]:,.2f}" if sups else None
 
         return {
             "symbol": symbol,
@@ -137,11 +149,11 @@ Return ONLY valid JSON matching this schema:
             ],
             "tacticalTradeSetup": {
                 "action": "MONITOR" if stance != "UNAVAILABLE" else "DATA_UNAVAILABLE",
-                "entryZone": f"₹{price:,.2f}" if price > 0 else "N/A",
+                "entryZone": f"₹{price:,.2f}" if price > 0 else None,
                 "target1": t1,
-                "target2": f"₹{resis[1]:,.2f}" if len(resis) > 1 else t1,
+                "target2": f"₹{resis[1]:,.2f}" if len(resis) > 1 else None,
                 "stopLoss": s1,
-                "riskReward": "1 : 2.0" if (resis and sups) else "N/A"
+                "riskReward": "1 : 2.0" if (t1 and s1) else None
             }
         }
 
@@ -209,3 +221,130 @@ class StrategyResearchAgent:
             "status": "REQUIRES_BACKTEST_VALIDATION"
         }
 
+
+class StrategyCopilotAgent:
+    """
+    Evidence-grounded Strategy Copilot.
+
+    Receives a StrategyEvaluationResult dict and a user message.
+    Grounds every answer in the verified, deterministically-computed rule
+    evaluations. Never invents indicator values or declares strategy states.
+    The copilot is read-only: it interprets the computed evidence only.
+    """
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+
+    def _build_evidence_block(self, evaluation: Dict[str, Any]) -> str:
+        """Format the evaluation result as a terse evidence block for the prompt."""
+        lines = [
+            f"Strategy: {evaluation.get('strategy_name', 'Unknown')}",
+            f"State: {evaluation.get('state', 'UNKNOWN')}",
+            f"Data Freshness: {evaluation.get('data_freshness', 'UNKNOWN')}",
+            f"Candles Used: {evaluation.get('candles_used', 0)}",
+            f"Evaluated At: {evaluation.get('evaluated_at', 'N/A')}",
+            "",
+            "ENTRY RULES:",
+        ]
+        for rule in evaluation.get("rule_evaluations", []):
+            if rule.get("is_entry_rule"):
+                lines.append(
+                    f"  [{rule.get('outcome', 'UNKNOWN')}] {rule.get('label', '')} "
+                    f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')})"
+                )
+        lines.append("")
+        lines.append("EXIT RULES:")
+        for rule in evaluation.get("rule_evaluations", []):
+            if not rule.get("is_entry_rule"):
+                lines.append(
+                    f"  [{rule.get('outcome', 'UNKNOWN')}] {rule.get('label', '')} "
+                    f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')})"
+                )
+        fv = evaluation.get("feature_vector", {})
+        if fv:
+            lines.append("")
+            lines.append("COMPUTED INDICATORS (verified, non-fabricated):")
+            for k, v in list(fv.items())[:12]:
+                lines.append(f"  {k}: {v}")
+        return "\n".join(lines)
+
+    async def answer(
+        self,
+        symbol: str,
+        evaluation: Dict[str, Any],
+        user_message: str,
+    ) -> Dict[str, Any]:
+        """
+        Answer a user question about a strategy evaluation.
+
+        Parameters
+        ----------
+        symbol     : The stock/instrument symbol
+        evaluation : The StrategyEvaluationResult serialised as a dict
+        user_message : The user's question
+
+        Returns
+        -------
+        { reply: str, evidence_cited: List[str] }
+        """
+        evidence_block = self._build_evidence_block(evaluation)
+
+        if not self.client:
+            # Local deterministic fallback — no fabrication
+            state = evaluation.get("state", "UNKNOWN")
+            n_pass = evaluation.get("entry_rules_passing", 0)
+            n_total = evaluation.get("entry_rules_total", 1)
+            freshness = evaluation.get("data_freshness", "UNKNOWN")
+            reply = (
+                f"Based on verified market data for {symbol}: "
+                f"The strategy '{evaluation.get('strategy_name', 'Unknown')}' is currently "
+                f"**{state}** — {n_pass}/{n_total} entry conditions satisfied. "
+                f"Data freshness: {freshness}. "
+                f"I can only interpret the computed evidence above; I cannot estimate or invent any values."
+            )
+            evidence_cited = [
+                r.get("label", "") for r in evaluation.get("rule_evaluations", [])
+                if r.get("outcome") in ("PASS", "FAIL")
+            ]
+            return {"reply": reply, "evidence_cited": evidence_cited}
+
+        system_prompt = f"""You are the APEX Strategy Copilot — an evidence-grounded interpreter, NOT a predictor.
+
+CORE RULES (strictly enforced):
+1. You MUST base every statement on the verified evidence block below.
+2. You CANNOT invent, estimate, or approximate any indicator value not in the evidence.
+3. You CANNOT change or override the strategy state computed by the evaluator.
+4. If data is UNAVAILABLE for a rule, say so explicitly — do not guess.
+5. Do not say "typically", "usually", "historically" without citing a specific verified value.
+6. Be concise (max 4 sentences) and cite the specific rule values.
+
+VERIFIED EVIDENCE FOR {symbol}:
+{evidence_block}
+
+User question: {user_message}
+
+Respond with a concise, evidence-grounded answer. Cite specific rule values (e.g. "RSI = 62.3, which passes the >55 threshold"). End with one actionable observation based solely on the computed state."""
+
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=system_prompt,
+            )
+            reply_text = response.text.strip() if response and response.text else (
+                "Evidence is available but the AI interpreter is temporarily unavailable."
+            )
+        except Exception as exc:
+            logger.warning("StrategyCopilotAgent Gemini call failed: %s", exc)
+            reply_text = (
+                f"Strategy state is {evaluation.get('state', 'UNKNOWN')} "
+                f"({evaluation.get('entry_rules_passing', 0)}/{evaluation.get('entry_rules_total', 0)} "
+                f"entry conditions met). AI interpreter temporarily unavailable — please review the rule checklist directly."
+            )
+
+        evidence_cited = [
+            r.get("label", "") for r in evaluation.get("rule_evaluations", [])
+            if r.get("outcome") in ("PASS", "FAIL") and r.get("actual_value_label", "") != "UNAVAILABLE"
+        ]
+
+        return {"reply": reply_text, "evidence_cited": evidence_cited}

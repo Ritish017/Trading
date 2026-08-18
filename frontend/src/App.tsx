@@ -23,6 +23,7 @@ import { InstitutionalDeskPage } from './components/pages/InstitutionalDeskPage'
 import { PortfolioPage } from './components/pages/PortfolioPage';
 import { BacktestReplayPage } from './components/pages/BacktestReplayPage';
 import { QuantLearnPage } from './components/pages/QuantLearnPage';
+import { StrategyLabPage } from './components/pages/StrategyLabPage';
 
 import { MarketNarrativeBanner } from './components/intelligence/MarketNarrativeBanner';
 import { IntelligenceTimeline } from './components/intelligence/IntelligenceTimeline';
@@ -239,7 +240,7 @@ export default function App() {
                   low: q.low ? Math.min(q.low, newPrice) : stock.low,
                   open: q.open || stock.open,
                   prevClose: prevClose,
-                  vwap: q.vwap || stock.vwap || newPrice,
+                  vwap: q.vwap ?? stock.vwap ?? 0,
                 };
               })
             );
@@ -864,6 +865,14 @@ export default function App() {
 
       {activePage === 'learn' && (
         <QuantLearnPage />
+      )}
+
+      {activePage === 'strategylab' && (
+        <StrategyLabPage
+          stocks={stocks}
+          selectedSymbol={selectedSymbol}
+          onSelectSymbol={(sym) => setSelectedSymbol(sym)}
+        />
       )}
 
       {/* Data Health & Latency Bottom Status Bar */}

@@ -114,7 +114,7 @@ class CandleAggregator:
                     "low": price,
                     "close": price,
                     "volume": delta_vol,
-                    "vwap": price,
+                    "vwap": round(price, 2) if delta_vol > 0 else None,
                     "cum_turnover": turnover,
                     "cum_vol": delta_vol,
                     "is_closed": False,
@@ -133,7 +133,7 @@ class CandleAggregator:
                 if current["cum_vol"] > 0:
                     current["vwap"] = round(current["cum_turnover"] / current["cum_vol"], 2)
                 else:
-                    current["vwap"] = price
+                    current["vwap"] = None
                 current["is_closed"] = False
                 current["source"] = source
                 updated[timeframe] = current

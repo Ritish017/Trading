@@ -18,7 +18,6 @@ from backend.app.quant_engine.indicators import (
 from backend.app.quant_engine.regime import classify_market_regime
 from backend.app.quant_engine.options import calculate_pcr, calculate_max_pain, classify_oi_pattern
 from backend.app.strategy_engine.dsl import StrategyHypothesis
-from backend.app.ai_engine.agents import MarketResearchAgent, PersonalTradingCoach, StrategyResearchAgent
 from backend.app.backtesting.event_driven import EventDrivenBacktester
 from backend.app.paper_trading.engine import PaperTradingEngine, PaperOrderRequest
 from backend.app.journal.analytics import compute_journal_statistics
@@ -30,6 +29,9 @@ from backend.app.ai_engine.contracts import (
     MarketSnapshot, TechnicalSnapshot, DerivativeSnapshot, NewsSnapshot, SectorSnapshot, MacroSnapshot, InstitutionalSnapshot,
     DataFreshness
 )
+from backend.app.strategy_engine.registry import STRATEGY_REGISTRY
+from backend.app.strategy_engine.evaluator import evaluate_all_strategies
+from backend.app.ai_engine.agents import MarketResearchAgent, PersonalTradingCoach, StrategyResearchAgent, StrategyCopilotAgent
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
@@ -56,6 +58,7 @@ paper_engine = PaperTradingEngine(initial_capital=settings.default_paper_capital
 market_research_agent = MarketResearchAgent(api_key=settings.gemini_api_key)
 trading_coach_agent = PersonalTradingCoach(api_key=settings.gemini_api_key)
 strategy_agent = StrategyResearchAgent(api_key=settings.gemini_api_key)
+strategy_copilot_agent = StrategyCopilotAgent(api_key=settings.gemini_api_key)
 chief_market_analyst = ChiefMarketAnalyst(api_key=settings.gemini_api_key)
 
 active_ws_connections: Set[WebSocket] = set()
@@ -192,6 +195,29 @@ class IndicatorRequest(BaseModel):
     symbol: str
     candles: List[Dict[str, Any]]
 
+def evaluate_quote_freshness(quote: Dict[str, Any]) -> DataFreshness:
+    """Truthfully evaluate quote freshness from timestamp and provider state."""
+    if not quote or quote.get("ltp") is None:
+        return DataFreshness.UNAVAILABLE
+    is_live = bool(quote.get("is_live", False))
+    ts = quote.get("timestamp")
+    if ts is None or ts <= 0:
+        return DataFreshness.UNAVAILABLE
+    try:
+        age = time.time() - float(ts)
+        if age < 0:
+            return DataFreshness.LIVE if is_live else DataFreshness.RECENT
+        if is_live and age <= 60.0:
+            return DataFreshness.LIVE
+        elif age <= 300.0:
+            return DataFreshness.RECENT
+        elif age <= 86400.0:
+            return DataFreshness.STALE
+        else:
+            return DataFreshness.UNAVAILABLE
+    except (ValueError, TypeError):
+        return DataFreshness.UNAVAILABLE
+
 @app.post("/api/quant/indicators")
 async def compute_indicators(req: IndicatorRequest):
     if not req.candles:
@@ -202,7 +228,7 @@ async def compute_indicators(req: IndicatorRequest):
     
     ema20 = calculate_ema(close, 20).tolist() if len(close) >= 20 else [None] * len(close)
     ema50 = calculate_ema(close, 50).tolist() if len(close) >= 50 else [None] * len(close)
-    vwap = calculate_vwap(df).tolist() if 'high' in df and 'low' in df and 'volume' in df else close.tolist()
+    vwap = calculate_vwap(df).tolist() if 'high' in df and 'low' in df and 'volume' in df else [None] * len(close)
     rsi = calculate_rsi(close, 14).tolist()
     rvol = calculate_relative_volume(df['volume'].astype(float), 20).tolist() if 'volume' in df else [None] * len(df)
     levels = detect_support_resistance(df)
@@ -211,9 +237,9 @@ async def compute_indicators(req: IndicatorRequest):
         "symbol": req.symbol,
         "ema20": [round(x, 2) if x is not None and not pd.isna(x) else None for x in ema20],
         "ema50": [round(x, 2) if x is not None and not pd.isna(x) else None for x in ema50],
-        "vwap": [round(x, 2) if not pd.isna(x) else None for x in vwap],
-        "rsi14": [round(x, 1) if not pd.isna(x) else None for x in rsi],
-        "rvol": [round(x, 2) if not pd.isna(x) else None for x in rvol],
+        "vwap": [round(x, 2) if x is not None and not pd.isna(x) else None for x in vwap],
+        "rsi14": [round(x, 1) if x is not None and not pd.isna(x) else None for x in rsi],
+        "rvol": [round(x, 2) if x is not None and not pd.isna(x) else None for x in rvol],
         "supportLevels": levels["support"],
         "resistanceLevels": levels["resistance"]
     }
@@ -245,18 +271,20 @@ async def get_market_narrative():
     except Exception:
         pass
 
+    freshness = evaluate_quote_freshness(nifty_quote)
+
     macro = MacroSnapshot(
-        nifty_50=nifty_quote.get("ltp", 0.0) or 0.0,
-        nifty_change_pct=nifty_quote.get("change_percent", 0.0) or 0.0,
-        bank_nifty=0.0,
-        bank_nifty_change_pct=0.0,
-        india_vix=vix_quote.get("ltp", 0.0) or 0.0,
-        india_vix_change_pct=vix_quote.get("change_percent", 0.0) or 0.0,
-        freshness=DataFreshness.LIVE if market_data_service.is_live else DataFreshness.UNAVAILABLE
+        nifty_50=nifty_quote.get("ltp"),
+        nifty_change_pct=nifty_quote.get("change_percent"),
+        bank_nifty=None,
+        bank_nifty_change_pct=None,
+        india_vix=vix_quote.get("ltp"),
+        india_vix_change_pct=vix_quote.get("change_percent"),
+        freshness=freshness
     )
     
     return {
-        "status": "AVAILABLE" if macro.nifty_50 > 0 else "UNAVAILABLE",
+        "status": "AVAILABLE" if (macro.nifty_50 is not None and macro.nifty_50 > 0) else "UNAVAILABLE",
         "macro": macro.dict(),
         "source": market_data_service.active_provider.provider_name
     }
@@ -275,24 +303,25 @@ async def get_intelligence_feed(symbols: str = Query(default="RELIANCE.NS,TCS.NS
             price = quote.get("ltp") or 0.0
             prev_close = quote.get("previous_close") or price
             chg_pct = quote.get("change_percent") or 0.0
-            vwap = quote.get("vwap") or price
+            vwap = quote.get("vwap")
             vol = quote.get("volume") or 0
+            freshness = evaluate_quote_freshness(quote)
 
             mkt = MarketSnapshot(
                 symbol=sym,
                 ltp=price,
-                open=quote.get("open", price) or price,
-                high=quote.get("high", price) or price,
-                low=quote.get("low", price) or price,
+                open=quote.get("open"),
+                high=quote.get("high"),
+                low=quote.get("low"),
                 previous_close=prev_close,
                 volume=vol,
                 vwap=vwap,
-                change=quote.get("change", 0.0) or 0.0,
+                change=quote.get("change"),
                 change_percent=chg_pct,
-                freshness=DataFreshness.LIVE if quote.get("is_live") else DataFreshness.RECENT
+                freshness=freshness
             )
 
-            tech = compute_market_features(candles_data, price, prev_close)
+            tech = compute_market_features(candles_data, price, prev_close, is_live_feed=(freshness == DataFreshness.LIVE))
 
             evs = detect_market_events(
                 market=mkt,
@@ -317,24 +346,25 @@ async def get_symbol_intelligence(symbol: str):
     price = quote.get("ltp") or 0.0
     prev_close = quote.get("previous_close") or price
     chg_pct = quote.get("change_percent") or 0.0
-    vwap = quote.get("vwap") or price
+    vwap = quote.get("vwap")
     vol = quote.get("volume") or 0
+    freshness = evaluate_quote_freshness(quote)
 
     mkt = MarketSnapshot(
         symbol=symbol,
         ltp=price,
-        open=quote.get("open", price) or price,
-        high=quote.get("high", price) or price,
-        low=quote.get("low", price) or price,
+        open=quote.get("open"),
+        high=quote.get("high"),
+        low=quote.get("low"),
         previous_close=prev_close,
         volume=vol,
         vwap=vwap,
-        change=quote.get("change", 0.0) or 0.0,
+        change=quote.get("change"),
         change_percent=chg_pct,
-        freshness=DataFreshness.LIVE if quote.get("is_live") else DataFreshness.RECENT
+        freshness=freshness
     )
 
-    tech = compute_market_features(candles_data, price, prev_close)
+    tech = compute_market_features(candles_data, price, prev_close, is_live_feed=(freshness == DataFreshness.LIVE))
 
     # Query real option chain
     deriv_snapshot = None
@@ -347,7 +377,7 @@ async def get_symbol_intelligence(symbol: str):
                 call_oi_total=chain.get("totalCallOI"),
                 put_oi_total=chain.get("totalPutOI"),
                 implied_volatility=chain.get("impliedVolatility"),
-                freshness=DataFreshness.LIVE
+                freshness=freshness
             )
         else:
             deriv_snapshot = DerivativeSnapshot(freshness=DataFreshness.UNAVAILABLE)
@@ -430,7 +460,121 @@ async def run_backtest(req: BacktestRequest):
     results = backtester.run_backtest(evaluated_df)
     return results
 
-# --- Real-Time WebSocket Endpoint ---
+# --- Strategy Lab API ---
+
+@app.get("/api/strategies/list")
+async def list_strategies():
+    """
+    Returns the full strategy library metadata (no evaluation).
+    Safe to call without any market data.
+    """
+    return [
+        {
+            "strategy_id": s.strategy_id,
+            "name": s.name,
+            "category": s.category,
+            "description": s.description,
+            "timeframe_hint": s.timeframe_hint,
+            "min_candles": s.min_candles,
+            "entry_rules_count": len(s.entry_rules),
+            "exit_rules_count": len(s.exit_rules),
+            "tags": s.tags,
+        }
+        for s in STRATEGY_REGISTRY.values()
+    ]
+
+
+class StrategyEvaluateRequest(BaseModel):
+    candles: Optional[List[Dict[str, Any]]] = None
+    is_live_feed: bool = False
+    strategy_ids: Optional[List[str]] = None
+
+
+@app.post("/api/strategies/evaluate/{symbol}")
+async def evaluate_strategies(symbol: str, req: StrategyEvaluateRequest):
+    """
+    Deterministically evaluate all (or selected) strategies for a given symbol.
+    If no candles are supplied, fetches them from the market data service.
+    Returns rule-level evidence: each rule value, outcome (PASS/FAIL/UNAVAILABLE),
+    and overall strategy state.
+    """
+    candles = req.candles
+    is_live = req.is_live_feed
+
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, "5m", 100)
+        # Infer live status from market data service
+        try:
+            quote = await market_data_service.get_quote(symbol)
+            freshness = evaluate_quote_freshness(quote)
+            is_live = (freshness == DataFreshness.LIVE)
+        except Exception:
+            is_live = False
+
+    results = evaluate_all_strategies(
+        candles=candles or [],
+        is_live_feed=is_live,
+        strategy_ids=req.strategy_ids,
+    )
+
+    # Serialise dataclass list to JSON-safe dicts
+    def _serialise(r):
+        return {
+            "strategy_id": r.strategy_id,
+            "strategy_name": r.strategy_name,
+            "category": r.category,
+            "description": r.description,
+            "state": r.state.value,
+            "entry_rules_total": r.entry_rules_total,
+            "entry_rules_passing": r.entry_rules_passing,
+            "entry_rules_unavailable": r.entry_rules_unavailable,
+            "exit_rules_triggered": r.exit_rules_triggered,
+            "exit_rules_total": r.exit_rules_total,
+            "rule_evaluations": [
+                {
+                    "rule_id": re.rule_id,
+                    "label": re.label,
+                    "dependency_keys": re.dependency_keys,
+                    "outcome": re.outcome.value,
+                    "actual_value": re.actual_value,
+                    "actual_value_label": re.actual_value_label,
+                    "is_entry_rule": re.is_entry_rule,
+                }
+                for re in r.rule_evaluations
+            ],
+            "feature_vector": r.feature_vector,
+            "data_freshness": r.data_freshness,
+            "evaluated_at": r.evaluated_at,
+            "candles_used": r.candles_used,
+            "tags": r.tags,
+        }
+
+    return [_serialise(r) for r in results]
+
+
+class StrategyCopilotRequest(BaseModel):
+    symbol: str
+    strategy_id: str
+    evaluation_result: Dict[str, Any]  # Full serialised StrategyEvaluationResult
+    user_message: str
+
+
+@app.post("/api/strategies/copilot")
+async def strategy_copilot(req: StrategyCopilotRequest):
+    """
+    Evidence-grounded Strategy Copilot.
+    AI interprets the pre-computed evaluation result only.
+    It cannot invent indicator values or override strategy states.
+    """
+    if not req.user_message.strip():
+        raise HTTPException(status_code=400, detail="user_message cannot be empty")
+    result = await strategy_copilot_agent.answer(
+        symbol=req.symbol,
+        evaluation=req.evaluation_result,
+        user_message=req.user_message,
+    )
+    return result
+
 @app.websocket("/ws/ticks")
 async def websocket_ticks(websocket: WebSocket):
     await websocket.accept()

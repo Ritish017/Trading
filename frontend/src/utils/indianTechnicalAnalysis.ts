@@ -110,7 +110,7 @@ export function calculateVWAP(candles: IndianCandle[]): number {
     totalVolume += c.volumeLakhs;
   }
 
-  return totalVolume > 0 ? Number((totalPV / totalVolume).toFixed(2)) : candles[candles.length - 1].close;
+  return totalVolume > 0 ? Number((totalPV / totalVolume).toFixed(2)) : 0;
 }
 
 export function generateIndianMarketDepth(currentPrice: number, precision: number = 2) {
@@ -138,39 +138,39 @@ export function generateIndianMarketDepth(currentPrice: number, precision: numbe
 }
 
 export function generateLocalIndianAIReport(stock: NSEStock): IndianMarketAIReport {
-  const isPos = stock.changePercent >= 0;
   const p = stock.price;
+  const hasVWAP = stock.vwap && stock.vwap > 0;
+  const stance = (p > 0 && hasVWAP) ? (p >= stock.vwap ? 'Bullish Accumulation' : 'Distribution Pressure') : 'Consolidation Range';
+  const conf = (p > 0 && hasVWAP) ? 50 : 25;
 
   return {
     symbol: stock.symbol,
     name: stock.name,
     sector: stock.sector,
-    marketStance: isPos ? 'Bullish Accumulation' : 'Neutral Consolidation',
-    confidence: isPos ? 88 : 74,
-    niftyCorrel: '0.84 Positive Beta',
-    fiiDiiSentiment: 'FII Net Buy in F&O Segment',
-    executiveSummary: `Technical structure for ${stock.name} indicates strong price action around ₹${stock.vwap} VWAP line with healthy institutional volume. Sectoral momentum in ${stock.sector} remains supportive ahead of key macro triggers.`,
-    supportLevels: [Number((p * 0.98).toFixed(2)), Number((p * 0.96).toFixed(2))],
-    resistanceLevels: [Number((p * 1.02).toFixed(2)), Number((p * 1.05).toFixed(2))],
+    marketStance: stance,
+    confidence: conf,
+    niftyCorrel: 'Market Beta',
+    fiiDiiSentiment: 'Settlement Neutral',
+    executiveSummary: `Price action for ${stock.name} is trading at ₹${p.toLocaleString()} with active session benchmark at ₹${stock.vwap?.toLocaleString() || 'N/A'}.`,
+    supportLevels: [],
+    resistanceLevels: [],
     technicalMetrics: {
-      rsi14: isPos ? 58.6 : 46.2,
-      ema20: Number((p * 0.985).toFixed(2)),
-      ema50: Number((p * 0.965).toFixed(2)),
-      vwap: stock.vwap,
-      pcrSignal: `Bullish Option Writing at ₹${Math.floor(p * 0.98 / 50) * 50}`,
+      rsi14: undefined,
+      ema20: undefined,
+      ema50: undefined,
+      vwap: stock.vwap || undefined,
+      pcrSignal: 'Unavailable',
     },
     catalysts: [
-      `FII net inflows in ${stock.sector} basket crossed ₹1,200 Cr this week.`,
-      `Consolidation above 20-day EMA indicates strong buyer interest.`,
-      `SEBI disclosures reflect high promoter holding and stable earnings trajectory.`,
+      'Active session price discovery relative to volume-weighted benchmark.',
     ],
     tacticalTradeSetup: {
-      action: isPos ? 'BUY (Delivery CNC / MIS Intraday)' : 'Accumulate on Dips',
-      entryZone: `₹${(p * 0.995).toFixed(2)} - ₹${p.toFixed(2)}`,
-      target1: `₹${(p * 1.035).toFixed(2)}`,
-      target2: `₹${(p * 1.075).toFixed(2)}`,
-      stopLoss: `₹${(p * 0.97).toFixed(2)}`,
-      riskReward: '1 : 2.5',
+      action: 'MONITOR',
+      entryZone: p > 0 ? `₹${p.toFixed(2)}` : undefined,
+      target1: undefined,
+      target2: undefined,
+      stopLoss: undefined,
+      riskReward: undefined,
     },
   };
 }

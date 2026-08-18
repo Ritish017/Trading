@@ -55,10 +55,13 @@ class TechnicalAnalyst:
         else:
             stance = SignalStance.NEUTRAL
 
+        total_ev = len(bullish_ev) + len(bearish_ev)
+        conf = round(min(0.95, (total_ev / 3.0) * 0.85), 2) if total_ev > 0 else 0.0
+
         return DomainAssessment(
             domain="Technical Analysis",
             stance=stance,
-            confidence=0.85,
+            confidence=conf,
             key_findings=findings,
             bullish_evidence=bullish_ev,
             bearish_evidence=bearish_ev
@@ -103,10 +106,13 @@ class DerivativesAnalyst:
         else:
             stance = SignalStance.NEUTRAL
 
+        total_ev = len(bullish_ev) + len(bearish_ev)
+        conf = round(min(0.95, (total_ev / 2.0) * 0.85), 2) if total_ev > 0 else 0.40
+
         return DomainAssessment(
             domain="Derivatives Analysis",
             stance=stance,
-            confidence=0.88,
+            confidence=conf,
             key_findings=findings,
             bullish_evidence=bullish_ev,
             bearish_evidence=bearish_ev
@@ -126,11 +132,12 @@ class NewsAnalyst:
             )
 
         ev = EvidenceItem(type="NEWS", statement=news.headline, value=news.sentiment, source=news.source, timestamp=news.published_at)
+        conf = news.sentiment_confidence if news.sentiment_confidence > 0 else 0.60
         if news.sentiment == "Positive":
             return DomainAssessment(
                 domain="News & Announcements",
                 stance=SignalStance.BULLISH,
-                confidence=news.sentiment_confidence,
+                confidence=conf,
                 key_findings=[f"Positive corporate catalyst: {news.headline}"],
                 bullish_evidence=[ev],
                 bearish_evidence=[]
@@ -139,7 +146,7 @@ class NewsAnalyst:
             return DomainAssessment(
                 domain="News & Announcements",
                 stance=SignalStance.BEARISH,
-                confidence=news.sentiment_confidence,
+                confidence=conf,
                 key_findings=[f"Negative headline pressure: {news.headline}"],
                 bullish_evidence=[],
                 bearish_evidence=[ev]
@@ -147,7 +154,7 @@ class NewsAnalyst:
         return DomainAssessment(
             domain="News & Announcements",
             stance=SignalStance.NEUTRAL,
-            confidence=0.7,
+            confidence=0.40,
             key_findings=[f"Neutral disclosure: {news.headline}"],
             bullish_evidence=[],
             bearish_evidence=[]
@@ -186,10 +193,12 @@ class SectorAnalyst:
             findings.append("Stock move is largely in tandem with broader sector")
 
         stance = SignalStance.BULLISH if len(bullish_ev) > len(bearish_ev) else SignalStance.BEARISH if len(bearish_ev) > len(bullish_ev) else SignalStance.NEUTRAL
+        conf = round(min(0.90, max(0.40, abs(rel_strength) / 2.0 * 0.85)), 2) if (bullish_ev or bearish_ev) else 0.50
+
         return DomainAssessment(
             domain="Sector Analysis",
             stance=stance,
-            confidence=0.82,
+            confidence=conf,
             key_findings=findings,
             bullish_evidence=bullish_ev,
             bearish_evidence=bearish_ev
@@ -198,7 +207,7 @@ class SectorAnalyst:
 class InstitutionalAnalyst:
     @staticmethod
     def analyze(inst: Optional[InstitutionalSnapshot]) -> DomainAssessment:
-        if not inst or inst.freshness == DataFreshness.UNAVAILABLE:
+        if not inst or inst.freshness == DataFreshness.UNAVAILABLE or inst.fii_cash_net_cr is None or inst.dii_cash_net_cr is None:
             return DomainAssessment(
                 domain="Institutional Flow",
                 stance=SignalStance.UNAVAILABLE,
@@ -212,12 +221,13 @@ class InstitutionalAnalyst:
         dii = inst.dii_cash_net_cr
         net_inst = fii + dii
         ev = EvidenceItem(type="INSTITUTIONAL", statement=f"FII Net: {fii:+,g} Cr | DII Net: {dii:+,g} Cr", value=net_inst, source="SETTLEMENT", timestamp=inst.as_of)
+        conf = round(min(0.90, max(0.40, abs(net_inst) / 2500.0)), 2)
 
         if net_inst > 500:
             return DomainAssessment(
                 domain="Institutional Flow",
                 stance=SignalStance.BULLISH,
-                confidence=0.85,
+                confidence=conf,
                 key_findings=["Combined FII + DII institutional accumulation"],
                 bullish_evidence=[ev],
                 bearish_evidence=[]
@@ -226,7 +236,7 @@ class InstitutionalAnalyst:
             return DomainAssessment(
                 domain="Institutional Flow",
                 stance=SignalStance.BEARISH,
-                confidence=0.85,
+                confidence=conf,
                 key_findings=["Combined FII + DII institutional distribution"],
                 bullish_evidence=[],
                 bearish_evidence=[ev]
@@ -234,7 +244,7 @@ class InstitutionalAnalyst:
         return DomainAssessment(
             domain="Institutional Flow",
             stance=SignalStance.NEUTRAL,
-            confidence=0.7,
+            confidence=0.40,
             key_findings=["Institutional flows balanced"],
             bullish_evidence=[],
             bearish_evidence=[]
@@ -243,7 +253,7 @@ class InstitutionalAnalyst:
 class MacroAnalyst:
     @staticmethod
     def analyze(macro: Optional[MacroSnapshot]) -> DomainAssessment:
-        if not macro or macro.freshness == DataFreshness.UNAVAILABLE:
+        if not macro or macro.freshness == DataFreshness.UNAVAILABLE or macro.india_vix is None or macro.nifty_change_pct is None:
             return DomainAssessment(domain="Macro Context", stance=SignalStance.UNAVAILABLE, confidence=0.0, key_findings=["Macro context data unavailable"], bullish_evidence=[], bearish_evidence=[])
 
         vix = macro.india_vix
@@ -260,10 +270,12 @@ class MacroAnalyst:
             stance = SignalStance.NEUTRAL
             findings.append("Macro environment in balanced consolidation")
 
+        conf = round(min(0.90, 0.40 + (abs(nifty_chg) / 4.0) * 0.40), 2)
+
         return DomainAssessment(
             domain="Macro Context",
             stance=stance,
-            confidence=0.80,
+            confidence=conf,
             key_findings=findings,
             bullish_evidence=[],
             bearish_evidence=[]

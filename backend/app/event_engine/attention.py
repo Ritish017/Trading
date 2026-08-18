@@ -1,6 +1,6 @@
 from typing import Dict, Any, Optional
 from backend.app.ai_engine.contracts import (
-    AttentionScore, AttentionClassification,
+    AttentionScore, AttentionClassification, DataFreshness,
     MarketSnapshot, TechnicalSnapshot, DerivativeSnapshot, NewsSnapshot, SectorSnapshot, MacroSnapshot
 )
 
@@ -49,7 +49,7 @@ def compute_attention_score(
 
     # 3. Derivatives Anomaly (0 - 20 pts)
     deriv_score = 0.0
-    if derivatives and derivatives.freshness != "UNAVAILABLE":
+    if derivatives and derivatives.freshness not in ["UNAVAILABLE", DataFreshness.UNAVAILABLE]:
         oi_chg = abs(derivatives.futures_oi_change or 0.0)
         pcr = derivatives.pcr
         if oi_chg >= 15.0 or (pcr is not None and (pcr <= 0.6 or pcr >= 1.6)):
@@ -63,7 +63,7 @@ def compute_attention_score(
 
     # 4. News & Corporate Catalyst Impact (0 - 15 pts)
     news_score = 0.0
-    if news and news.freshness != "UNAVAILABLE":
+    if news and news.freshness not in ["UNAVAILABLE", DataFreshness.UNAVAILABLE]:
         if news.event_type in ["EARNINGS", "REGULATORY", "ACQUISITION"]:
             news_score = 15.0
         elif news.event_type in ["ORDER_WIN", "CORPORATE_ACTION"]:
@@ -75,7 +75,7 @@ def compute_attention_score(
 
     # 5. Sector & Market Relevance (0 - 15 pts)
     sec_score = 4.0 if is_nifty50 else 0.0
-    if sector and sector.freshness != "UNAVAILABLE":
+    if sector and sector.freshness not in ["UNAVAILABLE", DataFreshness.UNAVAILABLE]:
         sec_chg = abs(sector.change_percent) if sector.change_percent is not None else 0.0
         if sec_chg >= 2.5:
             sec_score = min(15.0, sec_score + 9.0)
@@ -86,7 +86,7 @@ def compute_attention_score(
 
     # 6. Macro Shock Impact (0 - 10 pts)
     macro_score = 0.0
-    if macro and macro.freshness != "UNAVAILABLE":
+    if macro and macro.freshness not in ["UNAVAILABLE", DataFreshness.UNAVAILABLE]:
         vix_chg = abs(macro.india_vix_change_pct) if macro.india_vix_change_pct is not None else 0.0
         nifty_chg = abs(macro.nifty_change_pct) if macro.nifty_change_pct is not None else 0.0
         if vix_chg >= 10.0 or nifty_chg >= 2.0:

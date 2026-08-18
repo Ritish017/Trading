@@ -287,20 +287,20 @@ Return ONLY valid JSON matching this schema:
             attention_score=attention.total_score,
             classification=attention.classification,
             market_regime=MarketRegime.BULLISH_TREND if market.change_percent > 0 else MarketRegime.BEARISH_TREND,
-            what_changed=data.get("what_changed", f"Price at ₹{market.ltp:,.2f}"),
-            why_it_matters=data.get("why_it_matters", "Contextual move around key VWAP pivots."),
+            what_changed=data.get("what_changed", f"Price at ₹{market.ltp:,.2f}" if market.ltp > 0 else "Price action unavailable"),
+            why_it_matters=data.get("why_it_matters", "Contextual move around key technical levels."),
             likely_drivers=data.get("likely_drivers", ["Technical momentum"]),
             confirming_evidence=evidence[:4],
             contradicting_evidence=[],
-            company_context=f"{market.symbol} trading at ₹{market.ltp:,.2f}",
+            company_context=f"{market.symbol} trading at ₹{market.ltp:,.2f}" if market.ltp > 0 else f"{market.symbol} market structure",
             sector_context=f"{sector.sector_name if sector else 'Sector'} basket active",
-            macro_context=f"NIFTY {macro.nifty_change_pct if macro else 0.0:+.2f}%",
+            macro_context=f"NIFTY {macro.nifty_change_pct:+.2f}%" if (macro and macro.nifty_change_pct is not None) else "Broader macro indices unavailable",
             why_should_i_care=data.get("why_should_i_care", "Standard liquidity event."),
-            what_to_watch=data.get("what_to_watch", [f"Support ₹{market.ltp*0.98:.2f}", f"Resistance ₹{market.ltp*1.02:.2f}"]),
+            what_to_watch=data.get("what_to_watch", []),
             bullish_confirmation=[],
             bearish_confirmation=[],
             uncertainties=[],
-            confidence=0.91,
+            confidence=round(min(0.95, max(0.20, len(evidence) / 5.0)), 2),
             timestamp=now_str,
             data_freshness=market.freshness,
             sources=["NSE_FEED", "QUANT_ENGINE", "GEMINI_ANALYST"]
@@ -311,36 +311,50 @@ Return ONLY valid JSON matching this schema:
         macro: Optional[MacroSnapshot] = None,
         sector_leaders: Optional[List[str]] = None,
         sector_laggards: Optional[List[str]] = None,
-        fii_cash_net: float = 1840.50,
-        dii_cash_net: float = 1210.80
+        fii_cash_net: Optional[float] = None,
+        dii_cash_net: Optional[float] = None
     ) -> MarketNarrative:
         now_str = datetime.now().strftime("%H:%M IST")
-        nifty_chg = macro.nifty_change_pct if macro else 0.42
-        vix = macro.india_vix if macro else 13.8
+        nifty_chg = macro.nifty_change_pct if (macro and macro.nifty_change_pct is not None) else None
+        vix = macro.india_vix if (macro and macro.india_vix is not None) else None
 
-        if nifty_chg >= 0.5:
-            headline = "Broad-Based Accumulation Led by Financials & Capital Goods"
-            regime = MarketRegime.BULLISH_TREND
-            summary = f"Indian equities are experiencing broad risk-on momentum with NIFTY up +{nifty_chg:.2f}%. Institutional FIIs recorded net cash inflows of ₹{fii_cash_net:+,g} Cr alongside stable domestic institutional support."
-        elif nifty_chg <= -0.5:
-            headline = "Risk-Off Consolidation Amid Elevated Global Volatility"
-            regime = MarketRegime.RISK_OFF
-            summary = f"Markets under mild distribution pressure with NIFTY declining {nifty_chg:.2f}%. India VIX is at {vix:.1f}, while institutional participation remains cautious around key support pivots."
-        else:
-            headline = "Range-Bound Compression Ahead of Key Macro Triggers"
+        if nifty_chg is None:
+            headline = "Macro Overview Pending Live Session Feeds"
             regime = MarketRegime.NEUTRAL_CONSOLIDATION
-            summary = f"NIFTY is trading in a tight consolidation range ({nifty_chg:+.2f}%) with India VIX calm at {vix:.1f}. Sectoral rotation is evident between IT and Banking heavyweights."
+            summary = "Broad market indices and institutional cash flow data are currently unavailable or disconnected."
+            confidence = 0.0
+        elif nifty_chg >= 0.5:
+            headline = "Broad-Based Accumulation Led by Financials & Heavyweights"
+            regime = MarketRegime.BULLISH_TREND
+            fii_str = f" Institutional FIIs recorded net cash flows of ₹{fii_cash_net:+,g} Cr." if fii_cash_net is not None else ""
+            summary = f"Indian equities are experiencing broad risk-on momentum with NIFTY up +{nifty_chg:.2f}%.{fii_str}"
+            confidence = 0.85 if vix is not None else 0.60
+        elif nifty_chg <= -0.5:
+            headline = "Risk-Off Consolidation Amid Elevated Volatility"
+            regime = MarketRegime.RISK_OFF
+            vix_str = f" India VIX is at {vix:.1f}." if vix is not None else ""
+            summary = f"Markets under distribution pressure with NIFTY declining {nifty_chg:.2f}%.{vix_str}"
+            confidence = 0.85 if vix is not None else 0.60
+        else:
+            headline = "Range-Bound Compression Across Major Indices"
+            regime = MarketRegime.NEUTRAL_CONSOLIDATION
+            vix_str = f" with India VIX at {vix:.1f}" if vix is not None else ""
+            summary = f"NIFTY is trading in a tight consolidation range ({nifty_chg:+.2f}%){vix_str}."
+            confidence = 0.75 if vix is not None else 0.50
+
+        inst_bias = f"FII: ₹{fii_cash_net:+,g} Cr | DII: ₹{dii_cash_net:+,g} Cr" if (fii_cash_net is not None and dii_cash_net is not None) else "Institutional Flow: Unavailable"
+        macro_str = f"India VIX: {vix:.1f}" if vix is not None else "Macro Volatility: Unavailable"
 
         return MarketNarrative(
             date=datetime.now().strftime("%d %b %Y"),
             headline=headline,
             primary_regime=regime,
             narrative_summary=summary,
-            key_drivers=["FII/DII Net Cash Flow Dynamics", "Crude & Currency Stability", "Quarterly Earnings Rotation"],
-            sector_leaders=sector_leaders or ["Banking & Financials", "Automotive"],
-            sector_laggards=sector_laggards or ["IT Services", "Metals"],
-            institutional_bias=f"FII: ₹{fii_cash_net:+,g} Cr | DII: ₹{dii_cash_net:+,g} Cr",
-            macro_backdrop=f"India VIX: {vix:.1f} | Crude: $84.50/bbl",
-            confidence=0.90,
+            key_drivers=["FII/DII Net Cash Flow Dynamics", "Domestic Liquidity", "Quarterly Earnings Rotation"],
+            sector_leaders=sector_leaders or [],
+            sector_laggards=sector_laggards or [],
+            institutional_bias=inst_bias,
+            macro_backdrop=macro_str,
+            confidence=confidence,
             timestamp=now_str
         )

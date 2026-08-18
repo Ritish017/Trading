@@ -28,7 +28,16 @@ def classify_market_regime(df: pd.DataFrame) -> Dict[str, Any]:
     ema50 = float(ema50_series.iloc[-1])
     
     rsi_series = calculate_rsi(close, 14)
-    rsi = float(rsi_series.iloc[-1]) if len(rsi_series) > 0 and not pd.isna(rsi_series.iloc[-1]) else 50.0
+    rsi = float(rsi_series.iloc[-1]) if len(rsi_series) > 0 and not pd.isna(rsi_series.iloc[-1]) else None
+    if rsi is None:
+        return {
+            "regime": "UNAVAILABLE",
+            "confidence": 0,
+            "trend_strength": 0.0,
+            "volatility_status": "UNAVAILABLE",
+            "evidence": "RSI indicator unavailable for regime classification",
+            "metrics": {}
+        }
     
     atr_series = calculate_atr(df, 14)
     atr = float(atr_series.iloc[-1]) if len(atr_series) > 0 and not pd.isna(atr_series.iloc[-1]) else 0.0
@@ -43,27 +52,29 @@ def classify_market_regime(df: pd.DataFrame) -> Dict[str, Any]:
     # Classification Logic
     if is_above_ema20 and is_ema_bullish and rsi > 55:
         regime = "TRENDING_BULLISH"
-        confidence = min(85 + int((rsi - 55) * 0.5), 98)
+        confidence = min(95, max(60, int(75 + (rsi - 55) * 0.6)))
         evidence = f"Price (₹{current_price:.2f}) > EMA20 (₹{ema20:.2f}) > EMA50 (₹{ema50:.2f}), RSI strong at {rsi:.1f}"
     elif not is_above_ema20 and not is_ema_bullish and rsi < 45:
         regime = "TRENDING_BEARISH"
-        confidence = min(85 + int((45 - rsi) * 0.5), 98)
+        confidence = min(95, max(60, int(75 + (45 - rsi) * 0.6)))
         evidence = f"Price (₹{current_price:.2f}) < EMA20 (₹{ema20:.2f}) < EMA50 (₹{ema50:.2f}), RSI weak at {rsi:.1f}"
     elif is_above_ema20 and 45 <= rsi <= 55:
         regime = "BULLISH_ACCUMULATION"
-        confidence = 78
+        dist_pct = abs(current_price - ema20) / ema20 * 100 if ema20 > 0 else 0.0
+        confidence = min(85, max(50, int(55 + dist_pct * 10)))
         evidence = f"Price holding above EMA20 (₹{ema20:.2f}) in neutral RSI zone ({rsi:.1f})"
     elif not is_above_ema20 and 45 <= rsi <= 55:
         regime = "BEARISH_DISTRIBUTION"
-        confidence = 76
+        dist_pct = abs(ema20 - current_price) / ema20 * 100 if ema20 > 0 else 0.0
+        confidence = min(85, max(50, int(55 + dist_pct * 10)))
         evidence = f"Price below EMA20 (₹{ema20:.2f}) showing persistent selling pressure on rallies"
     elif atr_pct > 2.5:
         regime = "HIGH_VOLATILITY"
-        confidence = 82
+        confidence = min(90, max(55, int(60 + (atr_pct - 2.5) * 8)))
         evidence = f"Intraday ATR percentage ({atr_pct:.2f}%) indicates heightened volatility"
     else:
         regime = "RANGE_BOUND"
-        confidence = 70
+        confidence = min(75, max(45, int(70 - abs(rsi - 50) * 2)))
         evidence = f"Oscillating between bounds with neutral RSI ({rsi:.1f})"
 
     return {

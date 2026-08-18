@@ -45,6 +45,46 @@ def test_candle_aggregator():
     assert c["low"] == 2800.0
     assert c["volume"] == 250
 
+def test_zero_volume_vwap():
+    df = pd.DataFrame({
+        "high": [100.0, 102.0],
+        "low": [98.0, 99.0],
+        "close": [100.0, 101.0],
+        "volume": [0.0, 0.0]
+    })
+    vwap_series = calculate_vwap(df)
+    assert pd.isna(vwap_series.iloc[0])
+    assert pd.isna(vwap_series.iloc[1])
+
+    agg = CandleAggregator()
+    tick_zero = NormalizedTick(symbol="TEST.NS", ltp=100.0, volume=0, timestamp=1700000000.0)
+    res = agg.process_tick(tick_zero)
+    assert res["5m"]["vwap"] is None
+
+def test_cumulative_volume_deltas_and_reset():
+    agg = CandleAggregator()
+    # Sequence: 1000, 1100, 1250, 1300
+    t1 = NormalizedTick(symbol="TCS.NS", ltp=3500.0, volume=1000, timestamp=1700000000.0, is_cumulative_volume=True)
+    r1 = agg.process_tick(t1)
+    assert r1["5m"]["volume"] == 0 # Baseline
+
+    t2 = NormalizedTick(symbol="TCS.NS", ltp=3505.0, volume=1100, timestamp=1700000005.0, is_cumulative_volume=True)
+    r2 = agg.process_tick(t2)
+    assert r2["5m"]["volume"] == 100
+
+    t3 = NormalizedTick(symbol="TCS.NS", ltp=3510.0, volume=1250, timestamp=1700000010.0, is_cumulative_volume=True)
+    r3 = agg.process_tick(t3)
+    assert r3["5m"]["volume"] == 250 # 100 + 150
+
+    t4 = NormalizedTick(symbol="TCS.NS", ltp=3515.0, volume=1300, timestamp=1700000015.0, is_cumulative_volume=True)
+    r4 = agg.process_tick(t4)
+    assert r4["5m"]["volume"] == 300 # 100 + 150 + 50
+
+    # Reset: 1300 -> 50
+    t5 = NormalizedTick(symbol="TCS.NS", ltp=3520.0, volume=50, timestamp=1700000020.0, is_cumulative_volume=True)
+    r5 = agg.process_tick(t5)
+    assert r5["5m"]["volume"] == 350 # Added 50 with no negative volume
+
 def test_paper_trading_engine():
     engine = PaperTradingEngine(initial_capital=1000000.0)
     order = PaperOrderRequest(
@@ -58,27 +98,22 @@ def test_paper_trading_engine():
     assert res["status"] == "FILLED"
     assert len(engine.positions) == 1
 
-def test_backtester():
-    np.random.seed(42)
-    dates = pd.date_range("2026-01-01", periods=100, freq="5min")
-    close = 100 + np.cumsum(np.random.randn(100))
-    high = close + np.random.rand(100)
-    low = close - np.random.rand(100)
-    open_p = close + np.random.randn(100) * 0.1
-    vol = np.random.randint(100, 1000, 100)
-
+def test_backtester_conservative_execution():
+    # Construct bars (len >= 15) where bar 2 touches BOTH target and stop
+    n_bars = 20
     df = pd.DataFrame({
-        "time": dates.astype(int) // 10**9,
-        "open": open_p,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": vol,
-        "buy_signal": [i % 10 == 0 for i in range(100)],
-        "sell_signal": [i % 10 == 5 for i in range(100)]
+        "time": [1700000000 + i * 300 for i in range(n_bars)],
+        "open": [100.0] * n_bars,
+        "high": [101.0 if i != 2 else 150.0 for i in range(n_bars)], # Bar 2 high touches target
+        "low": [99.0 if i != 2 else 50.0 for i in range(n_bars)],    # Bar 2 low touches stop
+        "close": [100.0] * n_bars,
+        "volume": [1000] * n_bars,
+        "buy_signal": [True if i == 1 else False for i in range(n_bars)],
+        "sell_signal": [False] * n_bars
     })
-
-    bt = EventDrivenBacktester(initial_capital=100000.0)
-    results = bt.run_backtest(df)
+    bt = EventDrivenBacktester(initial_capital=100000.0, slippage_pct=0.0, brokerage_per_trade=0.0)
+    results = bt.run_backtest(df, target_atr_multiple=1.0, stop_atr_multiple=1.0)
     assert results["status"] == "SUCCESS"
-    assert "total_return_pct" in results
+    assert results["totalTrades"] == 1
+    # Conservative policy: stop loss prioritized over target on ambiguous bar
+    assert results["trades"][0]["reason"] == "STOP_LOSS"

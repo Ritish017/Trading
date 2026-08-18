@@ -1,13 +1,46 @@
+import time
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Optional
 from backend.app.ai_engine.contracts import TechnicalSnapshot, DerivativeSnapshot, DataFreshness
 from backend.app.quant_engine.indicators import detect_support_resistance
 
-def compute_market_features(candles: List[Dict[str, Any]], current_price: float, prev_close: float) -> TechnicalSnapshot:
+def determine_data_freshness(latest_timestamp: Optional[float], is_live_provider: bool = False) -> DataFreshness:
     """
-    Compute comprehensive quantitative and technical feature vector from historical OHLCV candles.
-    Returns TechnicalSnapshot with DataFreshness.UNAVAILABLE and None values if insufficient data.
+    Truthful data freshness determination based on verified timestamp age and provider status.
+    - LIVE: Active live feed with tick/candle timestamp within last 60 seconds.
+    - RECENT: Timestamp within last 5 minutes.
+    - STALE: Timestamp within last 24 hours.
+    - UNAVAILABLE: Missing timestamp, older than 24 hours, or unconfigured feed.
+    """
+    if latest_timestamp is None or latest_timestamp <= 0:
+        return DataFreshness.UNAVAILABLE
+
+    now = time.time()
+    age = now - latest_timestamp
+
+    if age < 0: # Future or slight clock skew: treat as recent unless live
+        return DataFreshness.LIVE if is_live_provider else DataFreshness.RECENT
+
+    if is_live_provider and age <= 60.0:
+        return DataFreshness.LIVE
+    elif age <= 300.0:
+        return DataFreshness.RECENT
+    elif age <= 86400.0:
+        return DataFreshness.STALE
+    else:
+        return DataFreshness.UNAVAILABLE
+
+def compute_market_features(
+    candles: List[Dict[str, Any]], 
+    current_price: float, 
+    prev_close: float,
+    is_live_feed: bool = False
+) -> TechnicalSnapshot:
+    """
+    Compute comprehensive quantitative and technical feature vector from OHLCV candles.
+    Data sufficiency (candle count) determines indicator presence (returning None when insufficient).
+    Data freshness is evaluated strictly from actual timestamps and provider state.
     """
     if not candles or len(candles) < 5:
         return TechnicalSnapshot(
@@ -15,6 +48,16 @@ def compute_market_features(candles: List[Dict[str, Any]], current_price: float,
             resistance_levels=[],
             freshness=DataFreshness.UNAVAILABLE
         )
+
+    # Extract latest candle timestamp for truthful freshness calculation
+    last_candle = candles[-1]
+    latest_ts = last_candle.get("timestamp") or last_candle.get("time")
+    try:
+        latest_ts = float(latest_ts) if latest_ts is not None else None
+    except (ValueError, TypeError):
+        latest_ts = None
+
+    freshness_level = determine_data_freshness(latest_ts, is_live_provider=is_live_feed)
 
     df = pd.DataFrame(candles)
     close = df['close'].astype(float)
@@ -25,11 +68,11 @@ def compute_market_features(candles: List[Dict[str, Any]], current_price: float,
     # 1. EMAs - require actual sufficiency of bars for each period
     ema20_series = close.ewm(span=20, adjust=False).mean() if len(close) >= 20 else None
     ema50_series = close.ewm(span=50, adjust=False).mean() if len(close) >= 50 else None
-    ema200_series = close.ewm(span=200, adjust=False).mean() if len(close) >= 200 else None
+    ema2000_series = close.ewm(span=200, adjust=False).mean() if len(close) >= 200 else None
 
     ema_20 = float(ema20_series.iloc[-1]) if ema20_series is not None and len(ema20_series) > 0 else None
     ema_50 = float(ema50_series.iloc[-1]) if ema50_series is not None and len(ema50_series) > 0 else None
-    ema_200 = float(ema200_series.iloc[-1]) if ema200_series is not None and len(ema200_series) > 0 else None
+    ema_200 = float(ema2000_series.iloc[-1]) if ema2000_series is not None and len(ema2000_series) > 0 else None
 
     # 2. RSI (14)
     delta = close.diff()
@@ -69,7 +112,7 @@ def compute_market_features(candles: List[Dict[str, Any]], current_price: float,
     # 5. Relative Volume (RVOL) = Current Volume / 20-period SMA Volume
     vol_sma20 = volume.rolling(window=min(20, len(volume)), min_periods=5).mean()
     current_vol = float(volume.iloc[-1]) if len(volume) > 0 else 0.0
-    if len(vol_sma20) > 0 and vol_sma20.iloc[-1] > 0:
+    if len(vol_sma20) > 0 and vol_sma20.iloc[-1] > 0 and current_vol > 0:
         rvol = float(current_vol / vol_sma20.iloc[-1])
     else:
         rvol = None
@@ -88,8 +131,6 @@ def compute_market_features(candles: List[Dict[str, Any]], current_price: float,
     levels = detect_support_resistance(df)
     sup_sorted = [s for s in levels["support"] if s < current_price][:3]
     res_sorted = [r for r in levels["resistance"] if r > current_price][:3]
-
-    freshness_level = DataFreshness.LIVE if len(candles) >= 20 else DataFreshness.RECENT
 
     return TechnicalSnapshot(
         rsi_14=round(rsi_14, 1) if rsi_14 is not None else None,

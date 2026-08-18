@@ -8,7 +8,8 @@ import {
   RotateCcw, 
   BookOpen, 
   Sparkles,
-  Zap
+  Zap,
+  FlaskConical
 } from 'lucide-react';
 
 export type ActivePage = 
@@ -18,7 +19,8 @@ export type ActivePage =
   | 'institutional'
   | 'portfolio'
   | 'backtest'
-  | 'learn';
+  | 'learn'
+  | 'strategylab';
 
 interface NavigationTabsProps {
   activePage: ActivePage;
@@ -87,6 +89,14 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
       badge: 'Academy',
       badgeColor: 'bg-purple-500/10 text-purple-300 border-purple-500/20',
       color: 'text-purple-400',
+    },
+    {
+      id: 'strategylab' as ActivePage,
+      label: 'Strategy Lab',
+      icon: FlaskConical,
+      badge: 'NEW',
+      badgeColor: 'bg-violet-500/10 text-violet-300 border-violet-500/20',
+      color: 'text-violet-400',
     },
   ];
 

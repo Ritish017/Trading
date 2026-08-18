@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Callable
+from dataclasses import dataclass, field
+from enum import Enum
 from backend.app.quant_engine.indicators import (
     calculate_ema, calculate_vwap, calculate_rsi, calculate_atr, calculate_relative_volume
 )
@@ -54,3 +56,47 @@ class StrategyHypothesis:
         res['sell_signal'] = (res['close'] < res['ema20']) | (res['rsi14'] < 45.0)
 
         return res
+
+
+# ---------------------------------------------------------------------------
+# Strategy Lab Data Models
+# ---------------------------------------------------------------------------
+
+class StrategyState(str, Enum):
+    ACTIVE = "ACTIVE"           # All entry rules pass
+    PARTIAL = "PARTIAL"         # >=50% entry rules pass (all computable)
+    INACTIVE = "INACTIVE"       # All rules computable, none pass
+    CONFLICTED = "CONFLICTED"   # Entry AND exit signals simultaneously active
+    UNAVAILABLE = "UNAVAILABLE" # >50% of rules cannot be evaluated (missing data)
+    STALE = "STALE"             # Data is too old to be trusted
+
+
+class RuleOutcome(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    UNAVAILABLE = "UNAVAILABLE"  # Dependency value is None / NaN
+
+
+@dataclass
+class StrategyRule:
+    """A single evaluable condition within a strategy."""
+    rule_id: str
+    label: str                    # Human-readable description
+    dependency_keys: List[str]    # Indicator keys required from the feature vector
+    # condition_fn: (feature_vector: Dict[str, Any]) -> Optional[bool]
+    # Returns True (PASS), False (FAIL), None (UNAVAILABLE)
+    condition_fn: Callable        # Not serialised — lives only in the evaluator
+
+
+@dataclass
+class StrategyDefinition:
+    """Immutable description of a systematic strategy."""
+    strategy_id: str
+    name: str
+    category: str                 # e.g. "Momentum", "Mean-Reversion", "Breakout"
+    description: str
+    timeframe_hint: str           # Suggested timeframe e.g. "5m", "15m"
+    min_candles: int              # Minimum bars before evaluation is meaningful
+    entry_rules: List[StrategyRule] = field(default_factory=list)
+    exit_rules: List[StrategyRule] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)

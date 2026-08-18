@@ -51,8 +51,8 @@ export const PaperTradingModal: React.FC<PaperTradingModalProps> = ({
       side,
       quantity,
       price: stock.price,
-      targetPrice: Number((stock.price * (side === 'BUY' ? 1.05 : 0.95)).toFixed(2)),
-      stopLoss: Number((stock.price * (side === 'BUY' ? 0.97 : 1.03)).toFixed(2)),
+      targetPrice: undefined,
+      stopLoss: undefined,
     });
   };
 

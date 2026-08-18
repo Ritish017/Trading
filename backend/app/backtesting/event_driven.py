@@ -52,7 +52,7 @@ class EventDrivenBacktester:
                 (df['low'] - df['close'].shift(1)).abs()
             )
         )
-        df['atr'] = tr.rolling(min(14, len(df)), min_periods=1).mean().fillna(df['close'] * 0.01)
+        df['atr'] = tr.rolling(min(14, len(df)), min_periods=1).mean().shift(1).bfill().fillna(df['close'] * 0.01)
 
         for i in range(1, len(df)):
             row = df.iloc[i]
@@ -62,7 +62,8 @@ class EventDrivenBacktester:
 
             if not in_position:
                 # Check Entry Condition
-                if row.get(entry_signal_col, False):
+                is_entry = bool(row[entry_signal_col]) if entry_signal_col in row else False
+                if is_entry:
                     exec_price = cur_price * (1.0 + self.slippage_pct / 100.0)
                     position_size = capital * 0.10 # Risk 10% capital per position
                     qty = max(int(position_size / exec_price), 1)
@@ -75,14 +76,26 @@ class EventDrivenBacktester:
                 target_p = entry_price + (atr * target_atr_multiple)
                 stop_p = entry_price - (atr * stop_atr_multiple)
 
-                is_exit_signal = row.get(exit_signal_col, False)
+                is_exit_signal = bool(row[exit_signal_col]) if exit_signal_col in row else False
                 hit_target = row['high'] >= target_p
                 hit_stop = row['low'] <= stop_p
 
                 if is_exit_signal or hit_target or hit_stop:
-                    exit_p = target_p if hit_target else (stop_p if hit_stop else cur_price)
+                    # Conservative deterministic execution: if both target and stop touched on same bar, assume stop hit first
+                    if hit_target and hit_stop:
+                        exit_p = stop_p
+                        exit_reason = "STOP_LOSS"
+                    elif hit_stop:
+                        exit_p = stop_p
+                        exit_reason = "STOP_LOSS"
+                    elif hit_target:
+                        exit_p = target_p
+                        exit_reason = "TARGET"
+                    else:
+                        exit_p = cur_price
+                        exit_reason = "SIGNAL"
+
                     exec_exit_price = exit_p * (1.0 - self.slippage_pct / 100.0)
-                    
                     proceeds = qty * exec_exit_price - self.brokerage_per_trade
                     capital += proceeds
                     pnl = proceeds - (qty * entry_price)
@@ -96,7 +109,7 @@ class EventDrivenBacktester:
                         "quantity": qty,
                         "pnl": round(pnl, 2),
                         "pnl_pct": round(pnl_pct, 2),
-                        "reason": "TARGET" if hit_target else ("STOP_LOSS" if hit_stop else "SIGNAL")
+                        "reason": exit_reason
                     })
 
                     in_position = False
@@ -124,12 +137,20 @@ class EventDrivenBacktester:
         returns = eq_series.pct_change().dropna()
         sharpe = round(float(np.sqrt(252) * (returns.mean() / (returns.std() + 1e-9))), 2) if len(returns) > 1 else 0.0
         
-        # Standard Annualization based on trading duration
-        # Assume 75 5m candles per Indian trading day (09:15 to 15:30 IST)
-        num_trading_days = max(1.0, len(df) / 75.0) if len(df) > 75 else max(1.0, float(len(df)))
-        years = max(num_trading_days / 252.0, 0.05)
-        if capital > 0:
-            cagr = round((((capital / self.initial_capital) ** (1.0 / years)) - 1.0) * 100.0, 2)
+        # Timestamp-derived annualized CAGR calculation
+        start_ts = df.iloc[0].get('timestamp') or df.iloc[0].get('time')
+        end_ts = df.iloc[-1].get('timestamp') or df.iloc[-1].get('time')
+        try:
+            start_val = float(start_ts)
+            end_val = float(end_ts)
+            elapsed_seconds = max(0.0, end_val - start_val)
+            seconds_per_year = 365.25 * 86400.0
+            elapsed_years = max(elapsed_seconds / seconds_per_year, 0.01) if elapsed_seconds > 0 else max(len(df) / (75.0 * 252.0), 0.01)
+        except (ValueError, TypeError):
+            elapsed_years = max(len(df) / (75.0 * 252.0), 0.01)
+
+        if capital > 0 and self.initial_capital > 0:
+            cagr = round((((capital / self.initial_capital) ** (1.0 / elapsed_years)) - 1.0) * 100.0, 2)
         else:
             cagr = -100.0
 

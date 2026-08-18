@@ -19,7 +19,7 @@ def calculate_vwap(df: pd.DataFrame) -> pd.Series:
     tp_vol = typical_price * df['volume']
     cum_tp_vol = tp_vol.cumsum()
     cum_vol = df['volume'].cumsum()
-    vwap = np.where(cum_vol > 0, cum_tp_vol / cum_vol, df['close'])
+    vwap = np.where(cum_vol > 0, cum_tp_vol / cum_vol, np.nan)
     return pd.Series(vwap, index=df.index)
 
 def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:

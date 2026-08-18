@@ -21,11 +21,11 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
 
-  const fiiCash = fiiDiiFlow?.fiiCashNetCr ?? 1840.5;
-  const diiCash = fiiDiiFlow?.diiCashNetCr ?? 1210.8;
-  const adv = breadth?.advances ?? 1482;
-  const dec = breadth?.declines ?? 840;
-  const ratio = breadth?.ratio ?? 1.76;
+  const fiiCash = fiiDiiFlow?.fiiCashNetCr;
+  const diiCash = fiiDiiFlow?.diiCashNetCr;
+  const adv = breadth?.advances;
+  const dec = breadth?.declines;
+  const ratio = breadth?.ratio;
 
   return (
     <header className="bg-[#14151b] border-b border-stone-800/80 px-4 py-3 flex flex-wrap items-center justify-between gap-3 select-none shrink-0">
@@ -56,8 +56,8 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           <Globe className="w-3.5 h-3.5 text-sky-400" />
           <div className="flex flex-col">
             <span className="text-[9px] text-stone-400 font-sans uppercase">FII Net Cash</span>
-            <span className={`font-bold ${fiiCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {fiiCash >= 0 ? '+' : ''}₹{fiiCash.toLocaleString()} Cr
+            <span className={`font-bold ${fiiCash !== undefined && fiiCash !== null ? (fiiCash >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-stone-500'}`}>
+              {fiiCash !== undefined && fiiCash !== null ? `${fiiCash >= 0 ? '+' : ''}₹${fiiCash.toLocaleString()} Cr` : 'UNAVAILABLE'}
             </span>
           </div>
         </div>
@@ -68,8 +68,8 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           <Landmark className="w-3.5 h-3.5 text-purple-400" />
           <div className="flex flex-col">
             <span className="text-[9px] text-stone-400 font-sans uppercase">DII Net Cash</span>
-            <span className={`font-bold ${diiCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {diiCash >= 0 ? '+' : ''}₹{diiCash.toLocaleString()} Cr
+            <span className={`font-bold ${diiCash !== undefined && diiCash !== null ? (diiCash >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-stone-500'}`}>
+              {diiCash !== undefined && diiCash !== null ? `${diiCash >= 0 ? '+' : ''}₹${diiCash.toLocaleString()} Cr` : 'UNAVAILABLE'}
             </span>
           </div>
         </div>
@@ -79,7 +79,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         <div className="flex flex-col">
           <span className="text-[9px] text-stone-400 font-sans uppercase">NSE Market Breadth</span>
           <span className="font-bold text-sky-400">
-            {adv} A : {dec} D ({ratio}x)
+            {adv !== undefined && dec !== undefined ? `${adv} A : ${dec} D (${ratio ?? '-'}x)` : 'UNAVAILABLE'}
           </span>
         </div>
       </div>

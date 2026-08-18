@@ -226,8 +226,9 @@ class StrategyCopilotAgent:
     """
     Evidence-grounded Strategy Copilot.
 
-    Receives a StrategyEvaluationResult dict and a user message.
-    Grounds every answer in the verified, deterministically-computed rule
+    Receives a StrategyEvaluationResult dict, optional multi-strategy context,
+    market regime, confluence, and multi-turn chat history.
+    Grounds every answer strictly in the verified, deterministically-computed rule
     evaluations. Never invents indicator values or declares strategy states.
     The copilot is read-only: it interprets the computed evidence only.
     """
@@ -236,22 +237,24 @@ class StrategyCopilotAgent:
         self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
-    def _build_evidence_block(self, evaluation: Dict[str, Any]) -> str:
-        """Format the evaluation result as a terse evidence block for the prompt."""
+    def _build_evidence_block(self, evaluation: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> str:
+        """Format the evaluation result and broader market context as a terse evidence block."""
         lines = [
             f"Strategy: {evaluation.get('strategy_name', 'Unknown')}",
+            f"Category: {evaluation.get('category', 'Unknown')}",
             f"State: {evaluation.get('state', 'UNKNOWN')}",
-            f"Data Freshness: {evaluation.get('data_freshness', 'UNKNOWN')}",
+            f"Data Freshness: {evaluation.get('data_freshness', 'UNKNOWN')} ({evaluation.get('data_age_seconds', 'N/A')}s ago)",
             f"Candles Used: {evaluation.get('candles_used', 0)}",
             f"Evaluated At: {evaluation.get('evaluated_at', 'N/A')}",
             "",
-            "ENTRY RULES:",
+            "ENTRY RULES & MATHEMATICS:",
         ]
         for rule in evaluation.get("rule_evaluations", []):
             if rule.get("is_entry_rule"):
+                math_note = f" [Math: {rule.get('math_detail')}]" if rule.get("math_detail") else ""
                 lines.append(
                     f"  [{rule.get('outcome', 'UNKNOWN')}] {rule.get('label', '')} "
-                    f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')})"
+                    f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')}){math_note}"
                 )
         lines.append("")
         lines.append("EXIT RULES:")
@@ -265,8 +268,25 @@ class StrategyCopilotAgent:
         if fv:
             lines.append("")
             lines.append("COMPUTED INDICATORS (verified, non-fabricated):")
-            for k, v in list(fv.items())[:12]:
+            for k, v in list(fv.items())[:14]:
                 lines.append(f"  {k}: {v}")
+
+        if context:
+            if context.get("market_regime"):
+                reg = context["market_regime"]
+                lines.append(f"\nMARKET REGIME: {reg.get('regime')} (Confidence: {reg.get('confidence')}%) - {reg.get('evidence')}")
+            if context.get("confluence"):
+                conf = context["confluence"]
+                lines.append(f"STRATEGY CONFLUENCE: {conf.get('active_count')}/{conf.get('total_strategies')} Active, "
+                             f"Bullish={conf.get('bullish_confluence')}, Reversal={conf.get('reversal_confluence')}, "
+                             f"Alignment Score={conf.get('alignment_score_pct')}%")
+                if conf.get("conflicts"):
+                    lines.append(f"CONFLICT WARNINGS: {'; '.join(conf['conflicts'])}")
+            if context.get("other_strategies"):
+                lines.append("\nOTHER STRATEGIES STATUS:")
+                for os_item in context["other_strategies"][:8]:
+                    lines.append(f"  • {os_item.get('name')}: {os_item.get('state')} ({os_item.get('passing_count')}/{os_item.get('total_count')})")
+
         return "\n".join(lines)
 
     async def answer(
@@ -274,34 +294,23 @@ class StrategyCopilotAgent:
         symbol: str,
         evaluation: Dict[str, Any],
         user_message: str,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Answer a user question about a strategy evaluation.
-
-        Parameters
-        ----------
-        symbol     : The stock/instrument symbol
-        evaluation : The StrategyEvaluationResult serialised as a dict
-        user_message : The user's question
-
-        Returns
-        -------
-        { reply: str, evidence_cited: List[str] }
+        Answer a user question about strategy evaluation with full multi-turn context.
         """
-        evidence_block = self._build_evidence_block(evaluation)
+        evidence_block = self._build_evidence_block(evaluation, context)
 
         if not self.client:
-            # Local deterministic fallback — no fabrication
             state = evaluation.get("state", "UNKNOWN")
             n_pass = evaluation.get("entry_rules_passing", 0)
             n_total = evaluation.get("entry_rules_total", 1)
             freshness = evaluation.get("data_freshness", "UNKNOWN")
+            strat_name = evaluation.get('strategy_name', 'Unknown')
             reply = (
-                f"Based on verified market data for {symbol}: "
-                f"The strategy '{evaluation.get('strategy_name', 'Unknown')}' is currently "
-                f"**{state}** — {n_pass}/{n_total} entry conditions satisfied. "
-                f"Data freshness: {freshness}. "
-                f"I can only interpret the computed evidence above; I cannot estimate or invent any values."
+                f"**{strat_name}** on **{symbol}** is currently **{state}** ({n_pass}/{n_total} conditions met). "
+                f"Data freshness: {freshness}. All rule states are deterministically verified from live indicator data."
             )
             evidence_cited = [
                 r.get("label", "") for r in evaluation.get("rule_evaluations", [])
@@ -309,22 +318,30 @@ class StrategyCopilotAgent:
             ]
             return {"reply": reply, "evidence_cited": evidence_cited}
 
-        system_prompt = f"""You are the APEX Strategy Copilot — an evidence-grounded interpreter, NOT a predictor.
+        history_str = ""
+        if chat_history:
+            history_str = "\nPREVIOUS CONVERSATION:\n" + "\n".join(
+                f"{h.get('role', 'user').upper()}: {h.get('text', '')}"
+                for h in chat_history[-6:]
+            )
 
-CORE RULES (strictly enforced):
-1. You MUST base every statement on the verified evidence block below.
-2. You CANNOT invent, estimate, or approximate any indicator value not in the evidence.
-3. You CANNOT change or override the strategy state computed by the evaluator.
-4. If data is UNAVAILABLE for a rule, say so explicitly — do not guess.
-5. Do not say "typically", "usually", "historically" without citing a specific verified value.
-6. Be concise (max 4 sentences) and cite the specific rule values.
+        system_prompt = f"""You are the APEX Strategy Copilot — an expert quantitative strategy observatory assistant.
+
+STRICT INVARIANTS:
+1. Base EVERY statement directly on the VERIFIED EVIDENCE below.
+2. CANNOT invent, approximate, or extrapolate missing metrics. If missing, say "Data unavailable".
+3. CANNOT alter the strategy state.
+4. Explain the mathematics, invalidation triggers, and comparisons factually.
+5. Keep explanations concise, professional, and quantitative. Cite exact numbers (e.g. "EMA20 = ₹1,323.15 is above EMA50 = ₹1,322.94").
+6. NEVER claim guaranteed profits or give direct financial advice.
 
 VERIFIED EVIDENCE FOR {symbol}:
 {evidence_block}
+{history_str}
 
-User question: {user_message}
+User Question: {user_message}
 
-Respond with a concise, evidence-grounded answer. Cite specific rule values (e.g. "RSI = 62.3, which passes the >55 threshold"). End with one actionable observation based solely on the computed state."""
+Answer concisely, citing exact evidence and numbers:"""
 
         try:
             response = self.client.models.generate_content(
@@ -332,7 +349,7 @@ Respond with a concise, evidence-grounded answer. Cite specific rule values (e.g
                 contents=system_prompt,
             )
             reply_text = response.text.strip() if response and response.text else (
-                "Evidence is available but the AI interpreter is temporarily unavailable."
+                "Evidence is available but the AI interpreter is temporarily offline."
             )
         except Exception as exc:
             logger.warning("StrategyCopilotAgent Gemini call failed: %s", exc)

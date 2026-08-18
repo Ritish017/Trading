@@ -30,7 +30,7 @@ from backend.app.ai_engine.contracts import (
     DataFreshness
 )
 from backend.app.strategy_engine.registry import STRATEGY_REGISTRY
-from backend.app.strategy_engine.evaluator import evaluate_all_strategies
+from backend.app.strategy_engine.evaluator import evaluate_all_strategies, evaluate_strategies_observatory
 from backend.app.ai_engine.agents import MarketResearchAgent, PersonalTradingCoach, StrategyResearchAgent, StrategyCopilotAgent
 
 logging.basicConfig(level=settings.log_level)
@@ -493,17 +493,19 @@ class StrategyEvaluateRequest(BaseModel):
 @app.post("/api/strategies/evaluate/{symbol}")
 async def evaluate_strategies(symbol: str, req: StrategyEvaluateRequest):
     """
-    Deterministically evaluate all (or selected) strategies for a given symbol.
-    If no candles are supplied, fetches them from the market data service.
-    Returns rule-level evidence: each rule value, outcome (PASS/FAIL/UNAVAILABLE),
-    and overall strategy state.
+    Deterministically evaluate all strategies for a given symbol.
+    Returns the complete Observatory payload:
+    - strategies list with rule math and historical state transitions
+    - canonical series indicators for chart overlays (EMA, VWAP, BB, ATR, MACD, RVOL)
+    - market regime classification
+    - confluence and conflict metrics
+    - verified data freshness and age
     """
     candles = req.candles
     is_live = req.is_live_feed
 
     if not candles:
         candles = await market_data_service.get_candles(symbol, "5m", 100)
-        # Infer live status from market data service
         try:
             quote = await market_data_service.get_quote(symbol)
             freshness = evaluate_quote_freshness(quote)
@@ -511,60 +513,28 @@ async def evaluate_strategies(symbol: str, req: StrategyEvaluateRequest):
         except Exception:
             is_live = False
 
-    results = evaluate_all_strategies(
+    observatory = evaluate_strategies_observatory(
         candles=candles or [],
         is_live_feed=is_live,
         strategy_ids=req.strategy_ids,
     )
-
-    # Serialise dataclass list to JSON-safe dicts
-    def _serialise(r):
-        return {
-            "strategy_id": r.strategy_id,
-            "strategy_name": r.strategy_name,
-            "category": r.category,
-            "description": r.description,
-            "state": r.state.value,
-            "entry_rules_total": r.entry_rules_total,
-            "entry_rules_passing": r.entry_rules_passing,
-            "entry_rules_unavailable": r.entry_rules_unavailable,
-            "exit_rules_triggered": r.exit_rules_triggered,
-            "exit_rules_total": r.exit_rules_total,
-            "rule_evaluations": [
-                {
-                    "rule_id": re.rule_id,
-                    "label": re.label,
-                    "dependency_keys": re.dependency_keys,
-                    "outcome": re.outcome.value,
-                    "actual_value": re.actual_value,
-                    "actual_value_label": re.actual_value_label,
-                    "is_entry_rule": re.is_entry_rule,
-                }
-                for re in r.rule_evaluations
-            ],
-            "feature_vector": r.feature_vector,
-            "data_freshness": r.data_freshness,
-            "evaluated_at": r.evaluated_at,
-            "candles_used": r.candles_used,
-            "tags": r.tags,
-        }
-
-    return [_serialise(r) for r in results]
+    return observatory
 
 
 class StrategyCopilotRequest(BaseModel):
     symbol: str
     strategy_id: str
-    evaluation_result: Dict[str, Any]  # Full serialised StrategyEvaluationResult
+    evaluation_result: Dict[str, Any]  # Serialised StrategyEvaluationResult
     user_message: str
+    chat_history: Optional[List[Dict[str, str]]] = None
+    context: Optional[Dict[str, Any]] = None
 
 
 @app.post("/api/strategies/copilot")
 async def strategy_copilot(req: StrategyCopilotRequest):
     """
-    Evidence-grounded Strategy Copilot.
-    AI interprets the pre-computed evaluation result only.
-    It cannot invent indicator values or override strategy states.
+    Evidence-grounded Strategy Copilot with conversational multi-turn context.
+    AI interprets the pre-computed evaluation result and market regime.
     """
     if not req.user_message.strip():
         raise HTTPException(status_code=400, detail="user_message cannot be empty")
@@ -572,6 +542,8 @@ async def strategy_copilot(req: StrategyCopilotRequest):
         symbol=req.symbol,
         evaluation=req.evaluation_result,
         user_message=req.user_message,
+        chat_history=req.chat_history,
+        context=req.context,
     )
     return result
 

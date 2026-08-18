@@ -1,14 +1,15 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   FlaskConical, Search, Zap, CheckCircle2, XCircle, AlertTriangle,
-  MinusCircle, RefreshCw, ChevronRight, Cpu, Activity, BarChart3,
-  TrendingUp, TrendingDown, Info, MessageSquare, Send, Loader2,
-  Shield, Clock, Database, BookOpen
+  MinusCircle, Clock, Database, ChevronDown, ChevronUp, ChevronRight,
+  TrendingUp, TrendingDown, Info, Send, Loader2, Shield, Activity,
+  Sliders, Eye, EyeOff, BarChart2, Layers, Sparkles, MessageSquare,
+  HelpCircle, RefreshCw
 } from 'lucide-react';
 import { NSEStock } from '../../types/indianMarket';
 
 // ---------------------------------------------------------------------------
-// Types
+// Types & Contracts
 // ---------------------------------------------------------------------------
 type RuleOutcome = 'PASS' | 'FAIL' | 'UNAVAILABLE';
 type StrategyState = 'ACTIVE' | 'PARTIAL' | 'INACTIVE' | 'CONFLICTED' | 'UNAVAILABLE' | 'STALE';
@@ -21,9 +22,28 @@ interface RuleEvaluation {
   actual_value: number | null;
   actual_value_label: string;
   is_entry_rule: boolean;
+  math_detail?: string | null;
 }
 
-interface StrategyEvaluationResult {
+interface ActivationEvent {
+  candle_index: number;
+  timestamp: number;
+  event_type: 'ACTIVATED' | 'INVALIDATED' | 'CONFLICT';
+  price: number;
+  strategy_id: string;
+  label: string;
+}
+
+interface HistoricalState {
+  candle_index: number;
+  timestamp: number;
+  state: StrategyState;
+  passing_count: number;
+  total_count: number;
+  price: number;
+}
+
+interface StrategyResult {
   strategy_id: string;
   strategy_name: string;
   category: string;
@@ -37,9 +57,77 @@ interface StrategyEvaluationResult {
   rule_evaluations: RuleEvaluation[];
   feature_vector: Record<string, number>;
   data_freshness: string;
+  data_age_seconds?: number | null;
   evaluated_at: string;
   candles_used: number;
   tags: string[];
+  historical_states: HistoricalState[];
+  activation_events: ActivationEvent[];
+}
+
+interface ChartCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  vwap: number;
+}
+
+interface SeriesIndicators {
+  ema20?: (number | null)[];
+  ema50?: (number | null)[];
+  ema200?: (number | null)[];
+  vwap?: (number | null)[];
+  rsi14?: (number | null)[];
+  macd?: (number | null)[];
+  macd_signal?: (number | null)[];
+  macd_histogram?: (number | null)[];
+  bb_upper?: (number | null)[];
+  bb_middle?: (number | null)[];
+  bb_lower?: (number | null)[];
+  atr14?: (number | null)[];
+  rvol?: (number | null)[];
+  supertrend_band?: (number | null)[];
+  orb_high?: (number | null)[];
+  orb_low?: (number | null)[];
+}
+
+interface MarketRegimeData {
+  regime: string;
+  confidence: number;
+  trend_strength: number;
+  volatility_status: string;
+  evidence: string;
+  metrics: Record<string, number>;
+}
+
+interface ConfluenceData {
+  active_count: number;
+  partial_count: number;
+  inactive_count: number;
+  unavailable_count: number;
+  conflicted_count: number;
+  total_strategies: number;
+  alignment_score_pct: number;
+  passing_rules_count: number;
+  total_rules_count: number;
+  bullish_confluence: number;
+  reversal_confluence: number;
+  has_conflicts: boolean;
+  conflict_reasons: string[];
+}
+
+interface ObservatoryData {
+  market_regime: MarketRegimeData;
+  confluence: ConfluenceData;
+  data_freshness: string;
+  data_age_seconds?: number | null;
+  evaluated_at: string;
+  strategies: StrategyResult[];
+  chart_indicators: SeriesIndicators;
+  candles: ChartCandle[];
 }
 
 interface CopilotMessage {
@@ -55,164 +143,830 @@ interface StrategyLabPageProps {
 }
 
 // ---------------------------------------------------------------------------
-// State Badge
+// Quick Symbols for Fast Switching
 // ---------------------------------------------------------------------------
-const STATE_CONFIG: Record<StrategyState, { label: string; bg: string; border: string; text: string; dot: string; icon: React.FC<any> }> = {
-  ACTIVE:      { label: 'ACTIVE',      bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400',  dot: 'bg-emerald-400',  icon: CheckCircle2   },
-  PARTIAL:     { label: 'PARTIAL',     bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',    dot: 'bg-amber-400',    icon: AlertTriangle  },
-  INACTIVE:    { label: 'INACTIVE',    bg: 'bg-stone-700/30',   border: 'border-stone-600/40',   text: 'text-stone-400',    dot: 'bg-stone-500',    icon: MinusCircle    },
-  CONFLICTED:  { label: 'CONFLICTED',  bg: 'bg-orange-500/15',  border: 'border-orange-500/40',  text: 'text-orange-400',   dot: 'bg-orange-400',   icon: AlertTriangle  },
-  UNAVAILABLE: { label: 'UNAVAILABLE', bg: 'bg-rose-900/20',    border: 'border-rose-700/40',    text: 'text-rose-400',     dot: 'bg-rose-500',     icon: XCircle        },
-  STALE:       { label: 'STALE',       bg: 'bg-purple-900/20',  border: 'border-purple-700/40',  text: 'text-purple-400',   dot: 'bg-purple-500',   icon: Clock          },
+const QUICK_SYMBOLS = [
+  'RELIANCE.NS',
+  'TCS.NS',
+  'HDFCBANK.NS',
+  'INFY.NS',
+  'ICICIBANK.NS',
+  'TATAMOTORS.NS',
+  'SBIN.NS',
+  'NIFTY 50',
+  'BANKNIFTY'
+];
+
+// Short Name mapping for Keypad Buttons
+const SHORT_NAMES: Record<string, string> = {
+  VWAP_MOMENTUM: 'VWAP MOM',
+  EMA_GOLDEN_CROSS: 'EMA CROSS',
+  RSI_OVERSOLD_REVERSAL: 'RSI REVERS',
+  BOLLINGER_SQUEEZE: 'BB SQUEEZE',
+  MACD_CROSSOVER: 'MACD CROSS',
+  ORB_BREAKOUT: 'ORB BREAKOUT',
+  SUPERTREND_PROXY: 'SUPERTREND',
+  RVOL_SURGE: 'RVOL SURGE',
+};
+
+// ---------------------------------------------------------------------------
+// State Badge Component
+// ---------------------------------------------------------------------------
+const STATE_STYLES: Record<StrategyState, { label: string; bg: string; border: string; text: string; dot: string; icon: React.FC<any> }> = {
+  ACTIVE:      { label: 'ACTIVE',      bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', icon: CheckCircle2 },
+  PARTIAL:     { label: 'PARTIAL',     bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   icon: AlertTriangle },
+  INACTIVE:    { label: 'INACTIVE',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    text: 'text-rose-400',    dot: 'bg-rose-500',    icon: XCircle },
+  CONFLICTED:  { label: 'CONFLICTED',  bg: 'bg-orange-500/15',  border: 'border-orange-500/40',  text: 'text-orange-400',  dot: 'bg-orange-400',  icon: AlertTriangle },
+  UNAVAILABLE: { label: 'UNAVAILABLE', bg: 'bg-stone-800/40',   border: 'border-stone-700/40',   text: 'text-stone-400',   dot: 'bg-stone-500',   icon: MinusCircle },
+  STALE:       { label: 'STALE',       bg: 'bg-purple-900/20',  border: 'border-purple-700/40',  text: 'text-purple-400',  dot: 'bg-purple-500',  icon: Clock },
 };
 
 function StateBadge({ state, size = 'md' }: { state: StrategyState; size?: 'sm' | 'md' }) {
-  const cfg = STATE_CONFIG[state] || STATE_CONFIG.UNAVAILABLE;
+  const cfg = STATE_STYLES[state] || STATE_STYLES.UNAVAILABLE;
   const Icon = cfg.icon;
-  const sizeClass = size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-xs';
+  const sizeClass = size === 'sm' ? 'px-1.5 py-0.5 text-[9px]' : 'px-2.5 py-1 text-xs';
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border font-bold font-mono ${sizeClass} ${cfg.bg} ${cfg.border} ${cfg.text}`}>
-      <Icon className={size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {cfg.label}
     </span>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Rule Row
+// Compact Strategy Keypad Tile (Part 2 & 3)
 // ---------------------------------------------------------------------------
-function RuleRow({ rule }: { rule: RuleEvaluation }) {
-  const isPass = rule.outcome === 'PASS';
-  const isUnavail = rule.outcome === 'UNAVAILABLE';
-
-  return (
-    <div className={`flex items-start gap-2.5 px-3 py-2.5 rounded-lg border text-xs transition-all ${
-      isPass    ? 'bg-emerald-900/10 border-emerald-800/30' :
-      isUnavail ? 'bg-stone-800/30 border-stone-700/30' :
-                  'bg-rose-900/10 border-rose-900/20'
-    }`}>
-      <div className="mt-0.5 shrink-0">
-        {isPass    ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> :
-         isUnavail ? <AlertTriangle className="w-3.5 h-3.5 text-stone-500" /> :
-                     <XCircle className="w-3.5 h-3.5 text-rose-400" />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <span className={`font-medium ${isPass ? 'text-stone-200' : isUnavail ? 'text-stone-500' : 'text-stone-300'}`}>
-          {rule.label}
-        </span>
-        <div className={`mt-0.5 font-mono text-[10px] ${
-          isPass ? 'text-emerald-400' : isUnavail ? 'text-stone-600' : 'text-rose-400'
-        }`}>
-          {rule.actual_value_label !== 'UNAVAILABLE' ? rule.actual_value_label : 'Value unavailable — insufficient data'}
-        </div>
-      </div>
-      <span className={`shrink-0 font-mono font-black text-[9px] px-1.5 py-0.5 rounded border ${
-        isPass    ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' :
-        isUnavail ? 'bg-stone-800 border-stone-700 text-stone-600' :
-                    'bg-rose-900/30 border-rose-700/30 text-rose-400'
-      }`}>
-        {rule.outcome}
-      </span>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Strategy Card (left matrix)
-// ---------------------------------------------------------------------------
-function StrategyCard({
-  result,
+function StrategyKeypadButton({
+  strategy,
   isSelected,
   onClick,
 }: {
-  result: StrategyEvaluationResult;
+  strategy: StrategyResult;
   isSelected: boolean;
   onClick: () => void;
 }) {
-  const cfg = STATE_CONFIG[result.state] || STATE_CONFIG.UNAVAILABLE;
-  const pct = result.entry_rules_total > 0
-    ? Math.round((result.entry_rules_passing / result.entry_rules_total) * 100)
-    : 0;
+  const cfg = STATE_STYLES[strategy.state] || STATE_STYLES.UNAVAILABLE;
+  const shortName = SHORT_NAMES[strategy.strategy_id] || strategy.strategy_name;
 
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left p-3.5 rounded-xl border transition-all duration-200 group ${
+      className={`relative p-2.5 rounded-xl border text-left transition-all duration-150 cursor-pointer flex flex-col justify-between ${
         isSelected
-          ? `${cfg.bg} ${cfg.border} ring-1 ring-violet-500/40`
-          : 'bg-[#181a24] border-stone-800/60 hover:border-stone-700/60 hover:bg-stone-800/20'
+          ? 'bg-violet-950/40 border-violet-500/80 shadow-lg shadow-violet-500/20 ring-1 ring-violet-400/50'
+          : 'bg-[#151720] border-stone-800/80 hover:border-stone-700 hover:bg-[#1c1e29]'
       }`}
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
+      <div className="flex items-start justify-between gap-1 w-full mb-1">
         <div className="flex-1 min-w-0">
-          <div className="font-bold text-sm text-stone-100 truncate">{result.strategy_name}</div>
-          <div className="text-[10px] font-mono text-stone-500 mt-0.5">{result.category}</div>
+          <div className="font-extrabold text-xs text-stone-100 truncate tracking-tight">{shortName}</div>
+          <div className="text-[9px] font-mono text-stone-500 uppercase">{strategy.category}</div>
         </div>
-        <StateBadge state={result.state} size="sm" />
+        <StateBadge state={strategy.state} size="sm" />
       </div>
 
-      {/* Progress bar */}
-      <div className="mt-2">
-        <div className="flex justify-between items-center mb-1">
-          <span className="text-[10px] text-stone-500 font-mono">
-            {result.entry_rules_passing}/{result.entry_rules_total} rules pass
-          </span>
-          {result.entry_rules_unavailable > 0 && (
-            <span className="text-[10px] text-stone-600 font-mono">
-              {result.entry_rules_unavailable} unavail
-            </span>
-          )}
-        </div>
-        <div className="h-1 bg-stone-800 rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              result.state === 'ACTIVE'  ? 'bg-emerald-500' :
-              result.state === 'PARTIAL' ? 'bg-amber-500' :
-              result.state === 'CONFLICTED' ? 'bg-orange-500' :
-              'bg-stone-700'
-            }`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
+      <div className="flex items-center justify-between text-[10px] font-mono text-stone-400 mt-1 border-t border-stone-800/40 pt-1.5 w-full">
+        <span className="text-stone-500">Coverage</span>
+        <span className="font-bold text-stone-300">
+          {strategy.entry_rules_passing}/{strategy.entry_rules_total}
+        </span>
       </div>
 
-      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-        {result.tags.slice(0, 3).map(t => (
-          <span key={t} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-stone-800 text-stone-500 border border-stone-700/50">
-            {t}
-          </span>
-        ))}
-      </div>
+      {isSelected && (
+        <div className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" />
+      )}
     </button>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Feature Vector Panel
+// Strategy Alignment & Confluence Gauge (Part 4 & 25)
 // ---------------------------------------------------------------------------
-function FeatureVectorPanel({ fv }: { fv: Record<string, number> }) {
-  const entries = Object.entries(fv);
-  if (entries.length === 0) return null;
+function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
+  const total = confluence.total_strategies || 8;
+  const actPct = (confluence.active_count / total) * 100;
+  const partPct = (confluence.partial_count / total) * 100;
+  const inactPct = (confluence.inactive_count / total) * 100;
+  const unavailPct = (confluence.unavailable_count / total) * 100;
+
   return (
-    <div className="bg-[#0e0f15] border border-stone-800/60 rounded-xl p-3">
-      <div className="flex items-center gap-1.5 mb-2">
-        <Database className="w-3 h-3 text-stone-500" />
-        <span className="text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">Computed Indicators</span>
+    <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <Layers className="w-3.5 h-3.5 text-violet-400" />
+          <span className="text-xs font-bold text-stone-200 uppercase tracking-wide">Strategy Alignment & Confluence</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-mono">
+          <span className="text-emerald-400 font-bold">{confluence.active_count} Active</span>
+          <span className="text-stone-600">·</span>
+          <span className="text-amber-400 font-bold">{confluence.partial_count} Partial</span>
+          <span className="text-stone-600">·</span>
+          <span className="text-rose-400 font-bold">{confluence.inactive_count} Inactive</span>
+          {confluence.unavailable_count > 0 && (
+            <>
+              <span className="text-stone-600">·</span>
+              <span className="text-stone-400 font-bold">{confluence.unavailable_count} N/A</span>
+            </>
+          )}
+        </div>
       </div>
-      <div className="grid grid-cols-2 gap-1">
-        {entries.map(([k, v]) => (
-          <div key={k} className="flex justify-between items-center px-2 py-1 rounded bg-stone-900/40 border border-stone-800/30">
-            <span className="text-[10px] font-mono text-stone-500 uppercase">{k}</span>
-            <span className="text-[10px] font-mono text-stone-300 font-bold">{typeof v === 'number' ? v.toFixed(3) : String(v)}</span>
+
+      {/* Visual Alignment Meter */}
+      <div className="h-2 w-full bg-stone-900 rounded-full overflow-hidden flex border border-stone-800">
+        <div style={{ width: `${actPct}%` }} className="bg-emerald-500 transition-all duration-500" title={`Active: ${confluence.active_count}`} />
+        <div style={{ width: `${partPct}%` }} className="bg-amber-500 transition-all duration-500" title={`Partial: ${confluence.partial_count}`} />
+        <div style={{ width: `${inactPct}%` }} className="bg-rose-500/80 transition-all duration-500" title={`Inactive: ${confluence.inactive_count}`} />
+        <div style={{ width: `${unavailPct}%` }} className="bg-stone-700 transition-all duration-500" title={`Unavailable: ${confluence.unavailable_count}`} />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 mt-2 text-[11px] font-mono">
+        <div className="flex items-center gap-3">
+          <span className="text-stone-400">
+            Rule Satisfaction: <strong className="text-stone-200">{confluence.passing_rules_count}/{confluence.total_rules_count}</strong> ({confluence.alignment_score_pct}%)
+          </span>
+          <span className="text-stone-400">
+            Bullish Confluence: <strong className="text-emerald-400">{confluence.bullish_confluence}</strong>
+          </span>
+          {confluence.reversal_confluence > 0 && (
+            <span className="text-stone-400">
+              Reversal / Exhaustion: <strong className="text-amber-400">{confluence.reversal_confluence}</strong>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {confluence.has_conflicts && (
+        <div className="mt-2 p-2 rounded-lg bg-orange-950/30 border border-orange-700/40 text-orange-300 text-xs flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-orange-400" />
+          <span>{confluence.conflict_reasons.join(' ')}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Interactive Observatory Trading Chart (Part 5, 6, 7, 8, 9)
+// ---------------------------------------------------------------------------
+interface ObservatoryChartProps {
+  candles: ChartCandle[];
+  indicators: SeriesIndicators;
+  selectedStrategy: StrategyResult | null;
+  timeframe: string;
+  onTimeframeChange: (tf: string) => void;
+}
+
+function ObservatoryChart({
+  candles,
+  indicators,
+  selectedStrategy,
+  timeframe,
+  onTimeframeChange,
+}: ObservatoryChartProps) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  const n = candles.length;
+  const chartWidth = 840;
+  const priceChartHeight = 240;
+  const subpanelHeight = 70;
+  const subpanelGap = 16;
+
+  // Determine if strategy has subpanel (RSI or MACD)
+  const isRSISubpanel = selectedStrategy?.strategy_id === 'RSI_OVERSOLD_REVERSAL' || selectedStrategy?.strategy_id === 'VWAP_MOMENTUM';
+  const isMACDSubpanel = selectedStrategy?.strategy_id === 'MACD_CROSSOVER';
+  const hasSubpanel = isRSISubpanel || isMACDSubpanel;
+
+  const totalHeight = priceChartHeight + (hasSubpanel ? subpanelHeight + subpanelGap : 0) + 40;
+
+  if (n === 0) {
+    return (
+      <div className="h-72 flex items-center justify-center text-stone-500 font-mono text-xs bg-[#11131a] rounded-2xl border border-stone-800">
+        No candle history available for chart rendering
+      </div>
+    );
+  }
+
+  const highs = candles.map(c => c.high);
+  const lows = candles.map(c => c.low);
+  const minPrice = Math.min(...lows) * 0.998;
+  const maxPrice = Math.max(...highs) * 1.002;
+  const priceRange = maxPrice - minPrice || 1;
+
+  const candleStep = chartWidth / n;
+  const candleWidth = Math.max(1, candleStep * 0.7);
+
+  const getY = (val: number) => {
+    return priceChartHeight - ((val - minPrice) / priceRange) * priceChartHeight;
+  };
+
+  const getSubY = (val: number, minV: number, maxV: number) => {
+    const range = maxV - minV || 1;
+    const top = priceChartHeight + subpanelGap;
+    return top + subpanelHeight - ((val - minV) / range) * subpanelHeight;
+  };
+
+  // Generate SVG paths for indicators
+  const makeLinePath = (series?: (number | null)[]) => {
+    if (!series || series.length === 0) return '';
+    let path = '';
+    let started = false;
+    for (let i = 0; i < Math.min(n, series.length); i++) {
+      const v = series[i];
+      if (v !== null && v !== undefined && !isNaN(v)) {
+        const x = i * candleStep + candleStep / 2;
+        const y = getY(v);
+        if (!started) {
+          path += `M ${x} ${y}`;
+          started = true;
+        } else {
+          path += ` L ${x} ${y}`;
+        }
+      }
+    }
+    return path;
+  };
+
+  // Generate Subpanel Path
+  const makeSubpanelPath = (series?: (number | null)[], minV = 0, maxV = 100) => {
+    if (!series || series.length === 0) return '';
+    let path = '';
+    let started = false;
+    for (let i = 0; i < Math.min(n, series.length); i++) {
+      const v = series[i];
+      if (v !== null && v !== undefined && !isNaN(v)) {
+        const x = i * candleStep + candleStep / 2;
+        const y = getSubY(v, minV, maxV);
+        if (!started) {
+          path += `M ${x} ${y}`;
+          started = true;
+        } else {
+          path += ` L ${x} ${y}`;
+        }
+      }
+    }
+    return path;
+  };
+
+  // Active Candle for inspector
+  const activeIdx = hoverIndex !== null && hoverIndex >= 0 && hoverIndex < n ? hoverIndex : n - 1;
+  const activeCandle = candles[activeIdx];
+
+  // Mouse handler
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * chartWidth;
+    const idx = Math.min(Math.max(Math.floor(x / candleStep), 0), n - 1);
+    setHoverIndex(idx);
+  };
+
+  // Check which overlays to render based on selected strategy
+  const sid = selectedStrategy?.strategy_id;
+  const showEMA20 = sid === 'EMA_GOLDEN_CROSS' || sid === 'VWAP_MOMENTUM' || sid === 'RVOL_SURGE';
+  const showEMA50 = sid === 'EMA_GOLDEN_CROSS' || sid === 'VWAP_MOMENTUM' || sid === 'MACD_CROSSOVER' || sid === 'SUPERTREND_PROXY';
+  const showEMA200 = sid === 'EMA_GOLDEN_CROSS';
+  const showVWAP = sid === 'VWAP_MOMENTUM' || sid === 'RSI_OVERSOLD_REVERSAL' || sid === 'ORB_BREAKOUT' || sid === 'SUPERTREND_PROXY';
+  const showBollinger = sid === 'BOLLINGER_SQUEEZE';
+  const showSupertrend = sid === 'SUPERTREND_PROXY';
+  const showORB = sid === 'ORB_BREAKOUT';
+
+  return (
+    <div className="bg-[#12131a] border border-stone-800/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl">
+      {/* Chart Top Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-stone-800/60 text-xs">
+        <div className="flex items-center gap-3">
+          <span className="font-mono font-black text-white text-sm">₹{activeCandle.close.toFixed(2)}</span>
+          <div className="flex items-center gap-2 text-[10px] font-mono text-stone-400">
+            <span>O: ₹{activeCandle.open.toFixed(2)}</span>
+            <span>H: ₹{activeCandle.high.toFixed(2)}</span>
+            <span>L: ₹{activeCandle.low.toFixed(2)}</span>
+            <span>C: ₹{activeCandle.close.toFixed(2)}</span>
+          </div>
+        </div>
+
+        {/* Timeframe selector */}
+        <div className="flex items-center gap-1 bg-stone-900/80 p-0.5 rounded-lg border border-stone-800">
+          {(['1m', '5m', '15m', '1h', '1D'] as const).map(tf => (
+            <button
+              key={tf}
+              onClick={() => onTimeframeChange(tf)}
+              className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded transition-all cursor-pointer ${
+                timeframe === tf
+                  ? 'bg-violet-600 text-white shadow-sm'
+                  : 'text-stone-400 hover:text-stone-200'
+              }`}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Active Overlays Legend */}
+      <div className="flex items-center gap-3 text-[10px] font-mono text-stone-400 flex-wrap">
+        <span className="text-stone-500 font-bold">Overlays:</span>
+        {showEMA20 && <span className="flex items-center gap-1 text-cyan-400"><span className="w-2 h-0.5 bg-cyan-400 inline-block" /> EMA20</span>}
+        {showEMA50 && <span className="flex items-center gap-1 text-amber-400"><span className="w-2 h-0.5 bg-amber-400 inline-block" /> EMA50</span>}
+        {showEMA200 && <span className="flex items-center gap-1 text-purple-400"><span className="w-2 h-0.5 bg-purple-400 inline-block" /> EMA200</span>}
+        {showVWAP && <span className="flex items-center gap-1 text-fuchsia-400"><span className="w-2 h-0.5 bg-fuchsia-400 inline-block" /> VWAP</span>}
+        {showBollinger && <span className="flex items-center gap-1 text-emerald-400"><span className="w-2 h-0.5 bg-emerald-400 inline-block" /> Bollinger Bands (20, 2σ)</span>}
+        {showSupertrend && <span className="flex items-center gap-1 text-lime-400"><span className="w-2 h-0.5 bg-lime-400 inline-block" /> Dynamic Support Band</span>}
+        {showORB && <span className="flex items-center gap-1 text-yellow-400"><span className="w-2 h-0.5 bg-yellow-400 inline-block" /> Opening Range (High/Low)</span>}
+        {selectedStrategy?.activation_events && selectedStrategy.activation_events.length > 0 && (
+          <span className="text-emerald-400 font-bold ml-auto flex items-center gap-1">
+            <Sparkles className="w-3 h-3 text-emerald-400" /> {selectedStrategy.activation_events.length} Historical Activation Markers
+          </span>
+        )}
+      </div>
+
+      {/* SVG Canvas */}
+      <div className="relative overflow-hidden w-full select-none">
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${chartWidth} ${totalHeight}`}
+          className="w-full h-auto cursor-crosshair"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setHoverIndex(null)}
+        >
+          <defs>
+            <linearGradient id="bbAreaGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.08" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
+            </linearGradient>
+            <linearGradient id="activeZoneGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+
+          {/* Price Grid Horizontal Lines */}
+          {[0.2, 0.4, 0.6, 0.8].map(ratio => {
+            const y = ratio * priceChartHeight;
+            const px = maxPrice - ratio * priceRange;
+            return (
+              <g key={ratio}>
+                <line x1={0} y1={y} x2={chartWidth} y2={y} stroke="#27272a" strokeWidth={0.8} strokeDasharray="3,3" />
+                <text x={chartWidth - 4} y={y - 3} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">
+                  ₹{px.toFixed(2)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Historical Active Regions Highlight Bands (Part 7) */}
+          {selectedStrategy?.historical_states?.map((hs, i) => {
+            if (hs.state !== 'ACTIVE') return null;
+            const x = hs.candle_index * candleStep;
+            return (
+              <rect
+                key={i}
+                x={x}
+                y={0}
+                width={candleStep}
+                height={priceChartHeight}
+                fill="url(#activeZoneGrad)"
+              />
+            );
+          })}
+
+          {/* Candlesticks (Part 5) */}
+          {candles.map((c, i) => {
+            const x = i * candleStep + candleStep / 2;
+            const openY = getY(c.open);
+            const closeY = getY(c.close);
+            const highY = getY(c.high);
+            const lowY = getY(c.low);
+            const isBull = c.close >= c.open;
+            const bodyTop = Math.min(openY, closeY);
+            const bodyHeight = Math.max(1.5, Math.abs(openY - closeY));
+
+            return (
+              <g key={i}>
+                {/* Wick */}
+                <line
+                  x1={x}
+                  y1={highY}
+                  x2={x}
+                  y2={lowY}
+                  stroke={isBull ? '#10b981' : '#f43f5e'}
+                  strokeWidth={1}
+                />
+                {/* Body */}
+                <rect
+                  x={x - candleWidth / 2}
+                  y={bodyTop}
+                  width={candleWidth}
+                  height={bodyHeight}
+                  fill={isBull ? '#10b981' : '#f43f5e'}
+                  rx={0.5}
+                />
+              </g>
+            );
+          })}
+
+          {/* Indicator Overlays (Part 6) */}
+          {showBollinger && (
+            <>
+              <path d={makeLinePath(indicators.bb_upper)} stroke="#10b981" strokeWidth={1} fill="none" strokeDasharray="2,2" />
+              <path d={makeLinePath(indicators.bb_middle)} stroke="#34d399" strokeWidth={0.8} fill="none" />
+              <path d={makeLinePath(indicators.bb_lower)} stroke="#10b981" strokeWidth={1} fill="none" strokeDasharray="2,2" />
+            </>
+          )}
+
+          {showSupertrend && indicators.supertrend_band && (
+            <path d={makeLinePath(indicators.supertrend_band)} stroke="#a3e635" strokeWidth={1.5} fill="none" strokeDasharray="4,2" />
+          )}
+
+          {showORB && indicators.orb_high && indicators.orb_low && (
+            <>
+              <path d={makeLinePath(indicators.orb_high)} stroke="#fbbf24" strokeWidth={1} strokeDasharray="3,3" fill="none" />
+              <path d={makeLinePath(indicators.orb_low)} stroke="#fbbf24" strokeWidth={1} strokeDasharray="3,3" fill="none" />
+            </>
+          )}
+
+          {showEMA20 && <path d={makeLinePath(indicators.ema20)} stroke="#22d3ee" strokeWidth={1.2} fill="none" />}
+          {showEMA50 && <path d={makeLinePath(indicators.ema50)} stroke="#f59e0b" strokeWidth={1.2} fill="none" />}
+          {showEMA200 && <path d={makeLinePath(indicators.ema200)} stroke="#a855f7" strokeWidth={1.5} fill="none" />}
+          {showVWAP && <path d={makeLinePath(indicators.vwap)} stroke="#e879f9" strokeWidth={1.4} fill="none" />}
+
+          {/* Strategy Activation Markers (Part 8) */}
+          {selectedStrategy?.activation_events?.map((ev, i) => {
+            const cx = ev.candle_index * candleStep + candleStep / 2;
+            const cy = getY(ev.price);
+            if (cx < 0 || cx > chartWidth) return null;
+
+            if (ev.event_type === 'ACTIVATED') {
+              return (
+                <g key={i} transform={`translate(${cx}, ${cy - 12})`}>
+                  <polygon points="0,-4 4,3 -4,3" fill="#10b981" />
+                  <circle cx={0} cy={0} r={5} stroke="#10b981" strokeWidth={1.5} fill="none" />
+                </g>
+              );
+            } else if (ev.event_type === 'INVALIDATED') {
+              return (
+                <g key={i} transform={`translate(${cx}, ${cy + 12})`}>
+                  <polygon points="0,4 4,-3 -4,-3" fill="#f43f5e" />
+                </g>
+              );
+            } else {
+              return (
+                <g key={i} transform={`translate(${cx}, ${cy - 14})`}>
+                  <circle cx={0} cy={0} r={4} fill="#f97316" />
+                </g>
+              );
+            }
+          })}
+
+          {/* Crosshair Cursor */}
+          {hoverIndex !== null && hoverIndex >= 0 && hoverIndex < n && (
+            <g>
+              <line
+                x1={hoverIndex * candleStep + candleStep / 2}
+                y1={0}
+                x2={hoverIndex * candleStep + candleStep / 2}
+                y2={priceChartHeight}
+                stroke="#a1a1aa"
+                strokeWidth={0.8}
+                strokeDasharray="2,2"
+              />
+              <line
+                x1={0}
+                y1={getY(candles[hoverIndex].close)}
+                x2={chartWidth}
+                y2={getY(candles[hoverIndex].close)}
+                stroke="#a1a1aa"
+                strokeWidth={0.8}
+                strokeDasharray="2,2"
+              />
+            </g>
+          )}
+
+          {/* Subpanels for Oscillators (RSI / MACD) */}
+          {isRSISubpanel && indicators.rsi14 && (
+            <g transform={`translate(0, ${priceChartHeight + subpanelGap})`}>
+              <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
+              {/* Guides 70, 50, 35 */}
+              <line x1={0} y1={getSubY(70, 0, 100) - (priceChartHeight + subpanelGap)} x2={chartWidth} y2={getSubY(70, 0, 100) - (priceChartHeight + subpanelGap)} stroke="#f43f5e" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
+              <line x1={0} y1={getSubY(50, 0, 100) - (priceChartHeight + subpanelGap)} x2={chartWidth} y2={getSubY(50, 0, 100) - (priceChartHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
+              <line x1={0} y1={getSubY(35, 0, 100) - (priceChartHeight + subpanelGap)} x2={chartWidth} y2={getSubY(35, 0, 100) - (priceChartHeight + subpanelGap)} stroke="#10b981" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
+              <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">RSI(14): {indicators.rsi14[activeIdx]?.toFixed(1) || 'N/A'}</text>
+              <path d={makeSubpanelPath(indicators.rsi14, 0, 100)} stroke="#a855f7" strokeWidth={1.5} fill="none" />
+            </g>
+          )}
+
+          {isMACDSubpanel && indicators.macd && (
+            <g transform={`translate(0, ${priceChartHeight + subpanelGap})`}>
+              <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
+              <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">MACD (12,26,9)</text>
+              <path d={makeSubpanelPath(indicators.macd, -5, 5)} stroke="#38bdf8" strokeWidth={1.2} fill="none" />
+              <path d={makeSubpanelPath(indicators.macd_signal, -5, 5)} stroke="#f97316" strokeWidth={1.2} fill="none" />
+            </g>
+          )}
+        </svg>
+      </div>
+
+      {/* Strategy Timeline Feed (Part 10) */}
+      {selectedStrategy?.activation_events && selectedStrategy.activation_events.length > 0 && (
+        <div className="pt-2 border-t border-stone-800/60 flex items-center gap-2 overflow-x-auto custom-scrollbar text-[10px] font-mono">
+          <span className="text-stone-500 shrink-0 font-bold">Timeline:</span>
+          {selectedStrategy.activation_events.slice(-6).map((ev, i) => (
+            <div
+              key={i}
+              className={`shrink-0 px-2 py-0.5 rounded-lg border flex items-center gap-1 ${
+                ev.event_type === 'ACTIVATED'
+                  ? 'bg-emerald-950/40 border-emerald-700/40 text-emerald-300'
+                  : ev.event_type === 'INVALIDATED'
+                  ? 'bg-rose-950/30 border-rose-800/40 text-rose-300'
+                  : 'bg-orange-950/30 border-orange-700/40 text-orange-300'
+              }`}
+            >
+              <span className="font-bold">₹{ev.price.toFixed(2)}</span>
+              <span>{ev.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Selected Strategy Rule Inspector with Mathematical Basis (Part 11 & 12)
+// ---------------------------------------------------------------------------
+function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
+  const [expandedRule, setExpandedRule] = useState<string | null>(null);
+
+  const entryRules = strategy.rule_evaluations.filter(r => r.is_entry_rule);
+  const exitRules = strategy.rule_evaluations.filter(r => !r.is_entry_rule);
+
+  return (
+    <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800/60 pb-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="font-black text-sm text-stone-100">{strategy.strategy_name}</span>
+            <StateBadge state={strategy.state} />
+          </div>
+          <p className="text-xs text-stone-400 mt-1 leading-relaxed">{strategy.description}</p>
+        </div>
+      </div>
+
+      {/* Entry Conditions */}
+      <div>
+        <div className="flex items-center justify-between text-xs font-bold text-stone-300 uppercase mb-2">
+          <span className="flex items-center gap-1.5 text-emerald-400">
+            <TrendingUp className="w-3.5 h-3.5" /> Entry Conditions ({strategy.entry_rules_passing}/{strategy.entry_rules_total} Pass)
+          </span>
+        </div>
+        <div className="space-y-1.5">
+          {entryRules.map(rule => {
+            const isPass = rule.outcome === 'PASS';
+            const isUnavail = rule.outcome === 'UNAVAILABLE';
+            const isExpanded = expandedRule === rule.rule_id;
+
+            return (
+              <div
+                key={rule.rule_id}
+                onClick={() => setExpandedRule(isExpanded ? null : rule.rule_id)}
+                className={`p-2.5 rounded-lg border text-xs cursor-pointer transition-all ${
+                  isPass
+                    ? 'bg-emerald-950/20 border-emerald-800/40 hover:bg-emerald-950/30'
+                    : isUnavail
+                    ? 'bg-stone-900/40 border-stone-800 hover:bg-stone-900/60'
+                    : 'bg-rose-950/20 border-rose-900/30 hover:bg-rose-950/30'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {isPass ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
+                     isUnavail ? <MinusCircle className="w-3.5 h-3.5 text-stone-500 shrink-0" /> :
+                     <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
+                    <span className="font-semibold text-stone-200">{rule.label}</span>
+                  </div>
+                  <div className="flex items-center gap-2 font-mono text-[11px]">
+                    <span className={isPass ? 'text-emerald-400' : isUnavail ? 'text-stone-500' : 'text-rose-400'}>
+                      {rule.actual_value_label}
+                    </span>
+                    {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-stone-500" /> : <ChevronDown className="w-3.5 h-3.5 text-stone-500" />}
+                  </div>
+                </div>
+
+                {/* Mathematical Basis Drilldown (Part 12) */}
+                {isExpanded && (
+                  <div className="mt-2 pt-2 border-t border-stone-800/60 text-[11px] font-mono space-y-1 text-stone-400 bg-stone-950/40 p-2 rounded">
+                    <div><strong>Rule ID:</strong> {rule.rule_id}</div>
+                    <div><strong>Outcome:</strong> <span className={isPass ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{rule.outcome}</span></div>
+                    {rule.math_detail && (
+                      <div><strong>Mathematical Calculation:</strong> <span className="text-violet-300 font-bold">{rule.math_detail}</span></div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Exit Conditions */}
+      {exitRules.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between text-xs font-bold text-stone-300 uppercase mb-2">
+            <span className="flex items-center gap-1.5 text-rose-400">
+              <TrendingDown className="w-3.5 h-3.5" /> Exit / Invalidation Triggers
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {exitRules.map(rule => (
+              <div key={rule.rule_id} className="p-2 rounded-lg bg-stone-900/40 border border-stone-800 text-xs flex items-center justify-between">
+                <span className="text-stone-300">{rule.label}</span>
+                <span className="font-mono text-[10px] text-stone-400">{rule.actual_value_label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Real Conversational Strategy Copilot (Part 13, 14, 15, 16)
+// ---------------------------------------------------------------------------
+interface StrategyCopilotProps {
+  symbol: string;
+  selectedStrategy: StrategyResult | null;
+  allStrategies: StrategyResult[];
+  regime: MarketRegimeData | null;
+  confluence: ConfluenceData | null;
+  timeframe: string;
+}
+
+function StrategyCopilotChat({
+  symbol,
+  selectedStrategy,
+  allStrategies,
+  regime,
+  confluence,
+  timeframe,
+}: StrategyCopilotProps) {
+  const [messages, setMessages] = useState<CopilotMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const quickChips = [
+    'Explain this strategy',
+    'Why is it active right now?',
+    'What would invalidate this strategy?',
+    'Compare with VWAP Momentum',
+    'Explain current market regime',
+    'Explain the mathematics',
+  ];
+
+  const handleSend = async (userText: string) => {
+    if (!userText.trim() || !selectedStrategy || isLoading) return;
+    const textToSend = userText.trim();
+    setInput('');
+    setMessages(prev => [...prev, { role: 'user', text: textToSend }]);
+    setIsLoading(true);
+
+    try {
+      const context = {
+        market_regime: regime,
+        confluence: confluence,
+        timeframe,
+        other_strategies: allStrategies.map(s => ({
+          name: s.strategy_name,
+          state: s.state,
+          passing_count: s.entry_rules_passing,
+          total_count: s.entry_rules_total,
+        })),
+      };
+
+      const res = await fetch('/api/strategies/copilot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol,
+          strategy_id: selectedStrategy.strategy_id,
+          evaluation_result: selectedStrategy,
+          user_message: textToSend,
+          chat_history: messages.slice(-4),
+          context,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        text: data.reply || 'No response from copilot.',
+        evidence_cited: data.evidence_cited || [],
+      }]);
+    } catch (e: any) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        text: `Copilot temporarily unavailable: ${e.message}`,
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  return (
+    <div className="bg-[#12131b] border border-stone-800/80 rounded-xl flex flex-col h-full overflow-hidden shadow-2xl">
+      {/* Header */}
+      <div className="p-3 border-b border-stone-800/60 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-violet-400" />
+          <span className="font-black text-xs text-white uppercase tracking-wider">AI Strategy Copilot</span>
+        </div>
+        <span className="text-[9px] font-mono text-stone-500 border border-stone-800 px-1.5 py-0.5 rounded">
+          Evidence-Grounded
+        </span>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5 min-h-[220px]">
+        {messages.length === 0 && (
+          <div className="text-center py-4 space-y-2">
+            <div className="text-xs text-stone-400 font-mono">
+              Inquiring about <strong className="text-violet-400">{selectedStrategy?.strategy_name || 'selected strategy'}</strong> on <strong>{symbol}</strong>
+            </div>
+            <div className="flex flex-wrap gap-1.5 justify-center">
+              {quickChips.map(chip => (
+                <button
+                  key={chip}
+                  onClick={() => handleSend(chip)}
+                  disabled={!selectedStrategy}
+                  className="text-[10px] font-mono px-2 py-1 rounded-lg bg-stone-900/80 hover:bg-stone-800 text-stone-300 border border-stone-700/60 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((m, idx) => (
+          <div key={idx} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+            <div
+              className={`max-w-[92%] p-2.5 rounded-xl text-xs leading-relaxed ${
+                m.role === 'user'
+                  ? 'bg-violet-600/30 text-stone-100 border border-violet-500/40'
+                  : 'bg-stone-900/90 text-stone-200 border border-stone-800'
+              }`}
+            >
+              {m.text}
+            </div>
+            {m.evidence_cited && m.evidence_cited.length > 0 && (
+              <div className="text-[9px] font-mono text-stone-500 mt-1 flex items-center gap-1">
+                <Database className="w-2.5 h-2.5" /> Cited: {m.evidence_cited.slice(0, 2).join(', ')}
+              </div>
+            )}
           </div>
         ))}
+
+        {isLoading && (
+          <div className="flex items-center gap-2 text-xs font-mono text-violet-400 p-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing verified rules & mathematics…
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="p-2.5 border-t border-stone-800/60 bg-[#0e0f15]">
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSend(input)}
+            placeholder={selectedStrategy ? "Ask Strategy Copilot..." : "Select a strategy first..."}
+            disabled={!selectedStrategy || isLoading}
+            className="flex-1 px-3 py-1.5 bg-stone-900 border border-stone-700/80 rounded-lg text-xs text-stone-200 placeholder-stone-600 focus:outline-none focus:border-violet-500 disabled:opacity-50 font-mono"
+          />
+          <button
+            onClick={() => handleSend(input)}
+            disabled={!input.trim() || !selectedStrategy || isLoading}
+            className="p-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-all disabled:opacity-40 cursor-pointer"
+          >
+            <Send className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main Strategy Lab Page
+// Main Strategy Lab Observatory Workspace (Part 1 & 2)
 // ---------------------------------------------------------------------------
 export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   stocks,
@@ -220,52 +974,36 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   onSelectSymbol,
 }) => {
   const [symbol, setSymbol] = useState(selectedSymbol || 'RELIANCE.NS');
-  const [symbolSearch, setSymbolSearch] = useState('');
+  const [timeframe, setTimeframe] = useState('5m');
   const [isEvaluating, setIsEvaluating] = useState(false);
-  const [evaluations, setEvaluations] = useState<StrategyEvaluationResult[]>([]);
+  const [observatoryData, setObservatoryData] = useState<ObservatoryData | null>(null);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
-  const [evaluatedAt, setEvaluatedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Copilot state
-  const [copilotMessages, setCopilotMessages] = useState<CopilotMessage[]>([]);
-  const [copilotInput, setCopilotInput] = useState('');
-  const [isCopilotLoading, setIsCopilotLoading] = useState(false);
-  const copilotEndRef = useRef<HTMLDivElement>(null);
+  // Symbol quick select
+  const currentStock = stocks.find(s => s.symbol === symbol) || stocks[0];
 
-  const selectedEval = evaluations.find(e => e.strategy_id === selectedStrategyId) || null;
-
-  // Filtered stocks for symbol selector
-  const filteredStocks = stocks.filter(s =>
-    !symbolSearch ||
-    s.symbol.toLowerCase().includes(symbolSearch.toLowerCase()) ||
-    s.name.toLowerCase().includes(symbolSearch.toLowerCase())
-  ).slice(0, 8);
-
-  // Run evaluation
-  const handleEvaluate = useCallback(async () => {
+  const handleEvaluate = useCallback(async (symToEval = symbol) => {
     setIsEvaluating(true);
     setError(null);
     try {
-      const res = await fetch(`/api/strategies/evaluate/${encodeURIComponent(symbol)}`, {
+      const res = await fetch(`/api/strategies/evaluate/${encodeURIComponent(symToEval)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_live_feed: false }),
+        body: JSON.stringify({ is_live_feed: true }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
-      const data: StrategyEvaluationResult[] = await res.json();
-      setEvaluations(data);
-      setEvaluatedAt(new Date().toLocaleTimeString());
-      // Auto-select the most interesting strategy
-      const priority = ['ACTIVE', 'PARTIAL', 'CONFLICTED', 'INACTIVE', 'STALE', 'UNAVAILABLE'];
-      for (const state of priority) {
-        const found = data.find(e => e.state === state);
-        if (found) { setSelectedStrategyId(found.strategy_id); break; }
+      const data: ObservatoryData = await res.json();
+      setObservatoryData(data);
+
+      // Auto-select first active or interesting strategy
+      if (data.strategies && data.strategies.length > 0) {
+        const firstActive = data.strategies.find(s => s.state === 'ACTIVE') || data.strategies[0];
+        setSelectedStrategyId(firstActive.strategy_id);
       }
-      setCopilotMessages([]);
     } catch (e: any) {
       setError(e.message || 'Evaluation failed');
     } finally {
@@ -273,440 +1011,155 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
     }
   }, [symbol]);
 
-  // Copilot chat
-  const handleCopilotSend = useCallback(async () => {
-    if (!copilotInput.trim() || !selectedEval || isCopilotLoading) return;
-    const userMsg = copilotInput.trim();
-    setCopilotInput('');
-    setCopilotMessages(prev => [...prev, { role: 'user', text: userMsg }]);
-    setIsCopilotLoading(true);
-    try {
-      const res = await fetch('/api/strategies/copilot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol,
-          strategy_id: selectedEval.strategy_id,
-          evaluation_result: selectedEval,
-          user_message: userMsg,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setCopilotMessages(prev => [...prev, {
-        role: 'assistant',
-        text: data.reply || 'No response.',
-        evidence_cited: data.evidence_cited || [],
-      }]);
-    } catch (e: any) {
-      setCopilotMessages(prev => [...prev, {
-        role: 'assistant',
-        text: `Copilot unavailable: ${e.message}`,
-      }]);
-    } finally {
-      setIsCopilotLoading(false);
-    }
-  }, [copilotInput, selectedEval, isCopilotLoading, symbol]);
-
+  // Initial evaluation on mount or symbol switch
   useEffect(() => {
-    copilotEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [copilotMessages]);
+    handleEvaluate(symbol);
+  }, [symbol]);
 
-  // Summary counts
-  const activeCount    = evaluations.filter(e => e.state === 'ACTIVE').length;
-  const partialCount   = evaluations.filter(e => e.state === 'PARTIAL').length;
-  const inactiveCount  = evaluations.filter(e => e.state === 'INACTIVE').length;
-  const unavailCount   = evaluations.filter(e => e.state === 'UNAVAILABLE' || e.state === 'STALE').length;
+  const selectedStrategy = observatoryData?.strategies?.find(s => s.strategy_id === selectedStrategyId) || null;
+
+  // Stale data warning banner
+  const isStale = observatoryData?.data_freshness === 'STALE';
+  const ageSeconds = observatoryData?.data_age_seconds;
 
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh-175px)] overflow-hidden">
-
-      {/* ── Header ── */}
-      <div className="shrink-0 bg-[#12131a] border-b border-stone-800/60 px-4 py-3">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          {/* Title */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-700 flex items-center justify-center shadow-lg shadow-violet-500/20">
-              <FlaskConical className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <div className="font-black text-sm text-white tracking-tight">STRATEGY LAB</div>
-              <div className="text-[10px] text-stone-500 font-mono">Deterministic Rule Evaluation · {evaluations.length > 0 ? `${evaluations.length} strategies` : 'No evaluation yet'}</div>
-            </div>
+    <div className="flex-1 flex flex-col h-[calc(100vh-175px)] overflow-y-auto custom-scrollbar p-3 space-y-3 bg-[#0a0b10]">
+      {/* ── Top Header (Part 2) ── */}
+      <div className="bg-[#12131b] border border-stone-800/80 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-violet-600/20 border border-violet-500/40 flex items-center justify-center text-violet-400 font-black shadow-inner">
+            <FlaskConical className="w-5 h-5" />
           </div>
-
-          {/* Symbol selector */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-stone-500" />
-              <input
-                type="text"
-                placeholder="Symbol..."
-                value={symbolSearch}
-                onChange={e => setSymbolSearch(e.target.value)}
-                onFocus={() => setSymbolSearch(symbol)}
-                onBlur={() => setTimeout(() => setSymbolSearch(''), 200)}
-                className="pl-6 pr-3 py-1.5 bg-stone-900 border border-stone-700 rounded-lg text-xs text-stone-200 font-mono placeholder-stone-600 w-36 focus:outline-none focus:border-violet-500/60"
-              />
-              {symbolSearch.length > 0 && filteredStocks.length > 0 && (
-                <div className="absolute top-full left-0 mt-1 w-56 bg-[#1a1b24] border border-stone-700 rounded-xl overflow-hidden z-50 shadow-xl">
-                  {filteredStocks.map(s => (
-                    <button
-                      key={s.symbol}
-                      onMouseDown={() => { setSymbol(s.symbol); setSymbolSearch(''); onSelectSymbol?.(s.symbol); }}
-                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-stone-800 text-xs text-left"
-                    >
-                      <span className="font-bold text-stone-200 font-mono">{s.symbol.replace('.NS', '')}</span>
-                      <span className="text-stone-500 truncate max-w-[100px]">{s.name}</span>
-                    </button>
-                  ))}
-                </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-black text-sm text-white tracking-wide font-mono">{symbol}</span>
+              <span className="text-xs text-stone-400 font-semibold hidden sm:inline">{currentStock?.name}</span>
+              {observatoryData && (
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                  observatoryData.data_freshness === 'LIVE' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
+                  observatoryData.data_freshness === 'RECENT' ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' :
+                  'bg-purple-900/30 text-purple-300 border-purple-700/40'
+                }`}>
+                  {observatoryData.data_freshness} {ageSeconds ? `(${ageSeconds}s)` : ''}
+                </span>
               )}
             </div>
-
-            <div className="px-3 py-1.5 bg-stone-900 border border-stone-700 rounded-lg text-xs font-mono font-bold text-violet-400">
-              {symbol.replace('.NS', '')}
-            </div>
-
-            <button
-              onClick={handleEvaluate}
-              disabled={isEvaluating}
-              className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold rounded-lg transition-all shadow-md shadow-violet-500/20 disabled:opacity-60"
-            >
-              {isEvaluating
-                ? <Loader2 className="w-3 h-3 animate-spin" />
-                : <Zap className="w-3 h-3" />}
-              {isEvaluating ? 'Evaluating…' : 'Evaluate'}
-            </button>
-
-            {evaluatedAt && (
-              <span className="text-[10px] text-stone-500 font-mono flex items-center gap-1">
-                <Clock className="w-2.5 h-2.5" /> {evaluatedAt}
+            <div className="flex items-center gap-2 text-xs font-mono mt-0.5">
+              <span className="text-stone-100 font-bold">₹{currentStock?.price?.toFixed(2) || '---'}</span>
+              <span className={currentStock?.change && currentStock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                {currentStock?.change && currentStock.change >= 0 ? '+' : ''}{currentStock?.change?.toFixed(2)} ({currentStock?.changePercent?.toFixed(2)}%)
               </span>
-            )}
+              {observatoryData?.market_regime && (
+                <span className="text-stone-400 font-medium hidden md:inline">
+                  · Regime: <strong className="text-amber-400">{observatoryData.market_regime.regime}</strong> ({observatoryData.market_regime.confidence}%)
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Summary bar */}
-        {evaluations.length > 0 && (
-          <div className="flex items-center gap-3 mt-2 flex-wrap">
-            <Pill label="Active" count={activeCount} color="emerald" />
-            <Pill label="Partial" count={partialCount} color="amber" />
-            <Pill label="Inactive" count={inactiveCount} color="stone" />
-            <Pill label="N/A" count={unavailCount} color="rose" />
-          </div>
-        )}
+        {/* Quick Symbol Switcher Chips (Part 19) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar max-w-md">
+          {QUICK_SYMBOLS.map(sym => (
+            <button
+              key={sym}
+              onClick={() => { setSymbol(sym); onSelectSymbol?.(sym); }}
+              className={`px-2 py-1 text-[10px] font-mono font-bold rounded-lg border transition-all cursor-pointer shrink-0 ${
+                symbol === sym
+                  ? 'bg-violet-600 text-white border-violet-400 shadow-md'
+                  : 'bg-stone-900/60 text-stone-400 border-stone-800 hover:text-stone-200 hover:bg-stone-800'
+              }`}
+            >
+              {sym.replace('.NS', '')}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleEvaluate(symbol)}
+            disabled={isEvaluating}
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-violet-500/20 disabled:opacity-60 cursor-pointer"
+          >
+            {isEvaluating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            {isEvaluating ? 'Evaluating…' : 'Evaluate'}
+          </button>
+        </div>
       </div>
 
-      {/* ── Body ── */}
-      {!evaluations.length && !isEvaluating && !error && (
-        <EmptyState onEvaluate={handleEvaluate} symbol={symbol} />
+      {/* Stale Data Warning Banner (Part 20) */}
+      {isStale && (
+        <div className="px-4 py-2.5 rounded-xl bg-purple-950/40 border border-purple-700/50 text-purple-200 text-xs flex items-center justify-between shadow-md">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-purple-400" />
+            <span><strong>STALE MARKET DATA</strong> — Last evaluated candle timestamp is {ageSeconds ? `${Math.round(ageSeconds / 60)} minutes` : 'several hours'} old. Strategy evaluation is displayed for quantitative research, not current live execution.</span>
+          </div>
+          <span className="font-mono text-[10px] text-purple-400 border border-purple-600/40 px-2 py-0.5 rounded">HISTORICAL CONTEXT</span>
+        </div>
       )}
 
       {error && (
-        <div className="m-4 px-4 py-3 rounded-xl bg-rose-900/20 border border-rose-700/40 text-rose-400 text-sm flex items-center gap-2">
-          <XCircle className="w-4 h-4 shrink-0" />
-          {error}
+        <div className="px-4 py-3 rounded-xl bg-rose-950/30 border border-rose-800/50 text-rose-300 text-xs flex items-center gap-2">
+          <XCircle className="w-4 h-4" />
+          <span>{error}</span>
         </div>
       )}
 
-      {isEvaluating && (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center space-y-3">
-            <Loader2 className="w-8 h-8 animate-spin text-violet-400 mx-auto" />
-            <div className="text-sm text-stone-400 font-mono">Computing indicators & evaluating {symbol}…</div>
-          </div>
+      {/* ── Compact Strategy Keypad (Part 2 & 3) ── */}
+      {observatoryData?.strategies && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+          {observatoryData.strategies.map(strat => (
+            <StrategyKeypadButton
+              key={strat.strategy_id}
+              strategy={strat}
+              isSelected={selectedStrategyId === strat.strategy_id}
+              onClick={() => setSelectedStrategyId(strat.strategy_id)}
+            />
+          ))}
         </div>
       )}
 
-      {evaluations.length > 0 && !isEvaluating && (
-        <div className="flex-1 flex overflow-hidden">
+      {/* ── Strategy Alignment & Confluence Panel (Part 4 & 25) ── */}
+      {observatoryData?.confluence && (
+        <StrategyAlignmentBar confluence={observatoryData.confluence} />
+      )}
 
-          {/* ── Left: Strategy Matrix ── */}
-          <div className="w-64 shrink-0 border-r border-stone-800/60 flex flex-col overflow-hidden">
-            <div className="px-3 py-2 border-b border-stone-800/40">
-              <span className="text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">Strategy Matrix</span>
-            </div>
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1.5">
-              {evaluations.map(ev => (
-                <StrategyCard
-                  key={ev.strategy_id}
-                  result={ev}
-                  isSelected={selectedStrategyId === ev.strategy_id}
-                  onClick={() => { setSelectedStrategyId(ev.strategy_id); setCopilotMessages([]); }}
+      {/* ── Main Layout: Trading Chart + Rule Inspector & Copilot (Part 5, 11, 13) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+        {/* Trading Chart (Left 8 Cols) */}
+        <div className="lg:col-span-8 space-y-3">
+          <ObservatoryChart
+            candles={observatoryData?.candles || []}
+            indicators={observatoryData?.chart_indicators || {}}
+            selectedStrategy={selectedStrategy}
+            timeframe={timeframe}
+            onTimeframeChange={setTimeframe}
+          />
+        </div>
+
+        {/* Selected Strategy Inspector & Copilot (Right 4 Cols) */}
+        <div className="lg:col-span-4 space-y-3 flex flex-col">
+          {selectedStrategy ? (
+            <>
+              <StrategyRuleInspector strategy={selectedStrategy} />
+              <div className="flex-1 min-h-[300px]">
+                <StrategyCopilotChat
+                  symbol={symbol}
+                  selectedStrategy={selectedStrategy}
+                  allStrategies={observatoryData?.strategies || []}
+                  regime={observatoryData?.market_regime || null}
+                  confluence={observatoryData?.confluence || null}
+                  timeframe={timeframe}
                 />
-              ))}
-            </div>
-          </div>
-
-          {/* ── Center: Strategy Detail ── */}
-          <div className="flex-1 flex flex-col overflow-hidden border-r border-stone-800/60">
-            {selectedEval ? (
-              <>
-                <div className="shrink-0 px-4 py-3 border-b border-stone-800/40 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-black text-sm text-white">{selectedEval.strategy_name}</span>
-                      <StateBadge state={selectedEval.state} />
-                    </div>
-                    <div className="text-[10px] text-stone-500 font-mono mt-0.5">
-                      {selectedEval.category} · {selectedEval.candles_used} candles · Freshness: {selectedEval.data_freshness}
-                    </div>
-                  </div>
-                  {selectedEval.exit_rules_triggered > 0 && (
-                    <span className="flex items-center gap-1 text-[10px] font-mono text-orange-400 border border-orange-500/30 bg-orange-500/10 px-2 py-1 rounded-lg">
-                      <TrendingDown className="w-3 h-3" /> Exit signal active
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
-                  {/* Description */}
-                  <div className="text-xs text-stone-400 leading-relaxed bg-stone-900/40 border border-stone-800/40 rounded-xl p-3">
-                    <Info className="w-3.5 h-3.5 inline mr-1.5 text-stone-500" />
-                    {selectedEval.description}
-                  </div>
-
-                  {/* Entry rules */}
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-xs font-bold text-stone-300 uppercase tracking-wider">Entry Rules</span>
-                      <span className="text-[10px] font-mono text-stone-500">
-                        ({selectedEval.entry_rules_passing}/{selectedEval.entry_rules_total} pass)
-                      </span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {selectedEval.rule_evaluations.filter(r => r.is_entry_rule).map(r => (
-                        <RuleRow key={r.rule_id} rule={r} />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Exit rules */}
-                  {selectedEval.rule_evaluations.filter(r => !r.is_entry_rule).length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
-                        <span className="text-xs font-bold text-stone-300 uppercase tracking-wider">Exit Rules</span>
-                        <span className="text-[10px] font-mono text-stone-500">
-                          ({selectedEval.exit_rules_triggered}/{selectedEval.exit_rules_total} triggered)
-                        </span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {selectedEval.rule_evaluations.filter(r => !r.is_entry_rule).map(r => (
-                          <RuleRow key={r.rule_id} rule={r} />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Feature vector */}
-                  {Object.keys(selectedEval.feature_vector).length > 0 && (
-                    <FeatureVectorPanel fv={selectedEval.feature_vector} />
-                  )}
-
-                  {/* Tags */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {selectedEval.tags.map(t => (
-                      <span key={t} className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-900/20 border border-violet-700/30 text-violet-400">
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Data integrity notice */}
-                  {selectedEval.entry_rules_unavailable > 0 && (
-                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-stone-900/50 border border-stone-700/40 text-xs text-stone-500">
-                      <Shield className="w-3.5 h-3.5 shrink-0 text-stone-600 mt-0.5" />
-                      <span>
-                        <span className="font-bold text-stone-400">{selectedEval.entry_rules_unavailable} rule(s) could not be evaluated</span> due to insufficient candle history (need {' '}
-                        at least {evaluations.find(e => e.strategy_id === selectedEval.strategy_id)?.candles_used} bars). 
-                        These are marked UNAVAILABLE — not treated as FAIL.
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center space-y-2">
-                  <ChevronRight className="w-6 h-6 text-stone-700 mx-auto" />
-                  <div className="text-sm text-stone-600 font-mono">Select a strategy from the matrix</div>
-                </div>
               </div>
-            )}
-          </div>
-
-          {/* ── Right: AI Strategy Copilot ── */}
-          <div className="w-80 shrink-0 flex flex-col overflow-hidden">
-            <div className="shrink-0 px-3 py-2 border-b border-stone-800/40 flex items-center gap-1.5">
-              <Cpu className="w-3.5 h-3.5 text-violet-400" />
-              <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider">Strategy Copilot</span>
-              <span className="ml-auto text-[9px] font-mono text-stone-600 border border-stone-700/50 px-1.5 py-0.5 rounded">Evidence-grounded</span>
+            </>
+          ) : (
+            <div className="p-8 text-center bg-[#12131b] border border-stone-800 rounded-xl text-stone-500 font-mono text-xs">
+              Select a strategy button above to inspect mathematical conditions and launch copilot.
             </div>
-
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-              {!selectedEval && (
-                <div className="text-[11px] text-stone-600 font-mono text-center mt-4">
-                  Select a strategy to start the copilot chat.
-                </div>
-              )}
-              {selectedEval && copilotMessages.length === 0 && (
-                <CopilotWelcome strategyName={selectedEval.strategy_name} state={selectedEval.state} />
-              )}
-              {copilotMessages.map((msg, i) => (
-                <CopilotBubble key={i} message={msg} />
-              ))}
-              {isCopilotLoading && (
-                <div className="flex items-center gap-2 text-[11px] text-stone-500">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Interpreting evidence…
-                </div>
-              )}
-              <div ref={copilotEndRef} />
-            </div>
-
-            {/* Input */}
-            <div className="shrink-0 border-t border-stone-800/40 p-2.5">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={copilotInput}
-                  onChange={e => setCopilotInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleCopilotSend()}
-                  placeholder={selectedEval ? "Ask about this strategy…" : "Select a strategy first"}
-                  disabled={!selectedEval || isCopilotLoading}
-                  className="flex-1 px-3 py-2 bg-stone-900 border border-stone-700 rounded-xl text-xs text-stone-200 placeholder-stone-600 focus:outline-none focus:border-violet-500/60 disabled:opacity-50"
-                />
-                <button
-                  onClick={handleCopilotSend}
-                  disabled={!copilotInput.trim() || !selectedEval || isCopilotLoading}
-                  className="w-8 h-8 flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-500 text-white transition-all disabled:opacity-40"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <div className="text-[9px] text-stone-700 font-mono mt-1.5 text-center">
-                Copilot can only interpret verified, computed rule values — it never invents data.
-              </div>
-            </div>
-          </div>
-
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 };
-
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-function Pill({ label, count, color }: { label: string; count: number; color: 'emerald' | 'amber' | 'stone' | 'rose' }) {
-  const cls = {
-    emerald: 'bg-emerald-500/15 text-emerald-400 border-emerald-700/30',
-    amber:   'bg-amber-500/15 text-amber-400 border-amber-700/30',
-    stone:   'bg-stone-700/30 text-stone-500 border-stone-700/40',
-    rose:    'bg-rose-900/20 text-rose-400 border-rose-700/30',
-  }[color];
-  return (
-    <span className={`flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${cls}`}>
-      {count} {label}
-    </span>
-  );
-}
-
-function CopilotWelcome({ strategyName, state }: { strategyName: string; state: StrategyState }) {
-  const suggestions = [
-    "Why is this strategy active right now?",
-    "Which rule is failing and why?",
-    "What would make this strategy ACTIVE?",
-    "Explain the data freshness warning.",
-  ];
-  return (
-    <div className="space-y-2 mt-1">
-      <div className="text-[10px] text-stone-600 font-mono text-center">
-        <span className="text-violet-400 font-bold">{strategyName}</span> is <span className="font-bold">{state}</span>.
-        <br />Ask the copilot about the evidence.
-      </div>
-      <div className="space-y-1">
-        {suggestions.map(s => (
-          <div key={s} className="text-[10px] text-stone-500 px-2 py-1 rounded-lg bg-stone-900/50 border border-stone-800/40 cursor-default font-mono">
-            "{s}"
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function CopilotBubble({ message }: { message: CopilotMessage }) {
-  const isUser = message.role === 'user';
-  return (
-    <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-      <div className={`max-w-[90%] px-3 py-2 rounded-xl text-[11px] leading-relaxed ${
-        isUser
-          ? 'bg-violet-700/30 border border-violet-500/30 text-stone-200'
-          : 'bg-stone-900/60 border border-stone-700/40 text-stone-300'
-      }`}>
-        {message.text}
-      </div>
-      {!isUser && message.evidence_cited && message.evidence_cited.length > 0 && (
-        <div className="max-w-[90%] space-y-0.5">
-          {message.evidence_cited.slice(0, 3).map((ev, i) => (
-            <div key={i} className="text-[9px] font-mono text-stone-600 flex items-center gap-1">
-              <BookOpen className="w-2 h-2 shrink-0" /> {ev}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EmptyState({ onEvaluate, symbol }: { onEvaluate: () => void; symbol: string }) {
-  return (
-    <div className="flex-1 flex items-center justify-center p-8">
-      <div className="text-center max-w-sm space-y-5">
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600/30 to-indigo-700/20 border border-violet-500/30 flex items-center justify-center mx-auto">
-          <FlaskConical className="w-8 h-8 text-violet-400" />
-        </div>
-        <div>
-          <div className="text-lg font-black text-white mb-1">Strategy Lab</div>
-          <div className="text-sm text-stone-400 leading-relaxed">
-            Evaluate a library of 8 systematic quantitative strategies against{' '}
-            <span className="font-bold text-violet-400">{symbol}</span>.
-            Each rule is deterministically assessed against real indicator values — never fabricated.
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-left">
-          {[
-            ['VWAP Momentum', 'Momentum'],
-            ['EMA Golden Cross', 'Trend'],
-            ['RSI Reversal', 'Mean-Rev'],
-            ['Bollinger Squeeze', 'Breakout'],
-            ['MACD Crossover', 'Momentum'],
-            ['ORB Breakout', 'Breakout'],
-            ['Supertrend ATR', 'Trend'],
-            ['RVOL Surge', 'Volume'],
-          ].map(([name, cat]) => (
-            <div key={name} className="flex items-center gap-1.5 text-[10px] font-mono text-stone-500">
-              <Activity className="w-2.5 h-2.5 text-violet-500 shrink-0" />
-              <span className="font-bold text-stone-400">{name}</span>
-              <span className="text-stone-700">·</span>
-              <span>{cat}</span>
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={onEvaluate}
-          className="w-full py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-violet-500/20"
-        >
-          <Zap className="w-4 h-4 inline mr-2" />
-          Evaluate {symbol.replace('.NS', '')} Now
-        </button>
-      </div>
-    </div>
-  );
-}

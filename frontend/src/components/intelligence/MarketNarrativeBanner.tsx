@@ -3,7 +3,7 @@ import { MarketNarrative } from '../../types/intelligence';
 import { Sparkles, Globe, TrendingUp, TrendingDown, Compass, RefreshCw } from 'lucide-react';
 
 interface MarketNarrativeBannerProps {
-  narrative?: MarketNarrative;
+  narrative?: MarketNarrative | null;
   isLoading?: boolean;
   onRefresh?: () => void;
 }
@@ -13,10 +13,15 @@ export const MarketNarrativeBanner: React.FC<MarketNarrativeBannerProps> = ({
   isLoading,
   onRefresh,
 }) => {
-  if (!narrative) return null;
+  if (!narrative || !narrative.headline) return null;
 
-  const isBullish = narrative.primary_regime.includes('BULLISH') || narrative.primary_regime.includes('RISK_ON');
-  const isBearish = narrative.primary_regime.includes('BEARISH') || narrative.primary_regime.includes('RISK_OFF');
+  const regimeStr = typeof narrative.primary_regime === 'string' ? narrative.primary_regime : 'NEUTRAL';
+  const isBullish = regimeStr.includes('BULLISH') || regimeStr.includes('RISK_ON');
+  const isBearish = regimeStr.includes('BEARISH') || regimeStr.includes('RISK_OFF');
+
+  const leaders = Array.isArray(narrative.sector_leaders) ? narrative.sector_leaders : [];
+  const laggards = Array.isArray(narrative.sector_laggards) ? narrative.sector_laggards : [];
+  const bias = narrative.institutional_bias || 'Neutral Positioning';
 
   return (
     <div className="bg-gradient-to-r from-[#181a24] via-[#1c1e29] to-[#161720] border border-amber-500/30 rounded-2xl p-3 shadow-md transition-all">
@@ -30,7 +35,7 @@ export const MarketNarrativeBanner: React.FC<MarketNarrativeBannerProps> = ({
               <span className="text-xs font-black uppercase tracking-wider text-amber-400 font-mono">
                 Today&apos;s Market Narrative
               </span>
-              <span className="text-[10px] font-mono text-stone-500">{narrative.date}</span>
+              <span className="text-[10px] font-mono text-stone-500">{narrative.date || ''}</span>
             </div>
             <h3 className="text-xs sm:text-sm font-bold text-stone-100">{narrative.headline}</h3>
           </div>
@@ -44,7 +49,7 @@ export const MarketNarrativeBanner: React.FC<MarketNarrativeBannerProps> = ({
               ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
               : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
           }`}>
-            {narrative.primary_regime.replace(/_/g, ' ')}
+            {regimeStr.replace(/_/g, ' ')}
           </span>
 
           {onRefresh && (
@@ -61,7 +66,7 @@ export const MarketNarrativeBanner: React.FC<MarketNarrativeBannerProps> = ({
       </div>
 
       <p className="text-xs text-stone-300 leading-relaxed font-sans mb-2.5">
-        {narrative.narrative_summary}
+        {narrative.narrative_summary || ''}
       </p>
 
       {/* Sector Drivers & Institutional Bias Row */}
@@ -69,21 +74,21 @@ export const MarketNarrativeBanner: React.FC<MarketNarrativeBannerProps> = ({
         <div className="flex items-center space-x-1.5 text-stone-400">
           <TrendingUp className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           <span className="truncate">
-            <strong className="text-stone-200">Leaders:</strong> {narrative.sector_leaders.join(', ')}
+            <strong className="text-stone-200">Leaders:</strong> {leaders.length > 0 ? leaders.join(', ') : 'N/A'}
           </span>
         </div>
 
         <div className="flex items-center space-x-1.5 text-stone-400">
           <TrendingDown className="w-3.5 h-3.5 text-rose-400 shrink-0" />
           <span className="truncate">
-            <strong className="text-stone-200">Laggards:</strong> {narrative.sector_laggards.join(', ')}
+            <strong className="text-stone-200">Laggards:</strong> {laggards.length > 0 ? laggards.join(', ') : 'N/A'}
           </span>
         </div>
 
         <div className="flex items-center space-x-1.5 text-stone-400 sm:justify-end">
           <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
           <span className="truncate">
-            <strong className="text-stone-200">Flow:</strong> {narrative.institutional_bias}
+            <strong className="text-stone-200">Flow:</strong> {bias}
           </span>
         </div>
       </div>

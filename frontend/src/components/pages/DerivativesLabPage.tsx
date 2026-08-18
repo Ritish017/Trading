@@ -57,10 +57,10 @@ export const DerivativesLabPage: React.FC<DerivativesLabPageProps> = ({
             <div>
               <div className="flex items-center space-x-2">
                 <span className="font-extrabold font-mono text-base text-white">
-                  {selectedStock?.symbol.split('.')[0]} Derivatives Desk
+                  {(selectedStock?.symbol || 'RELIANCE.NS').split('.')[0]} Derivatives Desk
                 </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
-                  NSE F&O
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                  OPTIONS & OI
                 </span>
               </div>
               <p className="text-xs text-stone-400">Real-time Open Interest, Put-Call Ratio, and Greeks Matrix</p>

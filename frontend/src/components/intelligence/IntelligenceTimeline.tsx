@@ -21,12 +21,15 @@ export const IntelligenceTimeline: React.FC<IntelligenceTimelineProps> = ({
   const categories = ['All', 'Critical (80+)', 'Important (65+)', 'Price & Vol', 'Derivatives', 'News'];
 
   const filteredEvents = (events || []).filter((ev) => {
+    if (!ev) return false;
+    const evType = typeof ev.event_type === 'string' ? ev.event_type : '';
+    const score = typeof ev.attention_score === 'number' ? ev.attention_score : 0;
     if (filterCategory === 'All') return true;
-    if (filterCategory === 'Critical (80+)') return ev.attention_score >= 80;
-    if (filterCategory === 'Important (65+)') return ev.attention_score >= 65;
-    if (filterCategory === 'Price & Vol') return ev.event_type.includes('SELLING') || ev.event_type.includes('BUYING') || ev.event_type.includes('VWAP');
-    if (filterCategory === 'Derivatives') return ev.event_type.includes('OI') || ev.event_type.includes('DERIVATIVE');
-    if (filterCategory === 'News') return ev.event_type.includes('NEWS');
+    if (filterCategory === 'Critical (80+)') return score >= 80;
+    if (filterCategory === 'Important (65+)') return score >= 65;
+    if (filterCategory === 'Price & Vol') return evType.includes('SELLING') || evType.includes('BUYING') || evType.includes('VWAP');
+    if (filterCategory === 'Derivatives') return evType.includes('OI') || evType.includes('DERIVATIVE');
+    if (filterCategory === 'News') return evType.includes('NEWS');
     return true;
   });
 

@@ -107,14 +107,14 @@ export const AIAnalystModal: React.FC<AIAnalystModalProps> = ({
                   <div className="text-xl font-black mt-1 flex items-center space-x-2">
                     <span
                       className={
-                        analysis.overallSignal.includes('Buy')
+                        (analysis.overallSignal || '').includes('Buy')
                           ? 'text-emerald-400'
-                          : analysis.overallSignal.includes('Sell')
+                          : (analysis.overallSignal || '').includes('Sell')
                           ? 'text-rose-400'
                           : 'text-amber-400'
                       }
                     >
-                      {analysis.overallSignal}
+                      {analysis.overallSignal || 'Neutral'}
                     </span>
                   </div>
                 </div>

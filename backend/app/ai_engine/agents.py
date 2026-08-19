@@ -237,39 +237,97 @@ class StrategyCopilotAgent:
         self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
-    def _build_evidence_block(self, evaluation: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> str:
-        """Format the evaluation result and broader market context as a terse evidence block."""
-        lines = [
-            f"Strategy: {evaluation.get('strategy_name', 'Unknown')}",
-            f"Category: {evaluation.get('category', 'Unknown')}",
-            f"State: {evaluation.get('state', 'UNKNOWN')}",
-            f"Data Freshness: {evaluation.get('data_freshness', 'UNKNOWN')} ({evaluation.get('data_age_seconds', 'N/A')}s ago)",
-            f"Candles Used: {evaluation.get('candles_used', 0)}",
-            f"Evaluated At: {evaluation.get('evaluated_at', 'N/A')}",
-            "",
-            "ENTRY RULES & MATHEMATICS:",
-        ]
-        for rule in evaluation.get("rule_evaluations", []):
-            if rule.get("is_entry_rule"):
-                math_note = f" [Math: {rule.get('math_detail')}]" if rule.get("math_detail") else ""
+    def _build_evidence_block(
+        self,
+        evaluation: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
+        research_summary: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Format the evaluation result, research summary, and market context as a terse evidence block."""
+        lines = []
+
+        if research_summary:
+            lines.extend([
+                f"=== HISTORICAL RESEARCH EVIDENCE ===",
+                f"Strategy: {research_summary.get('strategy_name', 'Unknown')} ({research_summary.get('strategy_id', '')})",
+                f"Category: {research_summary.get('category', 'Unknown')}",
+                f"Direction: {research_summary.get('direction', 'BULLISH')}",
+                f"Symbol: {research_summary.get('symbol', 'UNKNOWN')}, Timeframe: {research_summary.get('timeframe', '5m')}",
+                f"Total Candles Analyzed: {research_summary.get('total_candles_analyzed', 0)}",
+                f"Total Activations: {research_summary.get('total_activations', 0)} ({research_summary.get('activation_frequency_pct', 0)}% of candles)",
+                f"Continuous Active Episodes: {research_summary.get('active_episodes_count', 0)}",
+                f"Avg Episode Duration: {research_summary.get('avg_episode_duration_candles', 0)} candles (Median: {research_summary.get('median_episode_duration_candles', 0)} candles)",
+                f"Invalidation Frequency: {research_summary.get('invalidation_frequency_pct', 0)}% ({research_summary.get('invalidation_count', 0)} episodes)",
+                "",
+                "FORWARD OBSERVATION WINDOWS:",
+            ])
+            for h_str, h_data in (research_summary.get("horizons_summary") or {}).items():
+                is_low = " [LOW SAMPLE]" if h_data.get("is_low_sample") else ""
                 lines.append(
-                    f"  [{rule.get('outcome', 'UNKNOWN')}] {rule.get('label', '')} "
-                    f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')}){math_note}"
+                    f"  • {h_str}-Candle Horizon: N={h_data.get('sample_count', 0)}{is_low}, "
+                    f"Median Return={h_data.get('median_return_pct')}%, Mean={h_data.get('mean_return_pct')}%, "
+                    f"Positive Return Freq={h_data.get('positive_return_pct')}%, "
+                    f"Median MAE={h_data.get('median_mae_pct')}%, Median MFE={h_data.get('median_mfe_pct')}%"
                 )
-        lines.append("")
-        lines.append("EXIT RULES:")
-        for rule in evaluation.get("rule_evaluations", []):
-            if not rule.get("is_entry_rule"):
-                lines.append(
-                    f"  [{rule.get('outcome', 'UNKNOWN')}] {rule.get('label', '')} "
-                    f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')})"
-                )
-        fv = evaluation.get("feature_vector", {})
-        if fv:
+
+            reg_bd = research_summary.get("regime_breakdown") or {}
+            if reg_bd:
+                lines.append("")
+                lines.append("PERFORMANCE BY MARKET REGIME (5-Candle Horizon):")
+                for reg_k, reg_v in reg_bd.items():
+                    is_low = " [LOW SAMPLE]" if reg_v.get("is_low_sample") else ""
+                    lines.append(
+                        f"  • {reg_k}: N={reg_v.get('activations')}{is_low}, "
+                        f"Median Return={reg_v.get('median_5candle_return')}%, "
+                        f"Positive Freq={reg_v.get('positive_frequency_pct')}%"
+                    )
+
+            conf_bd = research_summary.get("confluence_breakdown") or {}
+            if conf_bd:
+                lines.append("")
+                lines.append("CONFLUENCE BREAKDOWN:")
+                for conf_k, conf_v in conf_bd.items():
+                    is_low = " [LOW SAMPLE]" if conf_v.get("is_low_sample") else ""
+                    lines.append(
+                        f"  • {conf_k}: N={conf_v.get('activations')}{is_low}, "
+                        f"Median Return={conf_v.get('median_5candle_return')}%, "
+                        f"Positive Freq={conf_v.get('positive_frequency_pct')}%"
+                    )
+
+        if evaluation:
+            lines.extend([
+                "",
+                "=== CURRENT OBSERVATORY EVALUATION ===",
+                f"Strategy: {evaluation.get('strategy_name', 'Unknown')}",
+                f"Category: {evaluation.get('category', 'Unknown')}",
+                f"State: {evaluation.get('state', 'UNKNOWN')}",
+                f"Data Freshness: {evaluation.get('data_freshness', 'UNKNOWN')} ({evaluation.get('data_age_seconds', 'N/A')}s ago)",
+                f"Candles Used: {evaluation.get('candles_used', 0)}",
+                f"Evaluated At: {evaluation.get('evaluated_at', 'N/A')}",
+                "",
+                "ENTRY RULES & MATHEMATICS:",
+            ])
+            for rule in evaluation.get("rule_evaluations", []):
+                if rule.get("is_entry_rule"):
+                    math_note = f" [Math: {rule.get('math_detail')}]" if rule.get("math_detail") else ""
+                    lines.append(
+                        f"  [{rule.get('outcome', 'UNKNOWN')}] {rule.get('label', '')} "
+                        f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')}){math_note}"
+                    )
             lines.append("")
-            lines.append("COMPUTED INDICATORS (verified, non-fabricated):")
-            for k, v in list(fv.items())[:14]:
-                lines.append(f"  {k}: {v}")
+            lines.append("EXIT RULES:")
+            for rule in evaluation.get("rule_evaluations", []):
+                if not rule.get("is_entry_rule"):
+                    lines.append(
+                        f"  [{rule.get('outcome', 'UNKNOWN')}] {rule.get('label', '')} "
+                        f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')})"
+                    )
+            fv = evaluation.get("feature_vector", {})
+            if fv:
+                lines.append("")
+                lines.append("COMPUTED INDICATORS (verified, non-fabricated):")
+                for k, v in list(fv.items())[:14]:
+                    lines.append(f"  {k}: {v}")
 
         if context:
             if context.get("market_regime"):
@@ -282,38 +340,56 @@ class StrategyCopilotAgent:
                              f"Alignment Score={conf.get('alignment_score_pct')}%")
                 if conf.get("conflicts"):
                     lines.append(f"CONFLICT WARNINGS: {'; '.join(conf['conflicts'])}")
-            if context.get("other_strategies"):
-                lines.append("\nOTHER STRATEGIES STATUS:")
-                for os_item in context["other_strategies"][:8]:
-                    lines.append(f"  • {os_item.get('name')}: {os_item.get('state')} ({os_item.get('passing_count')}/{os_item.get('total_count')})")
 
         return "\n".join(lines)
 
     async def answer(
         self,
         symbol: str,
-        evaluation: Dict[str, Any],
-        user_message: str,
+        evaluation: Optional[Dict[str, Any]] = None,
+        user_message: str = "",
         chat_history: Optional[List[Dict[str, str]]] = None,
         context: Optional[Dict[str, Any]] = None,
+        research_summary: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Answer a user question about strategy evaluation with full multi-turn context.
+        Answer a user question about strategy evaluation or historical research with full multi-turn context.
         """
-        evidence_block = self._build_evidence_block(evaluation, context)
+        evidence_block = self._build_evidence_block(evaluation, context, research_summary)
 
         if not self.client:
-            state = evaluation.get("state", "UNKNOWN")
-            n_pass = evaluation.get("entry_rules_passing", 0)
-            n_total = evaluation.get("entry_rules_total", 1)
-            freshness = evaluation.get("data_freshness", "UNKNOWN")
-            strat_name = evaluation.get('strategy_name', 'Unknown')
+            if research_summary:
+                s_name = research_summary.get('strategy_name', 'Strategy')
+                tot_act = research_summary.get('total_activations', 0)
+                avg_dur = research_summary.get('avg_episode_duration_candles', 0)
+                h5 = (research_summary.get('horizons_summary') or {}).get('5') or {}
+                med5 = h5.get('median_return_pct', 'N/A')
+                pos5 = h5.get('positive_return_pct', 'N/A')
+                mae5 = h5.get('median_mae_pct', 'N/A')
+                mfe5 = h5.get('median_mfe_pct', 'N/A')
+                reply = (
+                    f"**{s_name}** on **{symbol}** has recorded **{tot_act} activation episodes** across the analyzed dataset. "
+                    f"The average continuous activation duration was **{avg_dur} candles**.\n\n"
+                    f"**5-Candle Forward Outcomes:**\n"
+                    f"• Median Return: **{med5}%**\n"
+                    f"• Positive Return Frequency: **{pos5}%**\n"
+                    f"• Median MAE (Adverse Excursion): **{mae5}%**\n"
+                    f"• Median MFE (Favorable Excursion): **{mfe5}%**\n\n"
+                    f"*(Note: All metrics reflect empirical historical observations under deterministic rules without execution/slippage modeling.)*"
+                )
+                return {"reply": reply, "evidence_cited": ["Total Activations", "5-Candle Forward Returns", "MAE/MFE"]}
+
+            state = (evaluation or {}).get("state", "UNKNOWN")
+            n_pass = (evaluation or {}).get("entry_rules_passing", 0)
+            n_total = (evaluation or {}).get("entry_rules_total", 1)
+            freshness = (evaluation or {}).get("data_freshness", "UNKNOWN")
+            strat_name = (evaluation or {}).get('strategy_name', 'Unknown')
             reply = (
                 f"**{strat_name}** on **{symbol}** is currently **{state}** ({n_pass}/{n_total} conditions met). "
                 f"Data freshness: {freshness}. All rule states are deterministically verified from live indicator data."
             )
             evidence_cited = [
-                r.get("label", "") for r in evaluation.get("rule_evaluations", [])
+                r.get("label", "") for r in (evaluation or {}).get("rule_evaluations", [])
                 if r.get("outcome") in ("PASS", "FAIL")
             ]
             return {"reply": reply, "evidence_cited": evidence_cited}

@@ -564,10 +564,61 @@ async def evaluate_strategies(symbol: str, req: StrategyEvaluateRequest):
     return observatory
 
 
+from backend.app.strategy_engine.research_engine import historical_research_engine
+
+
+class StrategyResearchRequest(BaseModel):
+    candles: Optional[List[Dict[str, Any]]] = None
+    strategy_id: Optional[str] = None
+    strategy_ids: Optional[List[str]] = None
+    timeframe: Optional[str] = "5m"
+    horizons: Optional[List[int]] = None
+
+
+@app.post("/api/strategies/research/{symbol}")
+async def research_strategies(symbol: str, req: StrategyResearchRequest):
+    """
+    Point-in-time historical research replay & outcome measurement.
+    Answers objectively: 'When this strategy activated historically, what happened afterward?'
+    Measures forward returns, excursions (MAE/MFE), regime attribution, and confluence analytics.
+    """
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        # Load up to 250 historical bars for research
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 15:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DATA_UNAVAILABLE: Insufficient historical candle depth for {symbol} ({len(candles) if candles else 0} candles).",
+        )
+
+    if req.strategy_id:
+        summary = historical_research_engine.evaluate_strategy_research(
+            candles=candles,
+            strategy_id=req.strategy_id,
+            symbol=symbol,
+            timeframe=tf,
+            horizons=req.horizons,
+        )
+        return summary
+    else:
+        summaries = historical_research_engine.evaluate_all_strategies_research(
+            candles=candles,
+            strategy_ids=req.strategy_ids,
+            symbol=symbol,
+            timeframe=tf,
+            horizons=req.horizons,
+        )
+        return summaries
+
+
 class StrategyCopilotRequest(BaseModel):
     symbol: str
     strategy_id: str
-    evaluation_result: Dict[str, Any]  # Serialised StrategyEvaluationResult
+    evaluation_result: Optional[Dict[str, Any]] = None  # Serialised StrategyEvaluationResult
+    research_summary: Optional[Dict[str, Any]] = None   # Serialised StrategyResearchSummary
     user_message: str
     chat_history: Optional[List[Dict[str, str]]] = None
     context: Optional[Dict[str, Any]] = None
@@ -577,7 +628,7 @@ class StrategyCopilotRequest(BaseModel):
 async def strategy_copilot(req: StrategyCopilotRequest):
     """
     Evidence-grounded Strategy Copilot with conversational multi-turn context.
-    AI interprets the pre-computed evaluation result and market regime.
+    AI interprets the pre-computed evaluation result, research outcomes, and market regime.
     """
     if not req.user_message.strip():
         raise HTTPException(status_code=400, detail="user_message cannot be empty")
@@ -587,6 +638,7 @@ async def strategy_copilot(req: StrategyCopilotRequest):
         user_message=req.user_message,
         chat_history=req.chat_history,
         context=req.context,
+        research_summary=req.research_summary,
     )
     return result
 

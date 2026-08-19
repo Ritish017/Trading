@@ -5,16 +5,18 @@ import {
   TrendingUp, TrendingDown, Info, Send, Loader2, Shield, Activity,
   Sliders, Eye, EyeOff, BarChart2, Layers, Sparkles, MessageSquare,
   HelpCircle, RefreshCw, CheckSquare, Square, History, ShieldAlert,
-  BarChart, ArrowUpRight, ArrowDownRight, Compass, Filter, Tag
+  BarChart, ArrowUpRight, ArrowDownRight, Compass, Filter, Tag, BookOpen,
+  Calendar, Award, Crosshair, Target, Percent
 } from 'lucide-react';
 import { NSEStock } from '../../types/indianMarket';
 
 // ---------------------------------------------------------------------------
-// Types & Extensible Contracts (V3)
+// Types & Extensible Contracts (V3 & V4)
 // ---------------------------------------------------------------------------
 export type RuleOutcome = 'PASS' | 'FAIL' | 'UNAVAILABLE';
 export type StrategyState = 'ACTIVE' | 'PARTIAL' | 'INACTIVE' | 'CONFLICTED' | 'UNAVAILABLE';
 export type DataFreshness = 'LIVE' | 'RECENT' | 'STALE' | 'UNAVAILABLE';
+export type StrategyDirection = 'BULLISH' | 'BEARISH' | 'BOTH';
 
 export interface RuleEvaluation {
   rule_id: string;
@@ -67,6 +69,7 @@ export interface StrategyResult {
   short_name?: string;
   category: string;
   description: string;
+  direction?: StrategyDirection | string;
   version?: string;
   enabled?: boolean;
   experimental?: boolean;
@@ -172,6 +175,88 @@ export interface ObservatoryData {
   candles: ChartCandle[];
 }
 
+export interface ForwardObservationData {
+  horizon_candles: number;
+  forward_return_pct?: number | null;
+  direction_adjusted_return_pct?: number | null;
+  mae_pct?: number | null;
+  mfe_pct?: number | null;
+  is_complete: boolean;
+  end_price?: number | null;
+  min_price?: number | null;
+  max_price?: number | null;
+}
+
+export interface ResearchObservationData {
+  observation_id: string;
+  strategy_id: string;
+  strategy_version: string;
+  symbol: string;
+  timeframe: string;
+  direction: string;
+  activation_index: number;
+  activation_timestamp: number;
+  activation_price: number;
+  invalidation_index?: number | null;
+  invalidation_timestamp?: number | null;
+  invalidation_price?: number | null;
+  candles_to_invalidation?: number | null;
+  time_to_invalidation_seconds?: number | null;
+  regime_at_activation: string;
+  regime_evidence: string;
+  confluence_count: number;
+  confluent_strategies: string[];
+  conflicting_strategies: string[];
+  rule_snapshot: any[];
+  indicator_snapshot: Record<string, number>;
+  forward_observations: Record<string, ForwardObservationData>;
+  observation_status: string;
+}
+
+export interface HorizonSummaryData {
+  horizon: number;
+  sample_count: number;
+  mean_return_pct?: number | null;
+  median_return_pct?: number | null;
+  std_dev_pct?: number | null;
+  min_return_pct?: number | null;
+  max_return_pct?: number | null;
+  positive_return_pct?: number | null;
+  negative_return_pct?: number | null;
+  p10?: number | null;
+  p25?: number | null;
+  p50?: number | null;
+  p75?: number | null;
+  p90?: number | null;
+  mean_mae_pct?: number | null;
+  median_mae_pct?: number | null;
+  mean_mfe_pct?: number | null;
+  median_mfe_pct?: number | null;
+  is_low_sample: boolean;
+}
+
+export interface StrategyResearchSummaryData {
+  strategy_id: string;
+  strategy_name: string;
+  category: string;
+  direction: string;
+  symbol: string;
+  timeframe: string;
+  total_candles_analyzed: number;
+  total_activations: number;
+  active_episodes_count: number;
+  total_active_candles: number;
+  activation_frequency_pct: number;
+  avg_episode_duration_candles: number;
+  median_episode_duration_candles: number;
+  invalidation_count: number;
+  invalidation_frequency_pct: number;
+  horizons_summary: Record<string, HorizonSummaryData>;
+  regime_breakdown: Record<string, { activations: number; median_5candle_return: number; positive_frequency_pct: number; is_low_sample: boolean }>;
+  confluence_breakdown: Record<string, { activations: number; median_5candle_return: number; positive_frequency_pct: number; is_low_sample: boolean }>;
+  observations: ResearchObservationData[];
+}
+
 export interface CopilotMessage {
   role: 'user' | 'assistant';
   text: string;
@@ -248,9 +333,9 @@ function StrategyKeypadButton({
   return (
     <button
       onClick={onClick}
-      className={`relative p-2.5 rounded-xl border text-left transition-all duration-150 cursor-pointer flex flex-col justify-between ${
+      className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer relative overflow-hidden ${
         isSelected
-          ? 'bg-violet-950/40 border-violet-500/80 shadow-lg shadow-violet-500/20 ring-1 ring-violet-400/50'
+          ? 'bg-violet-950/40 border-violet-500/80 ring-1 ring-violet-500/60 shadow-lg shadow-violet-500/10'
           : 'bg-[#151720] border-stone-800/80 hover:border-stone-700 hover:bg-[#1c1e29]'
       }`}
     >
@@ -280,7 +365,7 @@ function StrategyKeypadButton({
 // Strategy Alignment & Confluence Gauge
 // ---------------------------------------------------------------------------
 function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
-  const total = confluence.total_strategies || 8;
+  const total = confluence.total_strategies || 20;
   const actPct = (confluence.active_count / total) * 100;
   const partPct = (confluence.partial_count / total) * 100;
   const inactPct = (confluence.inactive_count / total) * 100;
@@ -346,7 +431,7 @@ function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic Metadata-Driven Observatory Trading Chart (Phase 22)
+// Dynamic Metadata-Driven Observatory Trading Chart
 // ---------------------------------------------------------------------------
 interface ObservatoryChartProps {
   candles: ChartCandle[];
@@ -355,6 +440,7 @@ interface ObservatoryChartProps {
   allStrategies: StrategyResult[];
   timeframe: string;
   onTimeframeChange: (tf: string) => void;
+  highlightIndex?: number | null;
 }
 
 function ObservatoryChart({
@@ -364,6 +450,7 @@ function ObservatoryChart({
   allStrategies,
   timeframe,
   onTimeframeChange,
+  highlightIndex,
 }: ObservatoryChartProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -394,7 +481,7 @@ function ObservatoryChart({
   const subpanelHeight = 65;
   const subpanelGap = 16;
 
-  // Dynamic visualization overlays from strategy definition metadata (Phase 22)
+  // Dynamic visualization overlays from strategy definition metadata
   const strategyOverlays = selectedStrategy?.visualization?.overlays || [];
   const isEMA20Active = layers.ema20 || strategyOverlays.includes('ema20');
   const isEMA50Active = layers.ema50 || strategyOverlays.includes('ema50');
@@ -496,7 +583,9 @@ function ObservatoryChart({
   };
 
   // Active Candle for crosshair
-  const activeIdx = hoverIndex !== null && hoverIndex >= 0 && hoverIndex < n ? hoverIndex : n - 1;
+  const activeIdx = hoverIndex !== null && hoverIndex >= 0 && hoverIndex < n
+    ? hoverIndex
+    : (highlightIndex !== undefined && highlightIndex !== null && highlightIndex >= 0 && highlightIndex < n ? highlightIndex : n - 1);
   const activeCandle = candles[activeIdx];
 
   // Mouse handler
@@ -795,12 +884,12 @@ function ObservatoryChart({
           })}
 
           {/* Crosshair Cursor */}
-          {hoverIndex !== null && hoverIndex >= 0 && hoverIndex < n && (
+          {activeIdx !== null && activeIdx >= 0 && activeIdx < n && (
             <g>
               <line
-                x1={hoverIndex * candleStep + candleStep / 2}
+                x1={activeIdx * candleStep + candleStep / 2}
                 y1={0}
-                x2={hoverIndex * candleStep + candleStep / 2}
+                x2={activeIdx * candleStep + candleStep / 2}
                 y2={priceChartHeight + volumeHeight}
                 stroke="#a1a1aa"
                 strokeWidth={0.8}
@@ -808,9 +897,9 @@ function ObservatoryChart({
               />
               <line
                 x1={0}
-                y1={getY(candles[hoverIndex].close)}
+                y1={getY(candles[activeIdx].close)}
                 x2={chartWidth}
-                y2={getY(candles[hoverIndex].close)}
+                y2={getY(candles[activeIdx].close)}
                 stroke="#a1a1aa"
                 strokeWidth={0.8}
                 strokeDasharray="2,2"
@@ -876,20 +965,17 @@ function ObservatoryChart({
           <span className="text-stone-500 shrink-0 font-bold flex items-center gap-1">
             <History className="w-3 h-3 text-stone-400" /> Historical Timeline:
           </span>
-          {selectedStrategy.activation_events.slice(-6).map((ev, i) => (
-            <div
+          {selectedStrategy.activation_events.slice(-10).map((ev, i) => (
+            <span
               key={i}
-              className={`shrink-0 px-2 py-0.5 rounded-lg border flex items-center gap-1.5 ${
-                ev.event_type === 'ACTIVATED'
-                  ? 'bg-emerald-950/40 border-emerald-700/40 text-emerald-300'
-                  : ev.event_type === 'INVALIDATED'
-                  ? 'bg-rose-950/30 border-rose-800/40 text-rose-300'
-                  : 'bg-orange-950/30 border-orange-700/40 text-orange-300'
+              className={`px-2 py-0.5 rounded border shrink-0 flex items-center gap-1 ${
+                ev.event_type === 'ACTIVATED' ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50' :
+                ev.event_type === 'INVALIDATED' ? 'bg-rose-950/40 text-rose-300 border-rose-800/50' :
+                'bg-stone-900 text-stone-400 border-stone-800'
               }`}
             >
-              <span className="font-bold">₹{ev.price.toFixed(2)}</span>
-              <span>{ev.label}</span>
-            </div>
+              <strong>{ev.event_type}</strong> @ ₹{ev.price.toFixed(2)}
+            </span>
           ))}
         </div>
       )}
@@ -1002,6 +1088,361 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
 }
 
 // ---------------------------------------------------------------------------
+// Historical Research Workstation Component (Phase 4)
+// ---------------------------------------------------------------------------
+interface ResearchWorkstationProps {
+  summary: StrategyResearchSummaryData | null;
+  isLoading: boolean;
+  error: string | null;
+  selectedObsId: string | null;
+  onSelectObsId: (obsId: string, candleIndex: number) => void;
+  onRefresh: () => void;
+}
+
+function ResearchWorkstation({
+  summary,
+  isLoading,
+  error,
+  selectedObsId,
+  onSelectObsId,
+  onRefresh,
+}: ResearchWorkstationProps) {
+  const [selectedHorizonTab, setSelectedHorizonTab] = useState<string>('5');
+  const [regimeFilter, setRegimeFilter] = useState<string>('ALL');
+
+  if (isLoading) {
+    return (
+      <div className="p-12 bg-[#12131b] border border-stone-800 rounded-2xl flex flex-col items-center justify-center text-stone-400 space-y-3 font-mono">
+        <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
+        <span className="text-xs">Executing Point-in-Time Historical Research Replay…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 bg-rose-950/20 border border-rose-800/40 rounded-2xl text-rose-300 font-mono text-xs space-y-2">
+        <div className="flex items-center gap-2 font-bold text-rose-200">
+          <AlertTriangle className="w-4 h-4 text-rose-400" />
+          <span>Research Replay Failed</span>
+        </div>
+        <p>{error}</p>
+        <button
+          onClick={onRefresh}
+          className="px-3 py-1 bg-stone-900 hover:bg-stone-800 border border-stone-700 text-stone-200 rounded text-[11px] font-bold cursor-pointer"
+        >
+          Retry Replay
+        </button>
+      </div>
+    );
+  }
+
+  if (!summary) {
+    return (
+      <div className="p-8 bg-[#12131b] border border-stone-800 rounded-2xl text-center text-stone-500 font-mono text-xs">
+        No research summary generated yet. Click 'Run Research Replay' above.
+      </div>
+    );
+  }
+
+  const isLowSample = summary.total_activations < 5;
+
+  const filteredObservations = summary.observations.filter(obs => {
+    if (regimeFilter !== 'ALL' && obs.regime_at_activation !== regimeFilter) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* ── Research KPI Banner ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2.5">
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
+          <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Total Activations</div>
+          <div className="text-xl font-black text-white font-mono mt-1">{summary.total_activations}</div>
+          <div className="text-[10px] font-mono text-stone-400 mt-0.5">
+            {summary.activation_frequency_pct}% of candles
+          </div>
+        </div>
+
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
+          <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Active Episodes</div>
+          <div className="text-xl font-black text-violet-400 font-mono mt-1">{summary.active_episodes_count}</div>
+          <div className="text-[10px] font-mono text-stone-400 mt-0.5">
+            Avg: {summary.avg_episode_duration_candles} bars
+          </div>
+        </div>
+
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
+          <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Median Duration</div>
+          <div className="text-xl font-black text-amber-400 font-mono mt-1">{summary.median_episode_duration_candles} <span className="text-xs font-normal text-stone-400">bars</span></div>
+          <div className="text-[10px] font-mono text-stone-400 mt-0.5">
+            Continuous hold
+          </div>
+        </div>
+
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
+          <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Invalidation Freq</div>
+          <div className="text-xl font-black text-rose-400 font-mono mt-1">{summary.invalidation_frequency_pct}%</div>
+          <div className="text-[10px] font-mono text-stone-400 mt-0.5">
+            {summary.invalidation_count} episodes
+          </div>
+        </div>
+
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3 col-span-2 sm:col-span-4 lg:col-span-1 flex flex-col justify-between">
+          <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Sample Validity</div>
+          <div className="mt-1">
+            {isLowSample ? (
+              <span className="px-2 py-0.5 rounded bg-amber-950/60 border border-amber-600/50 text-amber-300 font-mono font-bold text-xs inline-flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" /> LOW SAMPLE (N&lt;5)
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-600/50 text-emerald-300 font-mono font-bold text-xs inline-flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> VALID DATASET
+              </span>
+            )}
+          </div>
+          <div className="text-[10px] font-mono text-stone-500 mt-0.5">{summary.total_candles_analyzed} candles</div>
+        </div>
+      </div>
+
+      {/* ── Forward Observation Windows Table ── */}
+      <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800/60 pb-2">
+          <div className="flex items-center gap-2">
+            <Target className="w-4 h-4 text-violet-400" />
+            <span className="font-bold text-xs text-stone-200 uppercase font-mono tracking-wider">
+              Forward Observation Windows (Empirical Outcome Distributions)
+            </span>
+          </div>
+          <span className="text-[10px] font-mono text-stone-500">
+            Direction: <strong className="text-stone-300 font-bold">{summary.direction}</strong>
+          </span>
+        </div>
+
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="w-full text-left text-xs font-mono">
+            <thead>
+              <tr className="border-b border-stone-800 text-stone-500 text-[10px] uppercase">
+                <th className="pb-2 font-bold">Horizon</th>
+                <th className="pb-2 font-bold">Sample (N)</th>
+                <th className="pb-2 font-bold">Median Return</th>
+                <th className="pb-2 font-bold">Mean Return</th>
+                <th className="pb-2 font-bold">Positive Freq %</th>
+                <th className="pb-2 font-bold">Median MAE (Adverse)</th>
+                <th className="pb-2 font-bold">Median MFE (Favorable)</th>
+                <th className="pb-2 font-bold">P10 / P90 Span</th>
+                <th className="pb-2 font-bold">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-800/60">
+              {['1', '3', '5', '10', '20'].map(h => {
+                const hs = summary.horizons_summary[h];
+                if (!hs) return null;
+                const isPos = hs.median_return_pct !== null && hs.median_return_pct !== undefined && hs.median_return_pct > 0;
+                const isNeg = hs.median_return_pct !== null && hs.median_return_pct !== undefined && hs.median_return_pct < 0;
+
+                return (
+                  <tr key={h} className="hover:bg-stone-900/40 transition-all">
+                    <td className="py-2.5 font-black text-stone-200">{h} {h === '1' ? 'Candle' : 'Candles'}</td>
+                    <td className="py-2.5 text-stone-400">{hs.sample_count}</td>
+                    <td className={`py-2.5 font-bold ${isPos ? 'text-emerald-400' : isNeg ? 'text-rose-400' : 'text-stone-400'}`}>
+                      {hs.median_return_pct !== null ? `${hs.median_return_pct > 0 ? '+' : ''}${hs.median_return_pct.toFixed(2)}%` : '---'}
+                    </td>
+                    <td className="py-2.5 text-stone-300">
+                      {hs.mean_return_pct !== null ? `${hs.mean_return_pct > 0 ? '+' : ''}${hs.mean_return_pct.toFixed(2)}%` : '---'}
+                    </td>
+                    <td className="py-2.5 text-stone-300">
+                      {hs.positive_return_pct !== null ? `${hs.positive_return_pct.toFixed(1)}%` : '---'}
+                    </td>
+                    <td className="py-2.5 text-orange-400 font-medium">
+                      {hs.median_mae_pct !== null ? `${hs.median_mae_pct.toFixed(2)}%` : '---'}
+                    </td>
+                    <td className="py-2.5 text-emerald-300 font-medium">
+                      {hs.median_mfe_pct !== null ? `${hs.median_mfe_pct.toFixed(2)}%` : '---'}
+                    </td>
+                    <td className="py-2.5 text-stone-500 text-[11px]">
+                      {hs.p10 !== null && hs.p90 !== null ? `[${hs.p10.toFixed(1)}% … ${hs.p90.toFixed(1)}%]` : '---'}
+                    </td>
+                    <td className="py-2.5">
+                      {hs.is_low_sample ? (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-700/50 text-amber-300">LOW SAMPLE</span>
+                      ) : (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/40 border border-emerald-700/50 text-emerald-300">COMPLETE</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Contextual Breakdowns Grid (Regime & Confluence) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Market Regime Breakdown */}
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-2.5">
+          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
+            <span className="font-bold text-xs text-stone-200 uppercase font-mono flex items-center gap-1.5">
+              <Compass className="w-3.5 h-3.5 text-amber-400" /> Outcomes by Market Regime (5-Candle Horizon)
+            </span>
+          </div>
+
+          <div className="space-y-1.5">
+            {Object.entries(summary.regime_breakdown).length > 0 ? (
+              Object.entries(summary.regime_breakdown).map(([reg, data]) => (
+                <div key={reg} className="p-2 rounded-lg bg-stone-900/50 border border-stone-800/60 flex items-center justify-between text-xs font-mono">
+                  <div>
+                    <span className="font-bold text-stone-200">{reg}</span>
+                    <div className="text-[10px] text-stone-500">{data.activations} activations</div>
+                  </div>
+                  <div className="text-right">
+                    <div className={data.median_5candle_return >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                      {data.median_5candle_return > 0 ? '+' : ''}{data.median_5candle_return.toFixed(2)}%
+                    </div>
+                    <div className="text-[10px] text-stone-400">
+                      Positive Freq: {data.positive_frequency_pct.toFixed(0)}%
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-xs text-stone-500 font-mono py-2 text-center">No regime activations recorded.</div>
+            )}
+          </div>
+        </div>
+
+        {/* Confluence Breakdown */}
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-2.5">
+          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
+            <span className="font-bold text-xs text-stone-200 uppercase font-mono flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-indigo-400" /> Outcomes by Strategy Confluence
+            </span>
+          </div>
+
+          <div className="space-y-1.5">
+            {Object.entries(summary.confluence_breakdown).length > 0 ? (
+              Object.entries(summary.confluence_breakdown).map(([tier, data]) => (
+                <div key={tier} className="p-2 rounded-lg bg-stone-900/50 border border-stone-800/60 flex items-center justify-between text-xs font-mono">
+                  <div>
+                    <span className="font-bold text-stone-200">{tier}</span>
+                    <div className="text-[10px] text-stone-500">{data.activations} activations</div>
+                  </div>
+                  <div className="text-right">
+                    <div className={data.median_5candle_return >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                      {data.median_5candle_return > 0 ? '+' : ''}{data.median_5candle_return.toFixed(2)}%
+                    </div>
+                    <div className="text-[10px] text-stone-400">
+                      Positive Freq: {data.positive_frequency_pct.toFixed(0)}%
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-xs text-stone-500 font-mono py-2 text-center">No confluence observations recorded.</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Historical Activation Episodes Ledger ── */}
+      <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800/60 pb-2">
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-emerald-400" />
+            <span className="font-bold text-xs text-stone-200 uppercase font-mono tracking-wider">
+              Activation Episodes Ledger ({filteredObservations.length} Episodes)
+            </span>
+          </div>
+
+          {/* Filter by Regime */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono text-stone-500">Filter Regime:</span>
+            <select
+              value={regimeFilter}
+              onChange={e => setRegimeFilter(e.target.value)}
+              className="bg-stone-900 border border-stone-800 text-stone-300 text-[10px] font-mono rounded px-2 py-1 focus:outline-none"
+            >
+              <option value="ALL">ALL REGIMES</option>
+              {Object.keys(summary.regime_breakdown).map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+          {filteredObservations.length > 0 ? (
+            filteredObservations.map(obs => {
+              const isSelected = selectedObsId === obs.observation_id;
+              const f5 = obs.forward_observations['5'];
+              const dateStr = new Date(obs.activation_timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+              return (
+                <div
+                  key={obs.observation_id}
+                  onClick={() => onSelectObsId(obs.observation_id, obs.activation_index)}
+                  className={`p-2.5 rounded-lg border text-xs font-mono cursor-pointer transition-all ${
+                    isSelected
+                      ? 'bg-violet-950/40 border-violet-500/80 shadow-md ring-1 ring-violet-500'
+                      : 'bg-stone-900/40 border-stone-800/60 hover:bg-stone-900 hover:border-stone-700'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-stone-200">Episode @ Bar #{obs.activation_index}</span>
+                      <span className="text-stone-500">({dateStr})</span>
+                      <span className="px-1.5 py-0.5 rounded bg-stone-800 text-[10px] text-amber-400">
+                        {obs.regime_at_activation}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="text-stone-300 font-bold">P₀: ₹{obs.activation_price.toFixed(2)}</span>
+                      {f5 && f5.is_complete && f5.direction_adjusted_return_pct !== null && (
+                        <span className={`font-bold ${f5.direction_adjusted_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          5-Bar: {f5.direction_adjusted_return_pct > 0 ? '+' : ''}{f5.direction_adjusted_return_pct.toFixed(2)}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Excursions & Confluence details */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-1.5 border-t border-stone-800/40 text-[10px] text-stone-400">
+                    <div>
+                      <span>Confluence: <strong>{obs.confluence_count} strategies</strong></span>
+                      {obs.confluent_strategies.length > 0 && (
+                        <span className="text-stone-500"> ({obs.confluent_strategies.join(', ')})</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3 font-mono">
+                      {f5?.mae_pct !== undefined && f5?.mae_pct !== null && (
+                        <span className="text-orange-400">MAE: {f5.mae_pct.toFixed(2)}%</span>
+                      )}
+                      {f5?.mfe_pct !== undefined && f5?.mfe_pct !== null && (
+                        <span className="text-emerald-400">MFE: {f5.mfe_pct.toFixed(2)}%</span>
+                      )}
+                      {obs.candles_to_invalidation && (
+                        <span className="text-stone-400">Duration: {obs.candles_to_invalidation} bars</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="p-6 text-center text-stone-500 font-mono text-xs">
+              No activation episodes match the selected regime filter.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Real Conversational Strategy Copilot
 // ---------------------------------------------------------------------------
 interface StrategyCopilotProps {
@@ -1011,6 +1452,7 @@ interface StrategyCopilotProps {
   regime: MarketRegimeData | null;
   confluence: ConfluenceData | null;
   timeframe: string;
+  researchSummary?: StrategyResearchSummaryData | null;
 }
 
 function StrategyCopilotChat({
@@ -1020,6 +1462,7 @@ function StrategyCopilotChat({
   regime,
   confluence,
   timeframe,
+  researchSummary,
 }: StrategyCopilotProps) {
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [input, setInput] = useState('');
@@ -1031,7 +1474,13 @@ function StrategyCopilotChat({
     setMessages([]);
   }, [symbol, selectedStrategy?.strategy_id, timeframe]);
 
-  const quickChips = [
+  const quickChips = researchSummary ? [
+    'How often did this strategy activate historically?',
+    'What is the median 5-candle forward return?',
+    'How does it perform in Trending vs Range-Bound regimes?',
+    'What is the typical adverse excursion (MAE)?',
+    'What is the invalidation rate?',
+  ] : [
     'Explain this strategy',
     'Why is it active right now?',
     'What would invalidate this strategy?',
@@ -1067,6 +1516,7 @@ function StrategyCopilotChat({
           symbol,
           strategy_id: selectedStrategy.strategy_id,
           evaluation_result: selectedStrategy,
+          research_summary: researchSummary || null,
           user_message: textToSend,
           chat_history: messages.slice(-4),
           context,
@@ -1099,104 +1549,128 @@ function StrategyCopilotChat({
       {/* Header */}
       <div className="p-3 border-b border-stone-800/60 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-violet-400" />
-          <span className="font-black text-xs text-white uppercase tracking-wider font-mono">AI Strategy Copilot</span>
+          <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/30 flex items-center justify-center text-violet-400">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span>Strategy Copilot</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-violet-950 border border-violet-700/50 text-violet-300">
+                {researchSummary ? 'RESEARCH' : 'OBSERVATORY'}
+              </span>
+            </div>
+            <div className="text-[10px] text-stone-400 font-mono">
+              Grounded in verified rules & empirical research
+            </div>
+          </div>
         </div>
-        <span className="text-[9px] font-mono text-stone-500 border border-stone-800 px-1.5 py-0.5 rounded">
-          Evidence-Grounded
-        </span>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5 min-h-[220px]">
-        {messages.length === 0 && (
+      <div className="flex-1 p-3 overflow-y-auto custom-scrollbar space-y-3 min-h-[160px] max-h-[300px]">
+        {messages.length === 0 ? (
           <div className="text-center py-4 space-y-2">
-            <div className="text-xs text-stone-400 font-mono">
-              Inquiring about <strong className="text-violet-400">{selectedStrategy?.strategy_name || 'selected strategy'}</strong> on <strong>{symbol}</strong>
-            </div>
-            <div className="flex flex-wrap gap-1.5 justify-center">
+            <MessageSquare className="w-8 h-8 text-stone-600 mx-auto" />
+            <p className="text-xs text-stone-400 font-medium">
+              Ask about {selectedStrategy?.strategy_name} rule logic, mathematical calculation, or historical outcomes.
+            </p>
+            <div className="flex flex-wrap gap-1.5 justify-center pt-2">
               {quickChips.map(chip => (
                 <button
                   key={chip}
                   onClick={() => handleSend(chip)}
-                  disabled={!selectedStrategy}
-                  className="text-[10px] font-mono px-2 py-1 rounded-lg bg-stone-900/80 hover:bg-stone-800 text-stone-300 border border-stone-700/60 transition-all cursor-pointer disabled:opacity-50"
+                  className="text-[10px] font-mono px-2 py-1 rounded-md bg-stone-900/80 border border-stone-800 text-stone-300 hover:text-white hover:border-violet-500/50 transition-all cursor-pointer"
                 >
                   {chip}
                 </button>
               ))}
             </div>
           </div>
-        )}
-
-        {messages.map((m, idx) => (
-          <div key={idx} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div
-              className={`max-w-[92%] p-2.5 rounded-xl text-xs leading-relaxed ${
-                m.role === 'user'
-                  ? 'bg-violet-600/30 text-stone-100 border border-violet-500/40'
-                  : 'bg-stone-900/90 text-stone-200 border border-stone-800'
-              }`}
-            >
-              {m.text}
-            </div>
-            {m.evidence_cited && m.evidence_cited.length > 0 && (
-              <div className="text-[9px] font-mono text-stone-500 mt-1 flex items-center gap-1">
-                <Database className="w-2.5 h-2.5" /> Cited: {m.evidence_cited.slice(0, 2).join(', ')}
+        ) : (
+          messages.map((m, i) => (
+            <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div
+                className={`p-2.5 rounded-xl text-xs leading-relaxed max-w-[92%] ${
+                  m.role === 'user'
+                    ? 'bg-violet-600 text-white rounded-br-none'
+                    : 'bg-[#181a24] border border-stone-800 text-stone-200 rounded-bl-none'
+                }`}
+              >
+                <div className="whitespace-pre-wrap">{m.text}</div>
+                {m.evidence_cited && m.evidence_cited.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-stone-700/50 text-[10px] font-mono text-violet-300">
+                    <span className="text-stone-400">Cited Evidence: </span>
+                    {m.evidence_cited.join(' · ')}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ))}
-
+            </div>
+          ))
+        )}
         {isLoading && (
-          <div className="flex items-center gap-2 text-xs font-mono text-violet-400 p-2">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing verified rules & mathematics…
+          <div className="flex items-center gap-2 text-xs text-violet-400 font-mono">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <span>Analyzing verified evidence…</span>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Box */}
-      <div className="p-2.5 border-t border-stone-800/60 bg-[#0e0f15]">
-        <div className="flex items-center gap-2">
+      {/* Input */}
+      <div className="p-2 border-t border-stone-800/60 bg-stone-950/40">
+        <form
+          onSubmit={e => {
+            e.preventDefault();
+            handleSend(input);
+          }}
+          className="flex items-center gap-2"
+        >
           <input
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend(input)}
-            placeholder={selectedStrategy ? "Ask Strategy Copilot..." : "Select a strategy first..."}
-            disabled={!selectedStrategy || isLoading}
-            className="flex-1 px-3 py-1.5 bg-stone-900 border border-stone-700/80 rounded-lg text-xs text-stone-200 placeholder-stone-600 focus:outline-none focus:border-violet-500 disabled:opacity-50 font-mono"
+            placeholder={`Ask about ${selectedStrategy?.short_name || 'strategy'}…`}
+            className="flex-1 bg-stone-900 border border-stone-800 rounded-lg px-2.5 py-1.5 text-xs text-stone-200 placeholder-stone-600 focus:outline-none focus:border-violet-500 font-mono"
           />
           <button
-            onClick={() => handleSend(input)}
-            disabled={!input.trim() || !selectedStrategy || isLoading}
-            className="p-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-all disabled:opacity-40 cursor-pointer"
+            type="submit"
+            disabled={!input.trim() || isLoading}
+            className="p-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg transition-all cursor-pointer"
           >
             <Send className="w-3.5 h-3.5" />
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main Strategy Lab Observatory Workspace (Dynamic V3 Extensible Architecture)
+// Master Strategy Lab Component (Phase 4 Workstation)
 // ---------------------------------------------------------------------------
 export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   stocks,
   selectedSymbol,
   onSelectSymbol,
 }) => {
-  const [symbol, setSymbol] = useState(selectedSymbol || 'RELIANCE.NS');
-  const [timeframe, setTimeframe] = useState('5m');
-  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [symbol, setSymbol] = useState<string>(selectedSymbol || 'RELIANCE.NS');
+  const [timeframe, setTimeframe] = useState<string>('5m');
+  const [activeTab, setActiveTab] = useState<'OBSERVATORY' | 'RESEARCH'>('OBSERVATORY');
+
+  // Observatory Data State
   const [observatoryData, setObservatoryData] = useState<ObservatoryData | null>(null);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
+  const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Dynamic Strategy Search & Filter State (Phase 20)
+  // Research Workstation State (Phase 4)
+  const [researchSummary, setResearchSummary] = useState<StrategyResearchSummaryData | null>(null);
+  const [isLoadingResearch, setIsLoadingResearch] = useState<boolean>(false);
+  const [researchError, setResearchError] = useState<string | null>(null);
+  const [highlightCandleIdx, setHighlightCandleIdx] = useState<number | null>(null);
+  const [selectedObsId, setSelectedObsId] = useState<string | null>(null);
+
+  // Filters (Category, State, Search)
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [stateFilter, setStateFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -1206,6 +1680,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
 
   const currentStock = stocks.find(s => s.symbol === symbol) || stocks[0];
 
+  // Evaluate Observatory
   const handleEvaluate = useCallback(async (symToEval = symbol, tfToEval = timeframe) => {
     const reqId = ++activeReqId.current;
     if (abortControllerRef.current) {
@@ -1254,10 +1729,46 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
     }
   }, [symbol, timeframe]);
 
+  // Run Research Replay (Phase 4)
+  const handleRunResearch = useCallback(async (stratId = selectedStrategyId, sym = symbol, tf = timeframe) => {
+    if (!stratId) return;
+    setIsLoadingResearch(true);
+    setResearchError(null);
+    try {
+      const res = await fetch(`/api/strategies/research/${encodeURIComponent(sym)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_id: stratId,
+          timeframe: tf,
+          candles: observatoryData?.candles || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data: StrategyResearchSummaryData = await res.json();
+      setResearchSummary(data);
+    } catch (e: any) {
+      setResearchError(e.message || 'Failed to run historical research');
+    } finally {
+      setIsLoadingResearch(false);
+    }
+  }, [selectedStrategyId, symbol, timeframe, observatoryData?.candles]);
+
   // Initial evaluation on mount or symbol/timeframe switch
   useEffect(() => {
     handleEvaluate(symbol, timeframe);
   }, [symbol, timeframe]);
+
+  // When switching to RESEARCH tab, auto-load research for selected strategy
+  useEffect(() => {
+    if (activeTab === 'RESEARCH' && selectedStrategyId) {
+      handleRunResearch(selectedStrategyId, symbol, timeframe);
+    }
+  }, [activeTab, selectedStrategyId, symbol, timeframe]);
 
   const selectedStrategy = observatoryData?.strategies?.find(s => s.strategy_id === selectedStrategyId) || null;
 
@@ -1265,13 +1776,12 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   const isStale = observatoryData?.data_freshness === 'STALE';
   const isLive = observatoryData?.data_freshness === 'LIVE';
   const isRecent = observatoryData?.data_freshness === 'RECENT';
-  const isUnavailable = observatoryData?.data_freshness === 'UNAVAILABLE';
   const isMarketClosed = observatoryData?.market_status === 'CLOSED';
   const isSimulated = observatoryData?.market_status === 'SIMULATED' || observatoryData?.provider === 'MOCK';
   const ageSeconds = observatoryData?.data_age_seconds;
   const provider = observatoryData?.provider || 'UPSTOX';
 
-  // Dynamic Category Extraction from registered strategies (Phase 3 & 20)
+  // Dynamic Category Extraction from registered strategies
   const availableCategories = useMemo(() => {
     if (!observatoryData?.strategies) return ['ALL'];
     const cats = new Set<string>();
@@ -1281,7 +1791,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
     return ['ALL', ...Array.from(cats)];
   }, [observatoryData?.strategies]);
 
-  // Dynamic Strategy Filtering (Phase 20)
+  // Dynamic Strategy Filtering
   const filteredStrategies = useMemo(() => {
     if (!observatoryData?.strategies) return [];
     return observatoryData.strategies.filter(s => {
@@ -1332,7 +1842,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
               </span>
               {observatoryData?.market_regime && (
                 <span className="text-stone-400 font-medium hidden md:inline">
-                  · Regime: <strong className="text-amber-400">{observatoryData.market_regime.regime}</strong> (Regime Evidence: {observatoryData.market_regime.confidence}%)
+                  · Regime: <strong className="text-amber-400">{observatoryData.market_regime.regime}</strong> ({observatoryData.market_regime.confidence}%)
                 </span>
               )}
             </div>
@@ -1356,60 +1866,55 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
           ))}
         </div>
 
+        {/* View Mode Toggle: Observatory vs Research */}
         <div className="flex items-center gap-2">
+          <div className="flex items-center bg-stone-900 p-0.5 rounded-xl border border-stone-800 font-mono text-xs">
+            <button
+              onClick={() => setActiveTab('OBSERVATORY')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'OBSERVATORY'
+                  ? 'bg-violet-600 text-white shadow-md'
+                  : 'text-stone-400 hover:text-stone-200'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Observatory</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('RESEARCH')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'RESEARCH'
+                  ? 'bg-violet-600 text-white shadow-md'
+                  : 'text-stone-400 hover:text-stone-200'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Research</span>
+            </button>
+          </div>
+
           <button
-            onClick={() => handleEvaluate(symbol, timeframe)}
-            disabled={isEvaluating}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-violet-500/20 disabled:opacity-60 cursor-pointer font-mono"
+            onClick={() => {
+              if (activeTab === 'OBSERVATORY') handleEvaluate(symbol, timeframe);
+              else handleRunResearch(selectedStrategyId, symbol, timeframe);
+            }}
+            disabled={isEvaluating || isLoadingResearch}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-violet-500/20 disabled:opacity-60 cursor-pointer font-mono"
           >
-            {isEvaluating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-            {isEvaluating ? 'Evaluating…' : 'Evaluate'}
+            {isEvaluating || isLoadingResearch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            {isEvaluating || isLoadingResearch ? 'Evaluating…' : 'Replay'}
           </button>
         </div>
       </div>
 
-      {/* Stale / Live / Market Closed / Simulated Data Experience Banner */}
+      {/* Context Banners */}
       {isStale && (
-        <div className="px-4 py-2.5 rounded-xl bg-purple-950/40 border border-purple-700/50 text-purple-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-md">
+        <div className="px-4 py-2 rounded-xl bg-purple-950/40 border border-purple-700/50 text-purple-200 text-xs flex items-center justify-between shadow-md">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-purple-400 shrink-0" />
-            <span>
-              <strong>HISTORICAL CONTEXT (DATA AGE: {formatDuration(ageSeconds)}):</strong> Strategy states below describe the last available market data (Provider: {provider}). They are not current live-market conditions.
-            </span>
+            <span><strong>HISTORICAL CONTEXT:</strong> Strategy states below describe last available data (Age: {formatDuration(ageSeconds)}).</span>
           </div>
-          <span className="font-mono text-[10px] text-purple-300 border border-purple-600/40 px-2 py-0.5 rounded shrink-0 self-start sm:self-auto">
-            🟣 HISTORICAL CONTEXT
-          </span>
-        </div>
-      )}
-
-      {isMarketClosed && !isStale && (
-        <div className="px-4 py-2 rounded-xl bg-sky-950/25 border border-sky-700/40 text-sky-300 text-xs flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-sky-400" />
-            <span><strong>MARKET CLOSED:</strong> Standard session hours are 09:15 - 15:30 IST (Mon-Fri). Strategy states reflect closing candle conditions (Provider: {provider}).</span>
-          </div>
-          <span className="font-mono text-[10px] text-sky-400 border border-sky-600/40 px-2 py-0.5 rounded">🔵 MARKET CLOSED</span>
-        </div>
-      )}
-
-      {isSimulated && (
-        <div className="px-4 py-2 rounded-xl bg-amber-950/25 border border-amber-700/40 text-amber-300 text-xs flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-amber-400" />
-            <span><strong>SIMULATED ENVIRONMENT:</strong> Running on development simulated market feed.</span>
-          </div>
-          <span className="font-mono text-[10px] text-amber-400 border border-amber-600/40 px-2 py-0.5 rounded">🟠 DEV MOCK</span>
-        </div>
-      )}
-
-      {isLive && !isMarketClosed && (
-        <div className="px-4 py-2 rounded-xl bg-emerald-950/25 border border-emerald-700/40 text-emerald-300 text-xs flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-emerald-400" />
-            <span><strong>LIVE MARKET STREAM:</strong> Real-time deterministic evaluation active (Provider: {provider}, Age: {formatDuration(ageSeconds)}).</span>
-          </div>
-          <span className="font-mono text-[10px] text-emerald-400 border border-emerald-600/40 px-2 py-0.5 rounded">🟢 LIVE</span>
+          <span className="font-mono text-[10px] text-purple-300 border border-purple-600/40 px-2 py-0.5 rounded">🟣 HISTORICAL CONTEXT</span>
         </div>
       )}
 
@@ -1420,10 +1925,9 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {/* ── Extensible Strategy Library Filter & Search Toolbar (Phases 20 & 21) ── */}
+      {/* ── Extensible Strategy Library Filter Toolbar ── */}
       {observatoryData?.strategies && (
         <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-          {/* Category Tabs */}
           <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar">
             <span className="text-[10px] font-mono text-stone-500 font-bold uppercase mr-1 flex items-center gap-1">
               <Filter className="w-3 h-3 text-stone-400" /> Category:
@@ -1443,7 +1947,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
             ))}
           </div>
 
-          {/* State Filter & Search Input */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 bg-stone-900 p-0.5 rounded-lg border border-stone-800 text-[10px] font-mono">
               {(['ALL', 'ACTIVE', 'PARTIAL', 'INACTIVE'] as const).map(st => (
@@ -1473,7 +1976,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {/* ── Dynamic Strategy Keypad (Scales to 10, 50, 100+ strategies) ── */}
+      {/* ── Dynamic Strategy Keypad (20 strategies) ── */}
       {filteredStrategies.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
           {filteredStrategies.map(strat => (
@@ -1481,7 +1984,12 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
               key={strat.strategy_id}
               strategy={strat}
               isSelected={selectedStrategyId === strat.strategy_id}
-              onClick={() => setSelectedStrategyId(strat.strategy_id)}
+              onClick={() => {
+                setSelectedStrategyId(strat.strategy_id);
+                if (activeTab === 'RESEARCH') {
+                  handleRunResearch(strat.strategy_id, symbol, timeframe);
+                }
+              }}
             />
           ))}
         </div>
@@ -1491,48 +1999,106 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {/* ── Strategy Alignment & Confluence Panel ── */}
-      {observatoryData?.confluence && (
-        <StrategyAlignmentBar confluence={observatoryData.confluence} />
+      {/* ── Tab View 1: OBSERVATORY VIEW ── */}
+      {activeTab === 'OBSERVATORY' && (
+        <>
+          {observatoryData?.confluence && (
+            <StrategyAlignmentBar confluence={observatoryData.confluence} />
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+            <div className="lg:col-span-8 space-y-3">
+              <ObservatoryChart
+                candles={observatoryData?.candles || []}
+                indicators={observatoryData?.chart_indicators || {}}
+                selectedStrategy={selectedStrategy}
+                allStrategies={observatoryData?.strategies || []}
+                timeframe={timeframe}
+                onTimeframeChange={setTimeframe}
+              />
+            </div>
+
+            <div className="lg:col-span-4 space-y-3 flex flex-col">
+              {selectedStrategy ? (
+                <>
+                  <StrategyRuleInspector strategy={selectedStrategy} />
+                  <div className="flex-1 min-h-[300px]">
+                    <StrategyCopilotChat
+                      symbol={symbol}
+                      selectedStrategy={selectedStrategy}
+                      allStrategies={observatoryData?.strategies || []}
+                      regime={observatoryData?.market_regime || null}
+                      confluence={observatoryData?.confluence || null}
+                      timeframe={timeframe}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="p-8 text-center bg-[#12131b] border border-stone-800 rounded-xl text-stone-500 font-mono text-xs">
+                  Select a strategy button above to inspect mathematical conditions and launch copilot.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
-      {/* ── Main Layout: Trading Chart + Dynamic Detail Inspector & Copilot ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-        {/* Trading Chart (Left 8 Cols) */}
-        <div className="lg:col-span-8 space-y-3">
-          <ObservatoryChart
-            candles={observatoryData?.candles || []}
-            indicators={observatoryData?.chart_indicators || {}}
-            selectedStrategy={selectedStrategy}
-            allStrategies={observatoryData?.strategies || []}
-            timeframe={timeframe}
-            onTimeframeChange={setTimeframe}
-          />
-        </div>
+      {/* ── Tab View 2: HISTORICAL RESEARCH VIEW (Phase 4) ── */}
+      {activeTab === 'RESEARCH' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+          {/* Research Workstation (Left 8 Cols) */}
+          <div className="lg:col-span-8 space-y-3">
+            <ObservatoryChart
+              candles={observatoryData?.candles || []}
+              indicators={observatoryData?.chart_indicators || {}}
+              selectedStrategy={selectedStrategy}
+              allStrategies={observatoryData?.strategies || []}
+              timeframe={timeframe}
+              onTimeframeChange={setTimeframe}
+              highlightIndex={highlightCandleIdx}
+            />
 
-        {/* Selected Strategy Inspector & Copilot (Right 4 Cols) */}
-        <div className="lg:col-span-4 space-y-3 flex flex-col">
-          {selectedStrategy ? (
-            <>
-              <StrategyRuleInspector strategy={selectedStrategy} />
-              <div className="flex-1 min-h-[300px]">
-                <StrategyCopilotChat
-                  symbol={symbol}
-                  selectedStrategy={selectedStrategy}
-                  allStrategies={observatoryData?.strategies || []}
-                  regime={observatoryData?.market_regime || null}
-                  confluence={observatoryData?.confluence || null}
-                  timeframe={timeframe}
-                />
+            <ResearchWorkstation
+              summary={researchSummary}
+              isLoading={isLoadingResearch}
+              error={researchError}
+              selectedObsId={selectedObsId}
+              onSelectObsId={(obsId, cIdx) => {
+                setSelectedObsId(obsId);
+                setHighlightCandleIdx(cIdx);
+              }}
+              onRefresh={() => handleRunResearch(selectedStrategyId, symbol, timeframe)}
+            />
+          </div>
+
+          {/* Research Strategy Copilot & Context (Right 4 Cols) */}
+          <div className="lg:col-span-4 space-y-3 flex flex-col">
+            {selectedStrategy && (
+              <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-2 text-xs font-mono">
+                <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
+                  <span className="font-bold text-stone-200">{selectedStrategy.strategy_name}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-900 border border-stone-800 text-stone-400">
+                    Direction: {selectedStrategy.direction || 'BULLISH'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-stone-400 leading-relaxed font-sans">{selectedStrategy.description}</p>
               </div>
-            </>
-          ) : (
-            <div className="p-8 text-center bg-[#12131b] border border-stone-800 rounded-xl text-stone-500 font-mono text-xs">
-              Select a strategy button above to inspect mathematical conditions and launch copilot.
+            )}
+
+            <div className="flex-1 min-h-[380px]">
+              <StrategyCopilotChat
+                symbol={symbol}
+                selectedStrategy={selectedStrategy}
+                allStrategies={observatoryData?.strategies || []}
+                regime={observatoryData?.market_regime || null}
+                confluence={observatoryData?.confluence || null}
+                timeframe={timeframe}
+                researchSummary={researchSummary}
+              />
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

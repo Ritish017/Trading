@@ -82,6 +82,12 @@ class StrategyCategory(str, Enum):
     SECTOR = "Sector"
 
 
+class StrategyDirection(str, Enum):
+    BULLISH = "BULLISH"
+    BEARISH = "BEARISH"
+    BOTH = "BOTH"
+
+
 class StrategyState(str, Enum):
     ACTIVE = "ACTIVE"           # All entry rules pass
     PARTIAL = "PARTIAL"         # >=50% entry rules pass (all computable)
@@ -154,6 +160,7 @@ class StrategyDefinition:
     short_name: str
     category: Union[StrategyCategory, str]
     description: str
+    direction: StrategyDirection = StrategyDirection.BULLISH
     version: str = "1.0.0"
     enabled: bool = True
     experimental: bool = False

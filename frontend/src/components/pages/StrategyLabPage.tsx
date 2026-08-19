@@ -5,12 +5,12 @@ import {
   TrendingUp, TrendingDown, Info, Send, Loader2, Shield, Activity,
   Sliders, Eye, EyeOff, BarChart2, Layers, Sparkles, MessageSquare,
   HelpCircle, RefreshCw, CheckSquare, Square, History, ShieldAlert,
-  BarChart, ArrowUpRight, ArrowDownRight, Compass
+  BarChart, ArrowUpRight, ArrowDownRight, Compass, Filter, Tag
 } from 'lucide-react';
 import { NSEStock } from '../../types/indianMarket';
 
 // ---------------------------------------------------------------------------
-// Types & Contracts
+// Types & Extensible Contracts (V3)
 // ---------------------------------------------------------------------------
 export type RuleOutcome = 'PASS' | 'FAIL' | 'UNAVAILABLE';
 export type StrategyState = 'ACTIVE' | 'PARTIAL' | 'INACTIVE' | 'CONFLICTED' | 'UNAVAILABLE';
@@ -45,11 +45,31 @@ export interface HistoricalState {
   price: number;
 }
 
+export interface StrategyVisualizationMeta {
+  overlays: string[];
+  subpanels: string[];
+  markers: string[];
+  highlight_active_regions: boolean;
+  color: string;
+}
+
+export interface StrategyRequirementsMeta {
+  min_candles: number;
+  requires_volume: boolean;
+  requires_vwap: boolean;
+  requires_intraday: boolean;
+  supported_timeframes: string[];
+}
+
 export interface StrategyResult {
   strategy_id: string;
   strategy_name: string;
+  short_name?: string;
   category: string;
   description: string;
+  version?: string;
+  enabled?: boolean;
+  experimental?: boolean;
   state: StrategyState;
   entry_rules_total: number;
   entry_rules_passing: number;
@@ -63,6 +83,8 @@ export interface StrategyResult {
   evaluated_at: string;
   candles_used: number;
   tags: string[];
+  requirements?: StrategyRequirementsMeta;
+  visualization?: StrategyVisualizationMeta;
   historical_states: HistoricalState[];
   activation_events: ActivationEvent[];
 }
@@ -163,30 +185,6 @@ const QUICK_SYMBOLS = [
   'BANKNIFTY'
 ];
 
-// Short Name mapping for Keypad Buttons
-const SHORT_NAMES: Record<string, string> = {
-  VWAP_MOMENTUM: 'VWAP MOM',
-  EMA_GOLDEN_CROSS: 'EMA CROSS',
-  RSI_OVERSOLD_REVERSAL: 'RSI REVERSAL',
-  BOLLINGER_SQUEEZE: 'BB SQUEEZE',
-  MACD_CROSSOVER: 'MACD CROSS',
-  ORB_BREAKOUT: 'ORB BREAKOUT',
-  SUPERTREND_PROXY: 'SUPERTREND PROXY',
-  RVOL_SURGE: 'RVOL SURGE',
-};
-
-// Strategy Palette Colors for Multi-Strategy Mode
-const STRATEGY_PALETTE: Record<string, { color: string; fill: string }> = {
-  VWAP_MOMENTUM:        { color: '#e879f9', fill: 'bg-fuchsia-500' },
-  EMA_GOLDEN_CROSS:     { color: '#22d3ee', fill: 'bg-cyan-400' },
-  RSI_OVERSOLD_REVERSAL:{ color: '#f97316', fill: 'bg-orange-500' },
-  BOLLINGER_SQUEEZE:    { color: '#10b981', fill: 'bg-emerald-500' },
-  MACD_CROSSOVER:       { color: '#38bdf8', fill: 'bg-sky-400' },
-  ORB_BREAKOUT:         { color: '#fbbf24', fill: 'bg-amber-400' },
-  SUPERTREND_PROXY:     { color: '#a3e635', fill: 'bg-lime-400' },
-  RVOL_SURGE:           { color: '#a855f7', fill: 'bg-purple-500' },
-};
-
 // ---------------------------------------------------------------------------
 // State Badge Component
 // ---------------------------------------------------------------------------
@@ -220,7 +218,7 @@ function formatDuration(seconds?: number | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Compact Strategy Keypad Tile
+// Dynamic Strategy Keypad Tile (Metadata-Driven)
 // ---------------------------------------------------------------------------
 function StrategyKeypadButton({
   strategy,
@@ -231,7 +229,7 @@ function StrategyKeypadButton({
   isSelected: boolean;
   onClick: () => void;
 }) {
-  const shortName = SHORT_NAMES[strategy.strategy_id] || strategy.strategy_name;
+  const displayName = strategy.short_name || strategy.strategy_name;
 
   return (
     <button
@@ -244,7 +242,7 @@ function StrategyKeypadButton({
     >
       <div className="flex items-start justify-between gap-1 w-full mb-1">
         <div className="flex-1 min-w-0">
-          <div className="font-extrabold text-xs text-stone-100 truncate tracking-tight">{shortName}</div>
+          <div className="font-extrabold text-xs text-stone-100 truncate tracking-tight">{displayName}</div>
           <div className="text-[9px] font-mono text-stone-500 uppercase">{strategy.category}</div>
         </div>
         <StateBadge state={strategy.state} size="sm" />
@@ -334,7 +332,7 @@ function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
 }
 
 // ---------------------------------------------------------------------------
-// Interactive Observatory Trading Chart
+// Dynamic Metadata-Driven Observatory Trading Chart (Phase 22)
 // ---------------------------------------------------------------------------
 interface ObservatoryChartProps {
   candles: ChartCandle[];
@@ -382,9 +380,20 @@ function ObservatoryChart({
   const subpanelHeight = 65;
   const subpanelGap = 16;
 
-  // Determine if strategy has dedicated subpanel (RSI or MACD)
-  const isRSISubpanel = selectedStrategy?.strategy_id === 'RSI_OVERSOLD_REVERSAL' || selectedStrategy?.strategy_id === 'VWAP_MOMENTUM';
-  const isMACDSubpanel = selectedStrategy?.strategy_id === 'MACD_CROSSOVER';
+  // Dynamic visualization overlays from strategy definition metadata (Phase 22)
+  const strategyOverlays = selectedStrategy?.visualization?.overlays || [];
+  const isEMA20Active = layers.ema20 || strategyOverlays.includes('ema20');
+  const isEMA50Active = layers.ema50 || strategyOverlays.includes('ema50');
+  const isEMA200Active = layers.ema200 || strategyOverlays.includes('ema200');
+  const isVWAPActive = layers.vwap || strategyOverlays.includes('vwap');
+  const isBollingerActive = layers.bollinger || strategyOverlays.includes('bb_upper') || strategyOverlays.includes('bb_middle');
+  const isSupertrendActive = layers.supertrend || strategyOverlays.includes('supertrend_band');
+  const isORBActive = layers.orb || strategyOverlays.includes('orb_high') || strategyOverlays.includes('orb_low');
+
+  // Dynamic subpanels from strategy definition metadata
+  const strategySubpanels = selectedStrategy?.visualization?.subpanels || [];
+  const isRSISubpanel = strategySubpanels.includes('rsi14');
+  const isMACDSubpanel = strategySubpanels.includes('macd');
   const hasSubpanel = isRSISubpanel || isMACDSubpanel;
 
   const totalHeight = priceChartHeight + volumeHeight + (hasSubpanel ? subpanelHeight + subpanelGap : 0) + 20;
@@ -477,16 +486,6 @@ function ObservatoryChart({
     const idx = Math.min(Math.max(Math.floor(x / candleStep), 0), n - 1);
     setHoverIndex(idx);
   };
-
-  // Automatic overlay defaults based on selected strategy
-  const sid = selectedStrategy?.strategy_id;
-  const isEMA20Active = layers.ema20 || sid === 'EMA_GOLDEN_CROSS' || sid === 'VWAP_MOMENTUM' || sid === 'RVOL_SURGE';
-  const isEMA50Active = layers.ema50 || sid === 'EMA_GOLDEN_CROSS' || sid === 'VWAP_MOMENTUM' || sid === 'MACD_CROSSOVER' || sid === 'SUPERTREND_PROXY';
-  const isEMA200Active = layers.ema200 || sid === 'EMA_GOLDEN_CROSS';
-  const isVWAPActive = layers.vwap || sid === 'VWAP_MOMENTUM' || sid === 'RSI_OVERSOLD_REVERSAL' || sid === 'ORB_BREAKOUT' || sid === 'SUPERTREND_PROXY';
-  const isBollingerActive = layers.bollinger || sid === 'BOLLINGER_SQUEEZE';
-  const isSupertrendActive = layers.supertrend || sid === 'SUPERTREND_PROXY';
-  const isORBActive = layers.orb || sid === 'ORB_BREAKOUT';
 
   return (
     <div className="bg-[#12131b] border border-stone-800/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl">
@@ -585,7 +584,7 @@ function ObservatoryChart({
 
       {/* Active Overlays Legend */}
       <div className="flex items-center gap-3 text-[10px] font-mono text-stone-400 flex-wrap">
-        <span className="text-stone-500 font-bold">Overlays:</span>
+        <span className="text-stone-500 font-bold">Active Overlays:</span>
         {isEMA20Active && <span className="flex items-center gap-1 text-cyan-400"><span className="w-2 h-0.5 bg-cyan-400 inline-block" /> EMA20</span>}
         {isEMA50Active && <span className="flex items-center gap-1 text-amber-400"><span className="w-2 h-0.5 bg-amber-400 inline-block" /> EMA50</span>}
         {isEMA200Active && <span className="flex items-center gap-1 text-purple-400"><span className="w-2 h-0.5 bg-purple-400 inline-block" /> EMA200</span>}
@@ -728,13 +727,13 @@ function ObservatoryChart({
             const cy = getY(ev.price);
             if (cx < 0 || cx > chartWidth) return null;
 
-            const pal = STRATEGY_PALETTE[ev.strategy_id] || { color: '#10b981' };
+            const markerColor = selectedStrategy?.visualization?.color || '#10b981';
 
             if (ev.event_type === 'ACTIVATED') {
               return (
                 <g key={i} transform={`translate(${cx}, ${cy - 12})`}>
-                  <polygon points="0,-4 4,3 -4,3" fill={pal.color} />
-                  <circle cx={0} cy={0} r={5} stroke={pal.color} strokeWidth={1.5} fill="none" />
+                  <polygon points="0,-4 4,3 -4,3" fill={markerColor} />
+                  <circle cx={0} cy={0} r={5} stroke={markerColor} strokeWidth={1.5} fill="none" />
                 </g>
               );
             } else if (ev.event_type === 'INVALIDATED') {
@@ -780,7 +779,6 @@ function ObservatoryChart({
           {isRSISubpanel && indicators.rsi14 && (
             <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
               <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
-              {/* Guides 70, 50, 35 */}
               <line x1={0} y1={getSubY(70, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(70, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#f43f5e" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
               <line x1={0} y1={getSubY(50, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(50, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
               <line x1={0} y1={getSubY(35, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(35, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#10b981" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
@@ -840,8 +838,13 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
     <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800/60 pb-2">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="font-black text-sm text-stone-100">{strategy.strategy_name}</span>
+            {strategy.version && (
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-stone-900 border border-stone-800 text-stone-400">
+                v{strategy.version}
+              </span>
+            )}
             <StateBadge state={strategy.state} />
           </div>
           <p className="text-xs text-stone-400 mt-1 leading-relaxed">{strategy.description}</p>
@@ -1107,7 +1110,7 @@ function StrategyCopilotChat({
 }
 
 // ---------------------------------------------------------------------------
-// Main Strategy Lab Observatory Workspace
+// Main Strategy Lab Observatory Workspace (Dynamic V3 Extensible Architecture)
 // ---------------------------------------------------------------------------
 export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   stocks,
@@ -1120,6 +1123,11 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   const [observatoryData, setObservatoryData] = useState<ObservatoryData | null>(null);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Dynamic Strategy Search & Filter State (Phase 20)
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [stateFilter, setStateFilter] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const activeReqId = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -1191,9 +1199,40 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   const ageSeconds = observatoryData?.data_age_seconds;
   const provider = observatoryData?.provider || 'UPSTOX';
 
+  // Dynamic Category Extraction from registered strategies (Phase 3 & 20)
+  const availableCategories = useMemo(() => {
+    if (!observatoryData?.strategies) return ['ALL'];
+    const cats = new Set<string>();
+    observatoryData.strategies.forEach(s => {
+      if (s.category) cats.add(s.category);
+    });
+    return ['ALL', ...Array.from(cats)];
+  }, [observatoryData?.strategies]);
+
+  // Dynamic Strategy Filtering (Phase 20)
+  const filteredStrategies = useMemo(() => {
+    if (!observatoryData?.strategies) return [];
+    return observatoryData.strategies.filter(s => {
+      if (categoryFilter !== 'ALL' && s.category !== categoryFilter) {
+        return false;
+      }
+      if (stateFilter !== 'ALL' && s.state !== stateFilter) {
+        return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesName = s.strategy_name.toLowerCase().includes(q) || (s.short_name && s.short_name.toLowerCase().includes(q));
+        const matchesDesc = s.description.toLowerCase().includes(q);
+        const matchesTag = s.tags && s.tags.some(t => t.toLowerCase().includes(q));
+        if (!matchesName && !matchesDesc && !matchesTag) return false;
+      }
+      return true;
+    });
+  }, [observatoryData?.strategies, categoryFilter, stateFilter, searchQuery]);
+
   return (
     <div className="flex-1 flex flex-col h-[calc(100vh-175px)] overflow-y-auto custom-scrollbar p-3 space-y-3 bg-[#0a0b10]">
-      {/* ── Top Header (Part 4) ── */}
+      {/* ── Top Header ── */}
       <div className="bg-[#12131b] border border-stone-800/80 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-violet-600/20 border border-violet-500/40 flex items-center justify-center text-violet-400 font-black shadow-inner">
@@ -1228,7 +1267,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
           </div>
         </div>
 
-        {/* Quick Symbol Switcher Chips (Part 35) */}
+        {/* Quick Symbol Switcher Chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar max-w-md">
           {QUICK_SYMBOLS.map(sym => (
             <button
@@ -1309,10 +1348,63 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {/* ── Compact Strategy Keypad (Part 5) ── */}
+      {/* ── Extensible Strategy Library Filter & Search Toolbar (Phases 20 & 21) ── */}
       {observatoryData?.strategies && (
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          {/* Category Tabs */}
+          <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar">
+            <span className="text-[10px] font-mono text-stone-500 font-bold uppercase mr-1 flex items-center gap-1">
+              <Filter className="w-3 h-3 text-stone-400" /> Category:
+            </span>
+            {availableCategories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(cat)}
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                  categoryFilter === cat
+                    ? 'bg-violet-600 text-white shadow-sm'
+                    : 'bg-stone-900 text-stone-400 hover:text-stone-200 border border-stone-800'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {/* State Filter & Search Input */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 bg-stone-900 p-0.5 rounded-lg border border-stone-800 text-[10px] font-mono">
+              {(['ALL', 'ACTIVE', 'PARTIAL', 'INACTIVE'] as const).map(st => (
+                <button
+                  key={st}
+                  onClick={() => setStateFilter(st)}
+                  className={`px-2 py-0.5 rounded transition-all cursor-pointer font-bold ${
+                    stateFilter === st ? 'bg-violet-600 text-white' : 'text-stone-400 hover:text-stone-200'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search strategies…"
+                className="px-2.5 py-1 pl-7 bg-stone-900 border border-stone-800 rounded-lg text-[11px] font-mono text-stone-200 placeholder-stone-600 focus:outline-none focus:border-violet-500 w-36 sm:w-44"
+              />
+              <Search className="w-3 h-3 text-stone-500 absolute left-2 top-2" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Dynamic Strategy Keypad (Scales to 10, 50, 100+ strategies) ── */}
+      {filteredStrategies.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-          {observatoryData.strategies.map(strat => (
+          {filteredStrategies.map(strat => (
             <StrategyKeypadButton
               key={strat.strategy_id}
               strategy={strat}
@@ -1321,14 +1413,18 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
             />
           ))}
         </div>
+      ) : (
+        <div className="p-4 text-center bg-[#12131b] border border-stone-800 rounded-xl text-stone-500 font-mono text-xs">
+          No strategies match the selected category or filter.
+        </div>
       )}
 
-      {/* ── Strategy Alignment & Confluence Panel (Part 7, 8, 9) ── */}
+      {/* ── Strategy Alignment & Confluence Panel ── */}
       {observatoryData?.confluence && (
         <StrategyAlignmentBar confluence={observatoryData.confluence} />
       )}
 
-      {/* ── Main Layout: Trading Chart (55-65%) + Rule Inspector & Copilot (Part 10) ── */}
+      {/* ── Main Layout: Trading Chart + Dynamic Detail Inspector & Copilot ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         {/* Trading Chart (Left 8 Cols) */}
         <div className="lg:col-span-8 space-y-3">

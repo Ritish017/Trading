@@ -757,11 +757,38 @@ def evaluate_strategies_observatory(
     market_status = _get_ist_market_status(provider)
 
     def _serialise_result(r: StrategyEvaluationResult) -> Dict[str, Any]:
+        strat_def = STRATEGY_REGISTRY.get(r.strategy_id)
+        cat_str = strat_def.category.value if (strat_def and hasattr(strat_def.category, "value")) else str(r.category)
+        short_name = strat_def.short_name if strat_def else r.strategy_name
+        version = strat_def.version if strat_def else "1.0.0"
+        enabled = strat_def.enabled if strat_def else True
+        experimental = strat_def.experimental if strat_def else False
+
+        vis_dict = {
+            "overlays": strat_def.visualization.overlays if strat_def else [],
+            "subpanels": strat_def.visualization.subpanels if strat_def else [],
+            "markers": strat_def.visualization.markers if strat_def else ["ACTIVATED", "INVALIDATED", "PARTIAL", "CONFLICT"],
+            "highlight_active_regions": strat_def.visualization.highlight_active_regions if strat_def else True,
+            "color": strat_def.visualization.color if strat_def else "#10b981",
+        }
+
+        req_dict = {
+            "min_candles": strat_def.requirements.min_candles if strat_def else 50,
+            "requires_volume": strat_def.requirements.requires_volume if strat_def else True,
+            "requires_vwap": strat_def.requirements.requires_vwap if strat_def else False,
+            "requires_intraday": strat_def.requirements.requires_intraday if strat_def else False,
+            "supported_timeframes": strat_def.requirements.supported_timeframes if strat_def else ["1m", "5m", "15m", "1h", "1D"],
+        }
+
         return {
             "strategy_id": r.strategy_id,
             "strategy_name": r.strategy_name,
-            "category": r.category,
+            "short_name": short_name,
+            "category": cat_str,
             "description": r.description,
+            "version": version,
+            "enabled": enabled,
+            "experimental": experimental,
             "state": r.state.value,
             "entry_rules_total": r.entry_rules_total,
             "entry_rules_passing": r.entry_rules_passing,
@@ -787,6 +814,8 @@ def evaluate_strategies_observatory(
             "evaluated_at": r.evaluated_at,
             "candles_used": r.candles_used,
             "tags": r.tags,
+            "requirements": req_dict,
+            "visualization": vis_dict,
             "historical_states": r.historical_states,
             "activation_events": [
                 {

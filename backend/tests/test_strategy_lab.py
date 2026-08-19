@@ -1,7 +1,16 @@
 import pytest
 import time
-from backend.app.strategy_engine.dsl import StrategyState, RuleOutcome
-from backend.app.strategy_engine.registry import STRATEGY_REGISTRY
+import pandas as pd
+from backend.app.strategy_engine.dsl import (
+    StrategyState,
+    RuleOutcome,
+    StrategyCategory,
+    StrategyHypothesis,
+)
+from backend.app.strategy_engine.registry import (
+    STRATEGY_REGISTRY,
+    registry_manager,
+)
 from backend.app.strategy_engine.evaluator import (
     evaluate_all_strategies,
     compute_feature_vector,
@@ -19,6 +28,32 @@ def test_strategy_registry_completeness():
         assert strat.strategy_id == sid
         assert len(strat.entry_rules) > 0
         assert strat.min_candles >= 10
+        assert strat.short_name is not None
+        assert strat.version is not None
+        assert strat.requirements is not None
+        assert strat.visualization is not None
+
+def test_strategy_registry_manager_queries():
+    all_strats = registry_manager.list_all()
+    assert len(all_strats) >= 8
+
+    enabled_strats = registry_manager.list_enabled()
+    assert len(enabled_strats) >= 8
+
+    trend_strats = registry_manager.list_by_category(StrategyCategory.TREND)
+    assert len(trend_strats) >= 2
+    assert any(s.strategy_id == "EMA_GOLDEN_CROSS" for s in trend_strats)
+
+    deps = registry_manager.get_all_required_dependencies(["EMA_GOLDEN_CROSS", "VWAP_MOMENTUM"])
+    assert "ema20" in deps
+    assert "ema50" in deps
+    assert "vwap" in deps
+    assert "rsi14" in deps
+
+    vis = registry_manager.get_visualization("EMA_GOLDEN_CROSS")
+    assert vis is not None
+    assert "ema20" in vis.overlays
+    assert "ema50" in vis.overlays
 
 def test_evaluator_insufficient_candles():
     candles = [
@@ -50,11 +85,6 @@ def test_evaluator_sufficient_candles():
         assert res.state in [StrategyState.ACTIVE, StrategyState.PARTIAL, StrategyState.INACTIVE, StrategyState.CONFLICTED]
 
 def test_freshness_separation_stale_data():
-    """
-    Ensures that stale data produces data_freshness='STALE' while the strategy
-    state remains a purely mathematical outcome (e.g. ACTIVE, INACTIVE, etc.),
-    verifying strict separation of data quality and mathematical rule evaluation.
-    """
     seven_hours_ago = time.time() - (7 * 3600 + 12 * 60)
     candles = [
         {
@@ -132,6 +162,13 @@ def test_observatory_payload_structure():
     assert obs["provider"] == "UPSTOX"
     assert len(obs["strategies"]) == len(STRATEGY_REGISTRY)
     assert len(obs["candles"]) == 60
+    
+    # Check V3 Metadata serialized
+    strat0 = obs["strategies"][0]
+    assert "short_name" in strat0
+    assert "requirements" in strat0
+    assert "visualization" in strat0
+    assert "version" in strat0
 
 def test_confluence_calculation_and_invariants():
     now = time.time()
@@ -149,7 +186,6 @@ def test_confluence_calculation_and_invariants():
     results = evaluate_all_strategies(candles, is_live_feed=True)
     confluence = compute_strategy_confluence(results)
     
-    # Invariant: sum of category states == total strategies
     total = (
         confluence["active_count"]
         + confluence["partial_count"]
@@ -181,10 +217,6 @@ def test_historical_activations_and_events():
         assert hs["state"] in ["ACTIVE", "PARTIAL", "INACTIVE", "CONFLICTED", "UNAVAILABLE"]
 
 def test_lookahead_prevention():
-    """
-    Phase 28 & 29: Verify that historical evaluation up to candle index T
-    never consumes or depends on future candles T+1, T+2.
-    """
     now = time.time()
     base_candles = [
         {
@@ -198,10 +230,8 @@ def test_lookahead_prevention():
         for i in range(50)
     ]
     
-    # Feature vector computed from first 50 candles
     fv1 = compute_feature_vector(base_candles)
     
-    # Add an extreme future candle
     future_candles = list(base_candles) + [
         {
             "open": 9999.0,
@@ -213,16 +243,12 @@ def test_lookahead_prevention():
         }
     ]
     
-    # Slicing up to 50 on future_candles must yield EXACT same feature vector as base_candles
     fv_sliced = compute_feature_vector(future_candles[:50])
     assert fv1["close"] == fv_sliced["close"]
     assert fv1["ema20"] == fv_sliced["ema20"]
     assert fv1["vwap"] == fv_sliced["vwap"]
 
 def test_zero_volume_vwap_contract():
-    """
-    Phase 9: When volume is zero, VWAP must be None, never fallback to close or arbitrary price.
-    """
     candles = [
         {
             "open": 100.0,
@@ -238,13 +264,29 @@ def test_zero_volume_vwap_contract():
     assert fv["vwap"] is None
 
 def test_market_status_detection():
-    """
-    Phase 3 & 26: Test IST session status logic and Mock detection.
-    """
     assert _get_ist_market_status("MOCK") == "SIMULATED"
     assert _get_ist_market_status("DEV_MOCK") == "SIMULATED"
     status = _get_ist_market_status("UPSTOX")
     assert status in ["OPEN", "CLOSED", "PRE_OPEN"]
+
+def test_backtest_hypothesis_evaluation():
+    """
+    Phase 17: Backtester compatibility without React or UI dependencies.
+    """
+    now = time.time()
+    data = {
+        "open": [100.0 + i for i in range(50)],
+        "high": [102.0 + i for i in range(50)],
+        "low": [99.0 + i for i in range(50)],
+        "close": [101.5 + i for i in range(50)],
+        "volume": [10000 + i * 100 for i in range(50)],
+    }
+    df = pd.DataFrame(data)
+    hypothesis = StrategyHypothesis(name="VWAP_Momentum_Breakout")
+    evaluated_df = hypothesis.evaluate_signals(df)
+    assert "buy_signal" in evaluated_df.columns
+    assert "sell_signal" in evaluated_df.columns
+    assert len(evaluated_df) == 50
 
 @pytest.mark.asyncio
 async def test_copilot_evidence_grounded_fallback():

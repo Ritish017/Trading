@@ -1,15 +1,19 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, Union
 from dataclasses import dataclass, field
 from enum import Enum
 from backend.app.quant_engine.indicators import (
     calculate_ema, calculate_vwap, calculate_rsi, calculate_atr, calculate_relative_volume
 )
 
+# ---------------------------------------------------------------------------
+# Strategy Hypothesis (Backtest & Simulation Model)
+# ---------------------------------------------------------------------------
+
 class StrategyHypothesis:
     """
-    Quantitative Strategy Definition & Signal Generator
+    Quantitative Strategy Definition & Signal Generator for Backtesting.
     """
 
     def __init__(
@@ -59,8 +63,24 @@ class StrategyHypothesis:
 
 
 # ---------------------------------------------------------------------------
-# Strategy Lab Data Models
+# Controlled Taxonomy & State Contracts
 # ---------------------------------------------------------------------------
+
+class StrategyCategory(str, Enum):
+    TREND = "Trend Following"
+    MOMENTUM = "Momentum"
+    MEAN_REVERSION = "Mean-Reversion"
+    BREAKOUT = "Breakout"
+    VOLUME = "Volume"
+    VOLATILITY = "Volatility"
+    # Future extensibility categories
+    STATISTICAL = "Statistical"
+    FACTOR = "Factor"
+    FUNDAMENTAL = "Fundamental"
+    OPTIONS = "Options"
+    EVENT_DRIVEN = "Event-Driven"
+    SECTOR = "Sector"
+
 
 class StrategyState(str, Enum):
     ACTIVE = "ACTIVE"           # All entry rules pass
@@ -68,7 +88,7 @@ class StrategyState(str, Enum):
     INACTIVE = "INACTIVE"       # All rules computable, none pass
     CONFLICTED = "CONFLICTED"   # Entry AND exit signals simultaneously active
     UNAVAILABLE = "UNAVAILABLE" # >50% of rules cannot be evaluated (missing data)
-    STALE = "STALE"             # Data is too old to be trusted
+    STALE = "STALE"             # Legacy compatibility alias for data freshness
 
 
 class RuleOutcome(str, Enum):
@@ -77,26 +97,86 @@ class RuleOutcome(str, Enum):
     UNAVAILABLE = "UNAVAILABLE"  # Dependency value is None / NaN
 
 
+# ---------------------------------------------------------------------------
+# Visualization & Data Requirements Contracts
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StrategyVisualization:
+    """Declares chart overlays, oscillator subpanels, and visual markers."""
+    overlays: List[str] = field(default_factory=list)      # e.g. ["ema20", "ema50"], ["vwap"], ["bb_upper", "bb_middle", "bb_lower"]
+    subpanels: List[str] = field(default_factory=list)     # e.g. ["rsi14"], ["macd"]
+    markers: List[str] = field(default_factory=lambda: ["ACTIVATED", "INVALIDATED", "PARTIAL", "CONFLICT"])
+    highlight_active_regions: bool = True
+    color: str = "#10b981"
+
+
+@dataclass
+class StrategyDataRequirements:
+    """Declares data dependencies and historical depth requirements."""
+    min_candles: int = 50
+    requires_volume: bool = True
+    requires_vwap: bool = False
+    requires_ohlc: bool = True
+    requires_intraday: bool = False
+    supported_timeframes: List[str] = field(default_factory=lambda: ["1m", "5m", "15m", "1h", "1D"])
+
+
+# ---------------------------------------------------------------------------
+# Strategy Rule & Evidence Contract
+# ---------------------------------------------------------------------------
+
 @dataclass
 class StrategyRule:
-    """A single evaluable condition within a strategy."""
+    """A single evaluable condition within a systematic strategy."""
     rule_id: str
     label: str                    # Human-readable description
     dependency_keys: List[str]    # Indicator keys required from the feature vector
-    # condition_fn: (feature_vector: Dict[str, Any]) -> Optional[bool]
-    # Returns True (PASS), False (FAIL), None (UNAVAILABLE)
-    condition_fn: Callable        # Not serialised — lives only in the evaluator
+    condition_fn: Callable        # (feature_vector: Dict[str, Any]) -> Optional[bool]
+    operator: str = ">"           # e.g. ">", "<", ">=", "<=", "between"
+    threshold: Optional[float] = None
+    is_entry_rule: bool = True
+    explanation: Optional[str] = None
 
+
+# ---------------------------------------------------------------------------
+# Extensible Strategy Definition Contract
+# ---------------------------------------------------------------------------
 
 @dataclass
 class StrategyDefinition:
-    """Immutable description of a systematic strategy."""
+    """
+    Immutable canonical description of a quantitative strategy.
+    Acts as the single source of truth for Evaluator, Backtester, Chart & Copilot.
+    """
     strategy_id: str
     name: str
-    category: str                 # e.g. "Momentum", "Mean-Reversion", "Breakout"
+    short_name: str
+    category: Union[StrategyCategory, str]
     description: str
-    timeframe_hint: str           # Suggested timeframe e.g. "5m", "15m"
-    min_candles: int              # Minimum bars before evaluation is meaningful
+    version: str = "1.0.0"
+    enabled: bool = True
+    experimental: bool = False
+    deprecated: bool = False
+    timeframe_hint: str = "5m"
+    min_candles: int = 50
+    requirements: StrategyDataRequirements = field(default_factory=StrategyDataRequirements)
     entry_rules: List[StrategyRule] = field(default_factory=list)
     exit_rules: List[StrategyRule] = field(default_factory=list)
+    invalidation_rules: List[StrategyRule] = field(default_factory=list)
+    visualization: StrategyVisualization = field(default_factory=StrategyVisualization)
     tags: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        # Sync min_candles and requirements
+        if self.min_candles != 50 and self.requirements.min_candles == 50:
+            self.requirements.min_candles = self.min_candles
+        elif self.requirements.min_candles != 50 and self.min_candles == 50:
+            self.min_candles = self.requirements.min_candles
+
+        # Convert string category to StrategyCategory if possible
+        if isinstance(self.category, str):
+            for c in StrategyCategory:
+                if c.value.lower() == self.category.lower() or c.name.lower() == self.category.lower():
+                    self.category = c
+                    break

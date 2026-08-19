@@ -1,21 +1,26 @@
 """
-Strategy Lab — Strategy Library (Registry)
-==========================================
-Defines the canonical library of systematic quantitative strategies.
+Strategy Lab — Strategy Library (Registry V3)
+=============================================
+Defines the canonical, extensible library of systematic quantitative strategies.
 
-Rules
------
+Invariants
+----------
 - Each rule's condition_fn receives a Dict[str, Any] feature vector and returns:
     True  → PASS
     False → FAIL
     None  → UNAVAILABLE (dependency value is None/NaN)
 - No fabricated values. Every condition tests a real computed indicator.
-- Descriptions strictly follow quantitative rigor without unsupported claims
-  (no "guarantees", "predicts", "take profit", or "institutional accumulation").
+- Metadata is fully structured with StrategyCategory, StrategyVisualization, and StrategyDataRequirements.
 """
 
-from typing import Dict
-from backend.app.strategy_engine.dsl import StrategyDefinition, StrategyRule
+from typing import Dict, List, Optional, Set, Union
+from backend.app.strategy_engine.dsl import (
+    StrategyDefinition,
+    StrategyRule,
+    StrategyCategory,
+    StrategyVisualization,
+    StrategyDataRequirements,
+)
 
 
 def _v(fv: dict, key: str):
@@ -45,36 +50,58 @@ def _cond(fv: dict, *keys, fn):
 VWAP_MOMENTUM = StrategyDefinition(
     strategy_id="VWAP_MOMENTUM",
     name="VWAP Momentum Breakout",
-    category="Momentum",
+    short_name="VWAP MOM",
+    category=StrategyCategory.MOMENTUM,
     description=(
         "Long bias when price is above VWAP, EMA20 > EMA50 (trend aligned), "
         "RSI(14) > 55 (momentum zone), and Relative Volume ≥ 1.2 (above-average trading volume)."
     ),
+    version="1.0.0",
+    enabled=True,
+    experimental=False,
     timeframe_hint="5m",
     min_candles=50,
+    requirements=StrategyDataRequirements(
+        min_candles=50,
+        requires_volume=True,
+        requires_vwap=True,
+        requires_intraday=True,
+        supported_timeframes=["1m", "5m", "15m"],
+    ),
+    visualization=StrategyVisualization(
+        overlays=["vwap", "ema20", "ema50"],
+        subpanels=["rsi14"],
+        color="#e879f9",
+    ),
     entry_rules=[
         StrategyRule(
             rule_id="price_above_vwap",
             label="Price > VWAP",
             dependency_keys=["close", "vwap"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c > v),
         ),
         StrategyRule(
             rule_id="ema_trend_aligned",
             label="EMA20 > EMA50  (uptrend aligned)",
             dependency_keys=["ema20", "ema50"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "ema20", "ema50", fn=lambda a, b: a > b),
         ),
         StrategyRule(
             rule_id="rsi_momentum",
             label="RSI(14) > 55  (momentum zone)",
             dependency_keys=["rsi14"],
+            operator=">",
+            threshold=55.0,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 55.0),
         ),
         StrategyRule(
             rule_id="volume_surge",
             label="Relative Volume ≥ 1.2  (above-average volume)",
             dependency_keys=["rvol"],
+            operator=">=",
+            threshold=1.2,
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 1.2),
         ),
     ],
@@ -83,12 +110,17 @@ VWAP_MOMENTUM = StrategyDefinition(
             rule_id="price_below_ema20",
             label="Price < EMA20  (trend breakdown — strategy exit condition)",
             dependency_keys=["close", "ema20"],
+            operator="<",
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "close", "ema20", fn=lambda c, e: c < e),
         ),
         StrategyRule(
             rule_id="rsi_weakness",
             label="RSI(14) < 45  (momentum fading — strategy exit condition)",
             dependency_keys=["rsi14"],
+            operator="<",
+            threshold=45.0,
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r < 45.0),
         ),
     ],
@@ -102,30 +134,48 @@ VWAP_MOMENTUM = StrategyDefinition(
 EMA_GOLDEN_CROSS = StrategyDefinition(
     strategy_id="EMA_GOLDEN_CROSS",
     name="EMA Golden Cross",
-    category="Trend Following",
+    short_name="EMA CROSS",
+    category=StrategyCategory.TREND,
     description=(
         "Classic trend-following setup: EMA20 crosses above EMA50 indicating "
         "a shift to bullish moving average alignment. RSI(14) < 70 confirms price is not overbought."
     ),
+    version="1.0.0",
+    enabled=True,
+    experimental=False,
     timeframe_hint="15m",
     min_candles=55,
+    requirements=StrategyDataRequirements(
+        min_candles=55,
+        requires_volume=False,
+        supported_timeframes=["5m", "15m", "1h", "1D"],
+    ),
+    visualization=StrategyVisualization(
+        overlays=["ema20", "ema50", "ema200"],
+        subpanels=["rsi14"],
+        color="#22d3ee",
+    ),
     entry_rules=[
         StrategyRule(
             rule_id="ema20_above_ema50",
             label="EMA20 > EMA50  (golden cross region)",
             dependency_keys=["ema20", "ema50"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "ema20", "ema50", fn=lambda a, b: a > b),
         ),
         StrategyRule(
             rule_id="price_above_ema20",
             label="Price > EMA20  (price above short-term trend)",
             dependency_keys=["close", "ema20"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "close", "ema20", fn=lambda c, e: c > e),
         ),
         StrategyRule(
             rule_id="rsi_not_overbought",
             label="RSI(14) < 70  (not overbought threshold)",
             dependency_keys=["rsi14"],
+            operator="<",
+            threshold=70.0,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r < 70.0),
         ),
     ],
@@ -134,6 +184,8 @@ EMA_GOLDEN_CROSS = StrategyDefinition(
             rule_id="ema_death_cross",
             label="EMA20 < EMA50  (moving average reversal — strategy exit condition)",
             dependency_keys=["ema20", "ema50"],
+            operator="<",
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "ema20", "ema50", fn=lambda a, b: a < b),
         ),
     ],
@@ -147,30 +199,50 @@ EMA_GOLDEN_CROSS = StrategyDefinition(
 RSI_OVERSOLD_REVERSAL = StrategyDefinition(
     strategy_id="RSI_OVERSOLD_REVERSAL",
     name="RSI Oversold Reversal",
-    category="Mean-Reversion",
+    short_name="RSI REVERSAL",
+    category=StrategyCategory.MEAN_REVERSION,
     description=(
         "Counter-trend setup: price is below VWAP, RSI(14) < 35 indicates an oversold condition, "
         "and Relative Volume ≥ 1.5 indicates heightened liquidity during the move."
     ),
+    version="1.0.0",
+    enabled=True,
+    experimental=False,
     timeframe_hint="5m",
     min_candles=30,
+    requirements=StrategyDataRequirements(
+        min_candles=30,
+        requires_volume=True,
+        requires_vwap=True,
+        supported_timeframes=["1m", "5m", "15m"],
+    ),
+    visualization=StrategyVisualization(
+        overlays=["vwap"],
+        subpanels=["rsi14"],
+        color="#f97316",
+    ),
     entry_rules=[
         StrategyRule(
             rule_id="rsi_oversold",
             label="RSI(14) < 35  (oversold reversal zone)",
             dependency_keys=["rsi14"],
+            operator="<",
+            threshold=35.0,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r < 35.0),
         ),
         StrategyRule(
             rule_id="price_below_vwap",
             label="Price < VWAP  (extended below session VWAP)",
             dependency_keys=["close", "vwap"],
+            operator="<",
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c < v),
         ),
         StrategyRule(
             rule_id="volume_flush",
             label="Relative Volume ≥ 1.5  (elevated volume condition)",
             dependency_keys=["rvol"],
+            operator=">=",
+            threshold=1.5,
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 1.5),
         ),
     ],
@@ -179,12 +251,17 @@ RSI_OVERSOLD_REVERSAL = StrategyDefinition(
             rule_id="rsi_recovered",
             label="RSI(14) > 55  (momentum normalized — strategy exit condition)",
             dependency_keys=["rsi14"],
+            operator=">",
+            threshold=55.0,
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 55.0),
         ),
         StrategyRule(
             rule_id="price_above_vwap",
             label="Price > VWAP  (mean reversion target — strategy exit condition)",
             dependency_keys=["close", "vwap"],
+            operator=">",
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c > v),
         ),
     ],
@@ -198,30 +275,49 @@ RSI_OVERSOLD_REVERSAL = StrategyDefinition(
 BOLLINGER_SQUEEZE = StrategyDefinition(
     strategy_id="BOLLINGER_SQUEEZE",
     name="Bollinger Band Squeeze",
-    category="Breakout",
+    short_name="BB SQUEEZE",
+    category=StrategyCategory.BREAKOUT,
     description=(
         "Identifies volatility expansion: price crosses above the upper Bollinger Band (20, 2σ), "
         "confirmed by RSI(14) > 50 and Relative Volume ≥ 1.3."
     ),
+    version="1.0.0",
+    enabled=True,
+    experimental=False,
     timeframe_hint="15m",
     min_candles=30,
+    requirements=StrategyDataRequirements(
+        min_candles=30,
+        requires_volume=True,
+        supported_timeframes=["5m", "15m", "1h", "1D"],
+    ),
+    visualization=StrategyVisualization(
+        overlays=["bb_upper", "bb_middle", "bb_lower"],
+        subpanels=["rsi14"],
+        color="#10b981",
+    ),
     entry_rules=[
         StrategyRule(
             rule_id="price_above_bb_upper",
             label="Price > Bollinger Upper Band  (band expansion)",
             dependency_keys=["close", "bb_upper"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "close", "bb_upper", fn=lambda c, b: c > b),
         ),
         StrategyRule(
             rule_id="rsi_expanding",
             label="RSI(14) > 50  (positive momentum confirmation)",
             dependency_keys=["rsi14"],
+            operator=">",
+            threshold=50.0,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 50.0),
         ),
         StrategyRule(
             rule_id="volume_confirmation",
             label="Relative Volume ≥ 1.3  (volume expansion confirmation)",
             dependency_keys=["rvol"],
+            operator=">=",
+            threshold=1.3,
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 1.3),
         ),
     ],
@@ -230,6 +326,8 @@ BOLLINGER_SQUEEZE = StrategyDefinition(
             rule_id="price_below_bb_middle",
             label="Price < Bollinger Middle Band  (re-entry below midline — strategy exit condition)",
             dependency_keys=["close", "bb_middle"],
+            operator="<",
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "close", "bb_middle", fn=lambda c, b: c < b),
         ),
     ],
@@ -243,30 +341,48 @@ BOLLINGER_SQUEEZE = StrategyDefinition(
 MACD_CROSSOVER = StrategyDefinition(
     strategy_id="MACD_CROSSOVER",
     name="MACD Bullish Crossover",
-    category="Momentum",
+    short_name="MACD CROSS",
+    category=StrategyCategory.MOMENTUM,
     description=(
         "MACD line crosses above the signal line (12, 26, 9), with a positive histogram "
         "and price positioned above EMA50 (trend filter)."
     ),
+    version="1.0.0",
+    enabled=True,
+    experimental=False,
     timeframe_hint="15m",
     min_candles=40,
+    requirements=StrategyDataRequirements(
+        min_candles=40,
+        requires_volume=False,
+        supported_timeframes=["5m", "15m", "1h", "1D"],
+    ),
+    visualization=StrategyVisualization(
+        overlays=["ema50"],
+        subpanels=["macd"],
+        color="#38bdf8",
+    ),
     entry_rules=[
         StrategyRule(
             rule_id="macd_above_signal",
             label="MACD Line > Signal Line  (bullish crossover region)",
             dependency_keys=["macd", "macd_signal"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "macd", "macd_signal", fn=lambda m, s: m > s),
         ),
         StrategyRule(
             rule_id="macd_histogram_positive",
             label="MACD Histogram > 0  (positive momentum)",
             dependency_keys=["macd_histogram"],
+            operator=">",
+            threshold=0.0,
             condition_fn=lambda fv: _cond(fv, "macd_histogram", fn=lambda h: h > 0),
         ),
         StrategyRule(
             rule_id="price_above_ema50",
             label="Price > EMA50  (trend filter intact)",
             dependency_keys=["close", "ema50"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "close", "ema50", fn=lambda c, e: c > e),
         ),
     ],
@@ -275,6 +391,8 @@ MACD_CROSSOVER = StrategyDefinition(
             rule_id="macd_bearish_cross",
             label="MACD Line < Signal Line  (bearish crossover — strategy exit condition)",
             dependency_keys=["macd", "macd_signal"],
+            operator="<",
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "macd", "macd_signal", fn=lambda m, s: m < s),
         ),
     ],
@@ -288,30 +406,51 @@ MACD_CROSSOVER = StrategyDefinition(
 ORB_BREAKOUT = StrategyDefinition(
     strategy_id="ORB_BREAKOUT",
     name="Opening Range Breakout (ORB)",
-    category="Breakout",
+    short_name="ORB BREAKOUT",
+    category=StrategyCategory.BREAKOUT,
     description=(
         "Price breaks above session VWAP during early session trading, "
         "with RSI(14) > 55 and Relative Volume ≥ 1.5 confirming directional expansion."
     ),
+    version="1.0.0",
+    enabled=True,
+    experimental=False,
     timeframe_hint="5m",
     min_candles=20,
+    requirements=StrategyDataRequirements(
+        min_candles=20,
+        requires_volume=True,
+        requires_vwap=True,
+        requires_intraday=True,
+        supported_timeframes=["1m", "5m", "15m"],
+    ),
+    visualization=StrategyVisualization(
+        overlays=["vwap", "orb_high", "orb_low"],
+        subpanels=["rsi14"],
+        color="#fbbf24",
+    ),
     entry_rules=[
         StrategyRule(
             rule_id="price_above_vwap_orb",
             label="Price > VWAP  (breakout above session reference level)",
             dependency_keys=["close", "vwap"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c > v),
         ),
         StrategyRule(
             rule_id="rsi_breakout_strength",
             label="RSI(14) > 55  (momentum confirms breakout)",
             dependency_keys=["rsi14"],
+            operator=">",
+            threshold=55.0,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 55.0),
         ),
         StrategyRule(
             rule_id="orb_volume",
             label="Relative Volume ≥ 1.5  (elevated session volume)",
             dependency_keys=["rvol"],
+            operator=">=",
+            threshold=1.5,
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 1.5),
         ),
     ],
@@ -320,6 +459,8 @@ ORB_BREAKOUT = StrategyDefinition(
             rule_id="price_back_below_vwap",
             label="Price < VWAP  (breakout invalidation — strategy exit condition)",
             dependency_keys=["close", "vwap"],
+            operator="<",
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c < v),
         ),
     ],
@@ -333,31 +474,50 @@ ORB_BREAKOUT = StrategyDefinition(
 SUPERTREND_PROXY = StrategyDefinition(
     strategy_id="SUPERTREND_PROXY",
     name="Supertrend ATR Proxy",
-    category="Trend Following",
+    short_name="SUPERTREND PROXY",
+    category=StrategyCategory.TREND,
     description=(
         "This strategy uses an ATR-based trend and dynamic support approximation (VWAP − 1.5×ATR) "
         "and is an ATR proxy, not the canonical multi-band Supertrend indicator. "
         "Price must remain above EMA50 and above the dynamic support level with RSI(14) > 50."
     ),
+    version="1.0.0",
+    enabled=True,
+    experimental=False,
     timeframe_hint="15m",
     min_candles=50,
+    requirements=StrategyDataRequirements(
+        min_candles=50,
+        requires_volume=True,
+        requires_vwap=True,
+        supported_timeframes=["5m", "15m", "1h", "1D"],
+    ),
+    visualization=StrategyVisualization(
+        overlays=["ema50", "vwap", "supertrend_band"],
+        subpanels=["rsi14"],
+        color="#a3e635",
+    ),
     entry_rules=[
         StrategyRule(
             rule_id="price_above_ema50_st",
             label="Price > EMA50  (primary trend is up)",
             dependency_keys=["close", "ema50"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "close", "ema50", fn=lambda c, e: c > e),
         ),
         StrategyRule(
             rule_id="rsi_trend_zone",
             label="RSI(14) > 50  (bullish momentum zone)",
             dependency_keys=["rsi14"],
+            operator=">",
+            threshold=50.0,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 50.0),
         ),
         StrategyRule(
             rule_id="atr_dynamic_support",
             label="Price > VWAP − 1.5×ATR  (above dynamic support band)",
             dependency_keys=["close", "vwap", "atr14"],
+            operator=">",
             condition_fn=lambda fv: _cond(
                 fv, "close", "vwap", "atr14",
                 fn=lambda c, v, a: c > (v - 1.5 * a)
@@ -369,6 +529,8 @@ SUPERTREND_PROXY = StrategyDefinition(
             rule_id="price_below_atr_band",
             label="Price < VWAP − 1.5×ATR  (support level breached — strategy exit condition)",
             dependency_keys=["close", "vwap", "atr14"],
+            operator="<",
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(
                 fv, "close", "vwap", "atr14",
                 fn=lambda c, v, a: c < (v - 1.5 * a)
@@ -385,30 +547,48 @@ SUPERTREND_PROXY = StrategyDefinition(
 RVOL_SURGE = StrategyDefinition(
     strategy_id="RVOL_SURGE",
     name="Relative Volume Surge",
-    category="Volume",
+    short_name="RVOL SURGE",
+    category=StrategyCategory.VOLUME,
     description=(
         "Flags when Relative Volume spikes ≥ 2.0× the 20-period average, price is above EMA20, "
         "and RSI is within the strategy's defined 45–70 range."
     ),
+    version="1.0.0",
+    enabled=True,
+    experimental=False,
     timeframe_hint="5m",
     min_candles=25,
+    requirements=StrategyDataRequirements(
+        min_candles=25,
+        requires_volume=True,
+        supported_timeframes=["1m", "5m", "15m", "1h", "1D"],
+    ),
+    visualization=StrategyVisualization(
+        overlays=["ema20"],
+        subpanels=["rsi14"],
+        color="#a855f7",
+    ),
     entry_rules=[
         StrategyRule(
             rule_id="rvol_spike",
             label="Relative Volume ≥ 2.0×  (unusually high volume relative to 20-period baseline)",
             dependency_keys=["rvol"],
+            operator=">=",
+            threshold=2.0,
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 2.0),
         ),
         StrategyRule(
             rule_id="price_above_ema20_rvol",
             label="Price > EMA20  (price above short-term trend)",
             dependency_keys=["close", "ema20"],
+            operator=">",
             condition_fn=lambda fv: _cond(fv, "close", "ema20", fn=lambda c, e: c > e),
         ),
         StrategyRule(
             rule_id="rsi_accumulation_zone",
             label="45 < RSI(14) < 70  (strategy defined range, not overbought)",
             dependency_keys=["rsi14"],
+            operator="between",
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: 45.0 < r < 70.0),
         ),
     ],
@@ -417,12 +597,18 @@ RVOL_SURGE = StrategyDefinition(
             rule_id="rvol_normalized",
             label="Relative Volume < 1.0  (volume normalization — strategy exit condition)",
             dependency_keys=["rvol"],
+            operator="<",
+            threshold=1.0,
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r < 1.0),
         ),
         StrategyRule(
             rule_id="rsi_overbought_exit",
             label="RSI(14) > 70  (overbought threshold — strategy exit condition)",
             dependency_keys=["rsi14"],
+            operator=">",
+            threshold=70.0,
+            is_entry_rule=False,
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 70.0),
         ),
     ],
@@ -431,18 +617,76 @@ RVOL_SURGE = StrategyDefinition(
 
 
 # ---------------------------------------------------------------------------
-# Strategy Registry — single source of truth
+# Extensible Strategy Registry (Single Source of Truth)
 # ---------------------------------------------------------------------------
-STRATEGY_REGISTRY: Dict[str, StrategyDefinition] = {
-    s.strategy_id: s
-    for s in [
-        VWAP_MOMENTUM,
-        EMA_GOLDEN_CROSS,
-        RSI_OVERSOLD_REVERSAL,
-        BOLLINGER_SQUEEZE,
-        MACD_CROSSOVER,
-        ORB_BREAKOUT,
-        SUPERTREND_PROXY,
-        RVOL_SURGE,
-    ]
-}
+
+class StrategyRegistryManager:
+    """
+    Manages registration, discovery, dependency resolution, and visualization
+    metadata for all quantitative strategies.
+    """
+
+    def __init__(self):
+        self._strategies: Dict[str, StrategyDefinition] = {}
+
+    def register(self, strategy: StrategyDefinition) -> None:
+        """Register a strategy definition."""
+        self._strategies[strategy.strategy_id] = strategy
+
+    def get(self, strategy_id: str) -> Optional[StrategyDefinition]:
+        """Lookup a strategy by its ID."""
+        return self._strategies.get(strategy_id)
+
+    def list_all(self) -> List[StrategyDefinition]:
+        """Return all registered strategy definitions."""
+        return list(self._strategies.values())
+
+    def list_enabled(self) -> List[StrategyDefinition]:
+        """Return all active, non-deprecated strategies."""
+        return [s for s in self._strategies.values() if s.enabled and not s.deprecated]
+
+    def list_by_category(self, category: Union[StrategyCategory, str]) -> List[StrategyDefinition]:
+        """Filter strategies by category."""
+        target_val = category.value if isinstance(category, StrategyCategory) else str(category)
+        return [
+            s for s in self._strategies.values()
+            if (s.category.value if isinstance(s.category, StrategyCategory) else str(s.category)).lower() == target_val.lower()
+        ]
+
+    def get_all_required_dependencies(self, strategy_ids: Optional[List[str]] = None) -> Set[str]:
+        """
+        Aggregate all indicator dependency keys across selected or all enabled strategies.
+        Guarantees that shared indicators are calculated ONCE by the quant engine.
+        """
+        strats = [self.get(sid) for sid in strategy_ids] if strategy_ids else self.list_enabled()
+        keys: Set[str] = {"close"}
+        for s in strats:
+            if s:
+                for r in s.entry_rules + s.exit_rules + s.invalidation_rules:
+                    keys.update(r.dependency_keys)
+        return keys
+
+    def get_visualization(self, strategy_id: str) -> Optional[StrategyVisualization]:
+        """Retrieve visualization metadata for chart rendering."""
+        strat = self.get(strategy_id)
+        return strat.visualization if strat else None
+
+
+# Canonical global instance
+registry_manager = StrategyRegistryManager()
+
+# Register the 8 initial canonical strategies
+for _strat in [
+    VWAP_MOMENTUM,
+    EMA_GOLDEN_CROSS,
+    RSI_OVERSOLD_REVERSAL,
+    BOLLINGER_SQUEEZE,
+    MACD_CROSSOVER,
+    ORB_BREAKOUT,
+    SUPERTREND_PROXY,
+    RVOL_SURGE,
+]:
+    registry_manager.register(_strat)
+
+# Backward-compatible dictionary export
+STRATEGY_REGISTRY: Dict[str, StrategyDefinition] = registry_manager._strategies

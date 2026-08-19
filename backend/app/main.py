@@ -559,6 +559,7 @@ async def evaluate_strategies(symbol: str, req: StrategyEvaluateRequest):
         strategy_ids=req.strategy_ids,
         timeframe=tf,
         provider=active_prov,
+        symbol=symbol,
     )
     return observatory
 

@@ -708,12 +708,35 @@ def evaluate_all_strategies(
     return results
 
 
+def _get_ist_market_status(provider: str) -> str:
+    """
+    Returns 'SIMULATED', 'OPEN', 'PRE_OPEN', or 'CLOSED'
+    based on Indian Market hours (09:15-15:30 IST, Monday-Friday).
+    """
+    if provider.upper() in ("MOCK", "DEV_MOCK", "DEV"):
+        return "SIMULATED"
+    import datetime
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    # Convert UTC to IST (+5:30)
+    now_ist = now_utc + datetime.timedelta(hours=5, minutes=30)
+    
+    if now_ist.weekday() >= 5:  # Saturday (5) or Sunday (6)
+        return "CLOSED"
+    mins = now_ist.hour * 60 + now_ist.minute
+    if 9 * 60 + 15 <= mins <= 15 * 60 + 30:
+        return "OPEN"
+    elif 9 * 60 <= mins < 9 * 60 + 15:
+        return "PRE_OPEN"
+    return "CLOSED"
+
+
 def evaluate_strategies_observatory(
     candles: List[Dict[str, Any]],
     is_live_feed: bool = False,
     strategy_ids: Optional[List[str]] = None,
     timeframe: str = "5m",
     provider: str = "UPSTOX",
+    symbol: str = "UNKNOWN",
 ) -> Dict[str, Any]:
     """
     Master observatory endpoint payload generator.
@@ -722,7 +745,7 @@ def evaluate_strategies_observatory(
     2. Canonical indicator series for chart overlays
     3. Market regime classification
     4. Confluence & conflict analysis
-    5. Data freshness metrics with explicit provider and timeframe
+    5. Data freshness metrics with explicit provider, market status, and timeframe
     """
     freshness, data_age = _evaluate_freshness(candles, is_live_feed)
     df = pd.DataFrame(candles) if candles else pd.DataFrame()
@@ -731,6 +754,7 @@ def evaluate_strategies_observatory(
     results = evaluate_all_strategies(candles, is_live_feed=is_live_feed, strategy_ids=strategy_ids)
     confluence = compute_strategy_confluence(results)
     series_indicators = compute_series_indicators(candles)
+    market_status = _get_ist_market_status(provider)
 
     def _serialise_result(r: StrategyEvaluationResult) -> Dict[str, Any]:
         return {
@@ -793,6 +817,8 @@ def evaluate_strategies_observatory(
         })
 
     return {
+        "symbol": symbol,
+        "market_status": market_status,
         "market_regime": regime,
         "confluence": confluence,
         "data_freshness": freshness,

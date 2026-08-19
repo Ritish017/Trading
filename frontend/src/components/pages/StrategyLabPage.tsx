@@ -122,6 +122,8 @@ export interface ConfluenceData {
 }
 
 export interface ObservatoryData {
+  symbol?: string;
+  market_status?: 'OPEN' | 'CLOSED' | 'PRE_OPEN' | 'SIMULATED';
   market_regime: MarketRegimeData;
   confluence: ConfluenceData;
   data_freshness: string;
@@ -186,7 +188,7 @@ const STRATEGY_PALETTE: Record<string, { color: string; fill: string }> = {
 };
 
 // ---------------------------------------------------------------------------
-// State Badge Component (Part 6)
+// State Badge Component
 // ---------------------------------------------------------------------------
 const STATE_STYLES: Record<StrategyState, { label: string; bg: string; border: string; text: string; dot: string; icon: React.FC<any> }> = {
   ACTIVE:      { label: 'ACTIVE',      bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', icon: CheckCircle2 },
@@ -218,7 +220,7 @@ function formatDuration(seconds?: number | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Compact Strategy Keypad Tile (Part 5)
+// Compact Strategy Keypad Tile
 // ---------------------------------------------------------------------------
 function StrategyKeypadButton({
   strategy,
@@ -263,7 +265,7 @@ function StrategyKeypadButton({
 }
 
 // ---------------------------------------------------------------------------
-// Strategy Alignment & Confluence Gauge (Part 7, 8, 9)
+// Strategy Alignment & Confluence Gauge
 // ---------------------------------------------------------------------------
 function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
   const total = confluence.total_strategies || 8;
@@ -332,7 +334,7 @@ function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
 }
 
 // ---------------------------------------------------------------------------
-// Interactive Observatory Trading Chart (Part 10, 11, 12, 13, 14, 15, 16, 19)
+// Interactive Observatory Trading Chart
 // ---------------------------------------------------------------------------
 interface ObservatoryChartProps {
   candles: ChartCandle[];
@@ -354,11 +356,11 @@ function ObservatoryChart({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  // Overlay Mode: 'SELECTED' or 'ALL' (Part 19)
+  // Overlay Mode: 'SELECTED' or 'ALL'
   const [overlayMode, setOverlayMode] = useState<'SELECTED' | 'ALL'>('SELECTED');
   const [showLayerMenu, setShowLayerMenu] = useState(false);
 
-  // Manual Layer Toggles (Part 13 & 34)
+  // Manual Layer Toggles
   const [layers, setLayers] = useState({
     candles: true,
     volume: true,
@@ -487,7 +489,7 @@ function ObservatoryChart({
   const isORBActive = layers.orb || sid === 'ORB_BREAKOUT';
 
   return (
-    <div className="bg-[#12131a] border border-stone-800/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl">
+    <div className="bg-[#12131b] border border-stone-800/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl">
       {/* Chart Top Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-stone-800/60 text-xs">
         <div className="flex items-center gap-3">
@@ -502,7 +504,7 @@ function ObservatoryChart({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Mode switch: Selected Strategy vs All Strategies (Part 19) */}
+          {/* Mode switch: Selected Strategy vs All Strategies */}
           <div className="flex items-center gap-1 bg-stone-900/80 p-0.5 rounded-lg border border-stone-800 text-[10px] font-mono">
             <button
               onClick={() => setOverlayMode('SELECTED')}
@@ -522,7 +524,7 @@ function ObservatoryChart({
             </button>
           </div>
 
-          {/* Timeframe selector (Part 11 & 36) */}
+          {/* Timeframe selector */}
           <div className="flex items-center gap-1 bg-stone-900/80 p-0.5 rounded-lg border border-stone-800">
             {(['1m', '5m', '15m', '1h', '1D'] as const).map(tf => (
               <button
@@ -539,7 +541,7 @@ function ObservatoryChart({
             ))}
           </div>
 
-          {/* Layer controls toggle button (Part 13 & 34) */}
+          {/* Layer controls toggle button */}
           <div className="relative">
             <button
               onClick={() => setShowLayerMenu(!showLayerMenu)}
@@ -593,7 +595,7 @@ function ObservatoryChart({
         {isORBActive && <span className="flex items-center gap-1 text-yellow-400"><span className="w-2 h-0.5 bg-yellow-400 inline-block" /> ORB Range</span>}
       </div>
 
-      {/* SVG Canvas (Part 10, 11, 14, 15) */}
+      {/* SVG Canvas */}
       <div className="relative overflow-hidden w-full select-none">
         <svg
           ref={svgRef}
@@ -627,7 +629,7 @@ function ObservatoryChart({
             );
           })}
 
-          {/* Historical Active Regions Highlight Bands (Part 14) */}
+          {/* Historical Active Regions Highlight Bands */}
           {layers.regions && overlayMode === 'SELECTED' && selectedStrategy?.historical_states?.map((hs, i) => {
             if (hs.state !== 'ACTIVE') return null;
             const x = hs.candle_index * candleStep;
@@ -643,7 +645,7 @@ function ObservatoryChart({
             );
           })}
 
-          {/* Candlesticks (Part 11) */}
+          {/* Candlesticks */}
           {layers.candles && candles.map((c, i) => {
             const x = i * candleStep + candleStep / 2;
             const openY = getY(c.open);
@@ -695,7 +697,7 @@ function ObservatoryChart({
             );
           })}
 
-          {/* Indicator Overlays (Part 12) */}
+          {/* Indicator Overlays */}
           {isBollingerActive && (
             <>
               <path d={makeLinePath(indicators.bb_upper)} stroke="#10b981" strokeWidth={1} fill="none" strokeDasharray="2,2" />
@@ -720,7 +722,7 @@ function ObservatoryChart({
           {isEMA200Active && <path d={makeLinePath(indicators.ema200)} stroke="#a855f7" strokeWidth={1.5} fill="none" />}
           {isVWAPActive && <path d={makeLinePath(indicators.vwap)} stroke="#e879f9" strokeWidth={1.4} fill="none" />}
 
-          {/* Strategy Activation Markers (Part 15 & 19) */}
+          {/* Strategy Activation Markers */}
           {layers.events && (overlayMode === 'SELECTED' ? selectedStrategy?.activation_events || [] : allStrategies.flatMap(s => s.activation_events || [])).map((ev, i) => {
             const cx = ev.candle_index * candleStep + candleStep / 2;
             const cy = getY(ev.price);
@@ -798,7 +800,7 @@ function ObservatoryChart({
         </svg>
       </div>
 
-      {/* Historical Strategy Timeline (Part 17) */}
+      {/* Historical Strategy Timeline */}
       {selectedStrategy?.activation_events && selectedStrategy.activation_events.length > 0 && (
         <div className="pt-2 border-t border-stone-800/60 flex items-center gap-2 overflow-x-auto custom-scrollbar text-[10px] font-mono">
           <span className="text-stone-500 shrink-0 font-bold flex items-center gap-1">
@@ -826,7 +828,7 @@ function ObservatoryChart({
 }
 
 // ---------------------------------------------------------------------------
-// Selected Strategy Rule Inspector with Mathematical Basis (Part 20, 21, 22)
+// Selected Strategy Rule Inspector with Mathematical Basis
 // ---------------------------------------------------------------------------
 function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
@@ -886,7 +888,7 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
                   </div>
                 </div>
 
-                {/* Mathematical Basis Drilldown (Part 21) */}
+                {/* Mathematical Basis Drilldown */}
                 {isExpanded && (
                   <div className="mt-2 pt-2 border-t border-stone-800/60 text-[11px] font-mono space-y-1 text-stone-400 bg-stone-950/40 p-2 rounded">
                     <div><strong>Rule ID:</strong> {rule.rule_id}</div>
@@ -925,7 +927,7 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
 }
 
 // ---------------------------------------------------------------------------
-// Real Conversational Strategy Copilot (Part 24, 25, 26, 27, 28, 29)
+// Real Conversational Strategy Copilot
 // ---------------------------------------------------------------------------
 interface StrategyCopilotProps {
   symbol: string;
@@ -948,6 +950,11 @@ function StrategyCopilotChat({
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Clear chat history on symbol, selectedStrategy, or timeframe switch to prevent conversation leakage
+  useEffect(() => {
+    setMessages([]);
+  }, [symbol, selectedStrategy?.strategy_id, timeframe]);
 
   const quickChips = [
     'Explain this strategy',
@@ -1114,9 +1121,19 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const activeReqId = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const currentStock = stocks.find(s => s.symbol === symbol) || stocks[0];
 
   const handleEvaluate = useCallback(async (symToEval = symbol, tfToEval = timeframe) => {
+    const reqId = ++activeReqId.current;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsEvaluating(true);
     setError(null);
     try {
@@ -1124,27 +1141,38 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_live_feed: true, timeframe: tfToEval }),
+        signal: controller.signal,
       });
+      if (reqId !== activeReqId.current) return;
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       const data: ObservatoryData = await res.json();
+      if (reqId !== activeReqId.current) return;
       setObservatoryData(data);
 
       // Auto-select first active strategy or maintain selected
       if (data.strategies && data.strategies.length > 0) {
-        if (!selectedStrategyId || !data.strategies.some(s => s.strategy_id === selectedStrategyId)) {
+        setSelectedStrategyId(prev => {
+          if (prev && data.strategies.some(s => s.strategy_id === prev)) {
+            return prev;
+          }
           const firstActive = data.strategies.find(s => s.state === 'ACTIVE') || data.strategies[0];
-          setSelectedStrategyId(firstActive.strategy_id);
-        }
+          return firstActive.strategy_id;
+        });
       }
     } catch (e: any) {
-      setError(e.message || 'Evaluation failed');
+      if (e.name === 'AbortError') return;
+      if (reqId === activeReqId.current) {
+        setError(e.message || 'Evaluation failed');
+      }
     } finally {
-      setIsEvaluating(false);
+      if (reqId === activeReqId.current) {
+        setIsEvaluating(false);
+      }
     }
-  }, [symbol, timeframe, selectedStrategyId]);
+  }, [symbol, timeframe]);
 
   // Initial evaluation on mount or symbol/timeframe switch
   useEffect(() => {
@@ -1153,11 +1181,13 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
 
   const selectedStrategy = observatoryData?.strategies?.find(s => s.strategy_id === selectedStrategyId) || null;
 
-  // Stale & Freshness handling (Part 2 & 3)
+  // Stale & Freshness handling
   const isStale = observatoryData?.data_freshness === 'STALE';
   const isLive = observatoryData?.data_freshness === 'LIVE';
   const isRecent = observatoryData?.data_freshness === 'RECENT';
   const isUnavailable = observatoryData?.data_freshness === 'UNAVAILABLE';
+  const isMarketClosed = observatoryData?.market_status === 'CLOSED';
+  const isSimulated = observatoryData?.market_status === 'SIMULATED' || observatoryData?.provider === 'MOCK';
   const ageSeconds = observatoryData?.data_age_seconds;
   const provider = observatoryData?.provider || 'UPSTOX';
 
@@ -1227,7 +1257,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       </div>
 
-      {/* Stale / Live Data Experience Banner (Part 3) */}
+      {/* Stale / Live / Market Closed / Simulated Data Experience Banner */}
       {isStale && (
         <div className="px-4 py-2.5 rounded-xl bg-purple-950/40 border border-purple-700/50 text-purple-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-md">
           <div className="flex items-center gap-2">
@@ -1242,7 +1272,27 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {isLive && (
+      {isMarketClosed && !isStale && (
+        <div className="px-4 py-2 rounded-xl bg-sky-950/25 border border-sky-700/40 text-sky-300 text-xs flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-sky-400" />
+            <span><strong>MARKET CLOSED:</strong> Standard session hours are 09:15 - 15:30 IST (Mon-Fri). Strategy states reflect closing candle conditions (Provider: {provider}).</span>
+          </div>
+          <span className="font-mono text-[10px] text-sky-400 border border-sky-600/40 px-2 py-0.5 rounded">🔵 MARKET CLOSED</span>
+        </div>
+      )}
+
+      {isSimulated && (
+        <div className="px-4 py-2 rounded-xl bg-amber-950/25 border border-amber-700/40 text-amber-300 text-xs flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2">
+            <Info className="w-4 h-4 text-amber-400" />
+            <span><strong>SIMULATED ENVIRONMENT:</strong> Running on development simulated market feed.</span>
+          </div>
+          <span className="font-mono text-[10px] text-amber-400 border border-amber-600/40 px-2 py-0.5 rounded">🟠 DEV MOCK</span>
+        </div>
+      )}
+
+      {isLive && !isMarketClosed && (
         <div className="px-4 py-2 rounded-xl bg-emerald-950/25 border border-emerald-700/40 text-emerald-300 text-xs flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-emerald-400" />

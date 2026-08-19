@@ -1129,6 +1129,148 @@ async def challenge_strategy(symbol: str, req: ChallengeStrategyRequest):
     )
     return critique
 
+
+# ---------------------------------------------------------------------------
+# Phase 7: Fundamental + Factor Research Engine Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.fundamental_engine.providers import fundamental_data_hub
+from backend.app.fundamental_engine.models import StatementType, StatementFrequency
+from backend.app.fundamental_engine.dependency_engine import FundamentalDependencyEngine
+from backend.app.fundamental_engine.confluence_engine import confluence_engine
+from backend.app.fundamental_engine.portfolio_engine import portfolio_engine
+from backend.app.fundamental_engine.normalization import calculate_sector_relative_factors
+from backend.app.ai_engine.agents import fundamental_copilot_agent
+
+
+@app.get("/api/fundamentals/company/{symbol}")
+async def get_company_profile(symbol: str):
+    """Returns company profile metadata and sector classifications."""
+    prof = await fundamental_data_hub.get_company_profile(symbol)
+    if not prof:
+        raise HTTPException(status_code=404, detail=f"FUNDAMENTAL_DATA_UNAVAILABLE: Profile not found for {symbol}.")
+    return {"profile": asdict(prof)}
+
+
+@app.get("/api/fundamentals/statements/{symbol}")
+async def get_financial_statements(symbol: str):
+    """Returns normalized historical financial statements (Income Statement, Balance Sheet, Cash Flow)."""
+    incomes = await fundamental_data_hub.get_financial_statements(symbol, StatementType.INCOME_STATEMENT)
+    balances = await fundamental_data_hub.get_financial_statements(symbol, StatementType.BALANCE_SHEET)
+    cashflows = await fundamental_data_hub.get_financial_statements(symbol, StatementType.CASH_FLOW)
+    return {
+        "symbol": symbol,
+        "income_statements": [asdict(x) for x in incomes],
+        "balance_sheets": [asdict(x) for x in balances],
+        "cash_flows": [asdict(x) for x in cashflows],
+    }
+
+
+class FactorScorecardRequest(BaseModel):
+    as_of_timestamp: Optional[int] = None
+    current_price: Optional[float] = None
+
+
+@app.post("/api/fundamentals/scorecard/{symbol}")
+async def get_factor_scorecard(symbol: str, req: FactorScorecardRequest):
+    """Generates structured point-in-time Factor Evidence Scorecard."""
+    scorecard = await confluence_engine.generate_scorecard(
+        symbol=symbol,
+        as_of_timestamp=req.as_of_timestamp,
+        current_price=req.current_price,
+    )
+    return {"scorecard": asdict(scorecard)}
+
+
+class ConfluenceMatrixRequest(BaseModel):
+    technical_active_count: int
+    technical_total_count: int
+    as_of_timestamp: Optional[int] = None
+    current_price: Optional[float] = None
+
+
+@app.post("/api/fundamentals/confluence/{symbol}")
+async def get_confluence_matrix(symbol: str, req: ConfluenceMatrixRequest):
+    """Evaluates 3x3 Technical x Fundamental empirical evidence matrix."""
+    scorecard = await confluence_engine.generate_scorecard(
+        symbol=symbol,
+        as_of_timestamp=req.as_of_timestamp,
+        current_price=req.current_price,
+    )
+    confluence = confluence_engine.evaluate_technical_fundamental_confluence(
+        symbol=symbol,
+        technical_active_count=req.technical_active_count,
+        technical_total_count=req.technical_total_count,
+        scorecard=scorecard,
+    )
+    return {
+        "scorecard": asdict(scorecard),
+        "confluence_matrix": asdict(confluence),
+    }
+
+
+class FactorPortfolioRequest(BaseModel):
+    universe_symbols: Optional[List[str]] = None
+    factor_id: Optional[str] = "PROFITABILITY_ROE"
+    rebalance_frequency: Optional[str] = "QUARTERLY"
+    top_quantile: Optional[float] = 0.30
+    initial_capital: Optional[float] = 1000000.0
+
+
+@app.post("/api/fundamentals/portfolio-research")
+async def run_factor_portfolio_simulation(req: FactorPortfolioRequest):
+    """Simulates point-in-time cross-sectional factor ranking and portfolio rebalancing."""
+    symbols = req.universe_symbols or ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "TATAMOTORS.NS", "SBIN.NS"]
+    res = await portfolio_engine.simulate_factor_portfolio(
+        universe_symbols=symbols,
+        price_history_map={},
+        factor_id=req.factor_id or "PROFITABILITY_ROE",
+        rebalance_frequency=req.rebalance_frequency or "QUARTERLY",
+        top_quantile=req.top_quantile or 0.30,
+        initial_capital=req.initial_capital or 1000000.0,
+    )
+    return {"simulation_result": asdict(res)}
+
+
+class FundamentalCopilotRequest(BaseModel):
+    symbol: str
+    user_message: str
+    scorecard: Optional[Dict[str, Any]] = None
+    statements: Optional[Dict[str, Any]] = None
+    confluence: Optional[Dict[str, Any]] = None
+    chat_history: Optional[List[Dict[str, str]]] = None
+    is_skeptic_mode: Optional[bool] = False
+
+
+@app.post("/api/fundamentals/copilot")
+async def fundamental_copilot(req: FundamentalCopilotRequest):
+    """Evidence-grounded Fundamental Copilot (Standard and Skeptic Mode)."""
+    res = await fundamental_copilot_agent.answer(
+        symbol=req.symbol,
+        user_message=req.user_message,
+        scorecard=req.scorecard,
+        statements=req.statements,
+        confluence=req.confluence,
+        chat_history=req.chat_history,
+        is_skeptic_mode=bool(req.is_skeptic_mode),
+    )
+    return res
+
+
+@app.post("/api/fundamentals/challenge/{symbol}")
+async def challenge_fundamental_thesis(symbol: str, req: FundamentalCopilotRequest):
+    """Launches Fundamental Skeptic Mode to challenge valuation, cash flow, and debt risks."""
+    res = await fundamental_copilot_agent.answer(
+        symbol=symbol,
+        user_message="CHALLENGE THIS FUNDAMENTAL THESIS: What are the primary accounting, balance sheet, and margin risks?",
+        scorecard=req.scorecard,
+        statements=req.statements,
+        confluence=req.confluence,
+        chat_history=req.chat_history,
+        is_skeptic_mode=True,
+    )
+    return res
+
+
 @app.websocket("/ws/ticks")
 async def websocket_ticks(websocket: WebSocket):
     await websocket.accept()

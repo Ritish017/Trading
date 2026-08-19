@@ -24,6 +24,7 @@ import { PortfolioPage } from './components/pages/PortfolioPage';
 import { BacktestReplayPage } from './components/pages/BacktestReplayPage';
 import { QuantLearnPage } from './components/pages/QuantLearnPage';
 import { StrategyLabPage } from './components/pages/StrategyLabPage';
+import { FundamentalResearchPage } from './components/pages/FundamentalResearchPage';
 
 import { MarketNarrativeBanner } from './components/intelligence/MarketNarrativeBanner';
 import { IntelligenceTimeline } from './components/intelligence/IntelligenceTimeline';
@@ -869,6 +870,14 @@ export default function App() {
 
       {activePage === 'strategylab' && (
         <StrategyLabPage
+          stocks={stocks}
+          selectedSymbol={selectedSymbol}
+          onSelectSymbol={(sym) => setSelectedSymbol(sym)}
+        />
+      )}
+
+      {activePage === 'fundamentals' && (
+        <FundamentalResearchPage
           stocks={stocks}
           selectedSymbol={selectedSymbol}
           onSelectSymbol={(sym) => setSelectedSymbol(sym)}

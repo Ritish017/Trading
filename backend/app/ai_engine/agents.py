@@ -522,3 +522,178 @@ Answer concisely, citing exact evidence and numbers:"""
             + "\n\n*Note: High historical returns without parameter neighborhood stability and OOS robustness indicate high data-mining risk.*"
         )
         return {"reply": reply, "evidence_cited": ["Skeptic Audit", "Friction Drag", "Sample Size Validation"]}
+
+
+class FundamentalCopilotAgent:
+    """
+    Evidence-grounded Fundamental & Factor Copilot.
+    Interprets financial statements, factor scorecards, sector peer distributions, and cash flow health.
+    Supports Skeptic Mode ('CHALLENGE THIS FUNDAMENTAL THESIS') to audit margin decay, debt risk, and earnings quality.
+    """
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+
+    async def answer(
+        self,
+        symbol: str,
+        user_message: str,
+        scorecard: Optional[Dict[str, Any]] = None,
+        statements: Optional[Dict[str, Any]] = None,
+        confluence: Optional[Dict[str, Any]] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        is_skeptic_mode: bool = False,
+    ) -> Dict[str, Any]:
+        evidence_block = self._build_evidence_block(symbol, scorecard, statements, confluence)
+
+        if not self.client:
+            if is_skeptic_mode:
+                return self._build_deterministic_skeptic_critique(symbol, scorecard, statements)
+            return self._build_deterministic_summary(symbol, scorecard, statements)
+
+        history_str = ""
+        if chat_history:
+            history_str = "\nPREVIOUS CONVERSATION:\n" + "\n".join(
+                f"{h.get('role', 'user').upper()}: {h.get('text', '')}"
+                for h in chat_history[-6:]
+            )
+
+        skeptic_instructions = """
+SKEPTIC MODE ACTIVE ("CHALLENGE THIS FUNDAMENTAL THESIS"):
+- Act as an aggressive fundamental forensic auditor and value skeptic.
+- Highlight earnings-cash divergence, deteriorating margins, rising debt, poor FCF conversion, and extreme valuation multiples.
+- Flag any missing or unavailable metrics.
+- Conclude whether evidence is INSUFFICIENT or thesis is VULNERABLE.
+""" if is_skeptic_mode else ""
+
+        system_prompt = f"""You are the APEX Fundamental Copilot — an expert quantitative fundamental and factor research assistant.
+
+STRICT INVARIANTS:
+1. Base EVERY statement directly on the VERIFIED EVIDENCE below. Cite exact numerical values.
+2. Missing values remain 'Data unavailable' — DO NOT extrapolate or fabricate financial statements.
+3. Distinguish clearly between reported periods and publication dates.
+4. Provide research evidence and factor interpretation, NOT financial advice or buy/sell recommendations.
+{skeptic_instructions}
+
+VERIFIED FUNDAMENTAL EVIDENCE FOR {symbol}:
+{evidence_block}
+{history_str}
+
+User Question: {user_message}
+
+Answer concisely, citing exact evidence and numbers:"""
+
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=system_prompt,
+            )
+            reply_text = response.text.strip() if response and response.text else (
+                "Evidence is available but the AI interpreter is temporarily offline."
+            )
+        except Exception as exc:
+            logger.warning("FundamentalCopilotAgent Gemini call failed: %s", exc)
+            reply_text = "AI interpreter temporarily unavailable — please review the quantitative scorecard directly."
+
+        return {"reply": reply_text, "evidence_cited": ["Audited Financial Statements", "Factor Scorecard"]}
+
+    def _build_evidence_block(
+        self,
+        symbol: str,
+        scorecard: Optional[Any],
+        statements: Optional[Any],
+        confluence: Optional[Any],
+    ) -> str:
+        lines = [f"=== FUNDAMENTAL EVIDENCE FOR {symbol} ==="]
+        if scorecard:
+            def _g(o, k, d=None):
+                return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+
+            comp = _g(scorecard, "company_name", symbol)
+            sec = _g(scorecard, "sector", "N/A")
+            ind = _g(scorecard, "industry", "N/A")
+            prof = _g(scorecard, "overall_fundamental_profile", "N/A")
+            lines.append(f"Company: {comp} (Sector: {sec}, Industry: {ind})")
+            lines.append(f"Overall Fundamental Profile: {prof}")
+            cats = _g(scorecard, "category_summaries", {}) or {}
+            for c_name, c_data in cats.items():
+                lines.append(f"• {c_name}: Rating={_g(c_data, 'rating')}, Avg Percentile={_g(c_data, 'average_percentile')}%")
+            lines.append("\nKey Factors:")
+            factors = _g(scorecard, "factors", []) or []
+            for f in factors:
+                f_name = _g(f, "name", "Unknown")
+                f_val = _g(f, "raw_value", "N/A")
+                f_unit = _g(f, "unit", "")
+                f_pct = _g(f, "percentile_rank", "N/A")
+                f_stat = _g(f, "data_status", "N/A")
+                lines.append(f"  - {f_name}: {f_val} {f_unit} (Sector Percentile: {f_pct}%, Status: {f_stat})")
+
+        if confluence:
+            c_quad = confluence.get("confluence_quadrant") if isinstance(confluence, dict) else getattr(confluence, "confluence_quadrant", "N/A")
+            t_st = confluence.get("technical_state") if isinstance(confluence, dict) else getattr(confluence, "technical_state", "N/A")
+            t_ev = confluence.get("technical_evidence") if isinstance(confluence, dict) else getattr(confluence, "technical_evidence", "N/A")
+            lines.append(f"\nMulti-Layer Confluence Quadrant: {c_quad}")
+            lines.append(f"Technical Layer: {t_st} ({t_ev})")
+
+        return "\n".join(lines)
+
+    def _build_deterministic_summary(
+        self,
+        symbol: str,
+        scorecard: Optional[Any],
+        statements: Optional[Any],
+    ) -> Dict[str, Any]:
+        if not scorecard:
+            return {"reply": f"Fundamental evidence for **{symbol}** is currently being aggregated.", "evidence_cited": []}
+        def _g(o, k, d=None):
+            return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+        prof = _g(scorecard, "overall_fundamental_profile", "UNKNOWN")
+        sec = _g(scorecard, "sector", "Unknown Sector")
+        comp = _g(scorecard, "company_name", symbol)
+        reply = (
+            f"**{comp}** has an overall fundamental profile of **{prof}** within the **{sec}** sector.\n\n"
+            f"**Category Breakdown:**\n"
+        )
+        cats = _g(scorecard, "category_summaries", {}) or {}
+        for c_name, c_data in cats.items():
+            reply += f"• **{c_name}**: {_g(c_data, 'rating')} (Avg Sector Percentile: {_g(c_data, 'average_percentile')}%\n"
+        reply += "\n*All metrics reflect audited point-in-time financial filings.*"
+        return {"reply": reply, "evidence_cited": ["Factor Scorecard", "Sector Percentiles"]}
+
+    def _build_deterministic_skeptic_critique(
+        self,
+        symbol: str,
+        scorecard: Optional[Any],
+        statements: Optional[Any],
+    ) -> Dict[str, Any]:
+        critiques = []
+        if scorecard:
+            def _g(o, k, d=None):
+                return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+            factors = _g(scorecard, "factors", []) or []
+            for f in factors:
+                f_name = _g(f, "name", "Unknown")
+                f_id = _g(f, "factor_id", "")
+                f_val = _g(f, "raw_value")
+                f_stat = _g(f, "data_status", "")
+                if f_stat == "UNAVAILABLE":
+                    critiques.append(f"• **Data Gap Warning**: Metric `{f_name}` is unavailable in source filings.")
+                elif "DEBT" in f_id and f_val is not None and f_val > 1.5:
+                    critiques.append(f"• **High Leverage Exposure**: `{f_name}` is elevated at {f_val}.")
+                elif "CONVERSION" in f_id and f_val is not None and f_val < 50.0:
+                    critiques.append(f"• **Weak Cash Flow Conversion**: Only {f_val}% of net profit converts to free cash flow.")
+
+        if not critiques:
+            critiques.append("• Scrutinize margin compression against raw material cost trends and review subsequent quarter restatements.")
+
+        reply = (
+            f"**Fundamental Skeptic Critique for {symbol}:**\n\n"
+            + "\n".join(critiques)
+            + "\n\n*Note: High accounting earnings without accompanying operating cash flow present significant vulnerability.*"
+        )
+        return {"reply": reply, "evidence_cited": ["Skeptic Audit", "Cash Flow Conversion", "Debt Analysis"]}
+
+
+fundamental_copilot_agent = FundamentalCopilotAgent()
+

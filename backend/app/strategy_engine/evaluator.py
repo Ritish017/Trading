@@ -32,6 +32,11 @@ from backend.app.quant_engine.indicators import (
     calculate_macd, calculate_bollinger_bands, calculate_relative_volume
 )
 from backend.app.quant_engine.regime import classify_market_regime
+from backend.app.strategy_engine.dependency_engine import (
+    dependency_engine,
+    normalize_dependency_key,
+    DependencyEvaluationContext,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,212 +107,24 @@ def _safe_float(val) -> Optional[float]:
 
 def compute_feature_vector(candles: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
     """
-    Build a flat feature vector Dict at the latest candle from OHLCV history.
-    All values are float or None.
+    Build a flat feature vector Dict at the latest candle from OHLCV history
+    using the canonical DependencyEngine.
     """
     if not candles or len(candles) < 5:
         return {}
-
-    df = pd.DataFrame(candles)
-    if "close" not in df.columns:
-        return {}
-
-    close = df["close"].astype(float)
-    has_hlv = all(c in df.columns for c in ["high", "low", "volume"])
-    high = df["high"].astype(float) if "high" in df.columns else close
-    low = df["low"].astype(float) if "low" in df.columns else close
-    volume = df["volume"].astype(float) if "volume" in df.columns else pd.Series([0.0] * len(df))
-
-    n = len(close)
-    fv: Dict[str, Optional[float]] = {}
-
-    fv["close"] = _safe_float(close.iloc[-1])
-
-    # EMAs
-    fv["ema20"] = _safe_float(close.ewm(span=20, adjust=False).mean().iloc[-1]) if n >= 20 else None
-    fv["ema50"] = _safe_float(close.ewm(span=50, adjust=False).mean().iloc[-1]) if n >= 50 else None
-    fv["ema200"] = _safe_float(close.ewm(span=200, adjust=False).mean().iloc[-1]) if n >= 200 else None
-
-    # RSI(14)
-    if n >= 15:
-        delta = close.diff()
-        gain = delta.where(delta > 0, 0.0)
-        loss = -delta.where(delta < 0, 0.0)
-        avg_g = gain.ewm(alpha=1.0 / 14, adjust=False).mean()
-        avg_l = loss.ewm(alpha=1.0 / 14, adjust=False).mean()
-        rs = avg_g / (avg_l + 1e-9)
-        rsi_s = 100.0 - (100.0 / (1.0 + rs))
-        fv["rsi14"] = _safe_float(rsi_s.iloc[-1])
-    else:
-        fv["rsi14"] = None
-
-    # MACD (12, 26, 9)
-    if n >= 35:
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        macd_line = ema12 - ema26
-        signal_line = macd_line.ewm(span=9, adjust=False).mean()
-        fv["macd"] = _safe_float(macd_line.iloc[-1])
-        fv["macd_signal"] = _safe_float(signal_line.iloc[-1])
-        fv["macd_histogram"] = _safe_float((macd_line - signal_line).iloc[-1])
-    else:
-        fv["macd"] = fv["macd_signal"] = fv["macd_histogram"] = None
-
-    # VWAP
-    if has_hlv and n >= 5:
-        typical = (high + low + close) / 3.0
-        tp_vol = typical * volume
-        cum_tv = tp_vol.cumsum()
-        cum_v = volume.cumsum()
-        vwap_s = np.where(cum_v > 0, cum_tv / cum_v, np.nan)
-        fv["vwap"] = _safe_float(float(vwap_s[-1]))
-    else:
-        fv["vwap"] = None
-
-    # ATR(14)
-    if n >= 15:
-        prev_c = close.shift(1)
-        tr1 = high - low
-        tr2 = (high - prev_c).abs()
-        tr3 = (low - prev_c).abs()
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr_s = tr.ewm(alpha=1.0 / 14, adjust=False).mean()
-        fv["atr14"] = _safe_float(atr_s.iloc[-1])
-    else:
-        fv["atr14"] = None
-
-    # Bollinger Bands (20, 2σ)
-    if n >= 20:
-        sma20 = close.rolling(window=20).mean()
-        std20 = close.rolling(window=20).std()
-        fv["bb_upper"] = _safe_float((sma20 + 2.0 * std20).iloc[-1])
-        fv["bb_middle"] = _safe_float(sma20.iloc[-1])
-        fv["bb_lower"] = _safe_float((sma20 - 2.0 * std20).iloc[-1])
-    else:
-        fv["bb_upper"] = fv["bb_middle"] = fv["bb_lower"] = None
-
-    # Relative Volume (20-period)
-    if has_hlv and n >= 21:
-        avg_vol = volume.rolling(window=20).mean()
-        rvol_s = np.where(avg_vol > 0, volume / avg_vol, np.nan)
-        fv["rvol"] = _safe_float(float(rvol_s[-1]))
-    else:
-        fv["rvol"] = None
-
-    return fv
+    ctx = dependency_engine.compute_context(candles)
+    return ctx.feature_vector
 
 
 def compute_series_indicators(candles: List[Dict[str, Any]]) -> Dict[str, List[Optional[float]]]:
     """
-    Computes canonical full-length indicator time series for trading chart overlays.
-    Returns zero-synthetic, aligned arrays.
+    Computes canonical full-length indicator time series for trading chart overlays
+    using the canonical DependencyEngine.
     """
     if not candles:
         return {}
-
-    df = pd.DataFrame(candles)
-    if "close" not in df.columns:
-        return {}
-
-    close = df["close"].astype(float)
-    has_hlv = all(c in df.columns for c in ["high", "low", "volume"])
-    high = df["high"].astype(float) if "high" in df.columns else close
-    low = df["low"].astype(float) if "low" in df.columns else close
-    volume = df["volume"].astype(float) if "volume" in df.columns else pd.Series([0.0] * len(df))
-
-    n = len(close)
-
-    def _to_list(s: Optional[pd.Series], min_bars: int = 1) -> List[Optional[float]]:
-        if s is None or n < min_bars:
-            return [None] * n
-        return [_safe_float(v) for v in s]
-
-    # EMAs
-    ema20 = close.ewm(span=20, adjust=False).mean() if n >= 20 else None
-    ema50 = close.ewm(span=50, adjust=False).mean() if n >= 50 else None
-    ema200 = close.ewm(span=200, adjust=False).mean() if n >= 200 else None
-
-    # VWAP
-    vwap_series = None
-    if has_hlv and n >= 5:
-        typical = (high + low + close) / 3.0
-        tp_vol = typical * volume
-        cum_tv = tp_vol.cumsum()
-        cum_v = volume.cumsum()
-        vwap_series = pd.Series(np.where(cum_v > 0, cum_tv / cum_v, np.nan), index=df.index)
-
-    # RSI(14)
-    rsi_series = None
-    if n >= 15:
-        delta = close.diff()
-        gain = delta.where(delta > 0, 0.0)
-        loss = -delta.where(delta < 0, 0.0)
-        avg_g = gain.ewm(alpha=1.0 / 14, adjust=False).mean()
-        avg_l = loss.ewm(alpha=1.0 / 14, adjust=False).mean()
-        rs = avg_g / (avg_l + 1e-9)
-        rsi_series = 100.0 - (100.0 / (1.0 + rs))
-
-    # MACD (12, 26, 9)
-    macd_line, signal_line, macd_hist = None, None, None
-    if n >= 35:
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        macd_line = ema12 - ema26
-        signal_line = macd_line.ewm(span=9, adjust=False).mean()
-        macd_hist = macd_line - signal_line
-
-    # ATR(14)
-    atr_series = None
-    if n >= 15:
-        prev_c = close.shift(1)
-        tr1 = high - low
-        tr2 = (high - prev_c).abs()
-        tr3 = (low - prev_c).abs()
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr_series = tr.ewm(alpha=1.0 / 14, adjust=False).mean()
-
-    # Bollinger Bands (20, 2σ)
-    bb_upper, bb_middle, bb_lower = None, None, None
-    if n >= 20:
-        sma20 = close.rolling(window=20).mean()
-        std20 = close.rolling(window=20).std()
-        bb_upper = sma20 + 2.0 * std20
-        bb_middle = sma20
-        bb_lower = sma20 - 2.0 * std20
-
-    # RVOL (20-period)
-    rvol_series = None
-    if has_hlv and n >= 21:
-        avg_vol = volume.rolling(window=20).mean()
-        rvol_series = pd.Series(np.where(avg_vol > 0, volume / avg_vol, np.nan), index=df.index)
-
-    # Supertrend Band (VWAP - 1.5 * ATR)
-    supertrend_band = None
-    if vwap_series is not None and atr_series is not None:
-        supertrend_band = vwap_series - (1.5 * atr_series)
-
-    # Opening Range Breakout (first 6 candles high/low proxy)
-    orb_high = float(high.iloc[:min(6, n)].max()) if n >= 6 else None
-    orb_low = float(low.iloc[:min(6, n)].min()) if n >= 6 else None
-
-    return {
-        "ema20": _to_list(ema20, 20),
-        "ema50": _to_list(ema50, 50),
-        "ema200": _to_list(ema200, 200),
-        "vwap": _to_list(vwap_series, 5),
-        "rsi14": _to_list(rsi_series, 15),
-        "macd": _to_list(macd_line, 35),
-        "macd_signal": _to_list(signal_line, 35),
-        "macd_histogram": _to_list(macd_hist, 35),
-        "bb_upper": _to_list(bb_upper, 20),
-        "bb_middle": _to_list(bb_middle, 20),
-        "bb_lower": _to_list(bb_lower, 20),
-        "atr14": _to_list(atr_series, 15),
-        "rvol": _to_list(rvol_series, 21),
-        "supertrend_band": _to_list(supertrend_band, 15),
-        "orb_high": [orb_high] * n if orb_high is not None else [None] * n,
-        "orb_low": [orb_low] * n if orb_low is not None else [None] * n,
-    }
+    ctx = dependency_engine.compute_context(candles)
+    return ctx.series
 
 
 # ---------------------------------------------------------------------------

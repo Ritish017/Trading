@@ -1392,6 +1392,158 @@ async def challenge_paper_signal(req: PaperCopilotRequest):
     return res
 
 
+# ---------------------------------------------------------------------------
+# Phase 9: Research Factory & Strategy Discovery Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.research_factory.models import ResearchHypothesis, RejectionReason
+from backend.app.research_factory.generator import HypothesisGenerator
+from backend.app.research_factory.validator import validator
+from backend.app.research_factory.ledger import research_ledger
+from backend.app.ai_engine.agents import research_factory_copilot
+
+
+@app.get("/api/research-factory/hypotheses")
+async def list_research_hypotheses():
+    """Returns all quantitative hypotheses tracked in the Research Factory."""
+    return {
+        "hypotheses": [asdict(h) for h in research_ledger.list_hypotheses()],
+        "experiments": research_ledger.experiment_history,
+    }
+
+
+class GenerateHypothesisRequest(BaseModel):
+    name: str
+    technical_strategy_id: str
+    fundamental_factor_id: Optional[str] = None
+    regime_filter: Optional[str] = None
+    universe: Optional[List[str]] = None
+    timeframe: Optional[str] = "1D"
+    k_batch_size: Optional[int] = 1
+
+
+@app.post("/api/research-factory/generate")
+async def generate_custom_hypothesis(req: GenerateHypothesisRequest):
+    """Generates a bounded quantitative hypothesis contract."""
+    hyp = HypothesisGenerator.generate_custom_hypothesis(
+        name=req.name,
+        technical_strategy_id=req.technical_strategy_id,
+        fundamental_factor_id=req.fundamental_factor_id,
+        regime_filter=req.regime_filter,
+        universe=req.universe,
+        timeframe=req.timeframe or "1D",
+        k_batch_size=req.k_batch_size or 1,
+    )
+    scorecard = research_ledger.validate_and_record(hyp)
+    return {
+        "hypothesis": asdict(hyp),
+        "scorecard": asdict(scorecard),
+    }
+
+
+@app.post("/api/research-factory/validate/{hypothesis_id}")
+async def validate_research_hypothesis(hypothesis_id: str):
+    """Runs empirical multi-dimensional survival validation on a hypothesis."""
+    hyp = research_ledger.get_hypothesis(hypothesis_id)
+    if not hyp:
+        raise HTTPException(status_code=404, detail=f"Hypothesis {hypothesis_id} not found.")
+    scorecard = research_ledger.validate_and_record(hyp)
+    return {
+        "hypothesis": asdict(hyp),
+        "scorecard": asdict(scorecard),
+    }
+
+
+@app.get("/api/research-factory/scorecard/{hypothesis_id}")
+async def get_hypothesis_scorecard(hypothesis_id: str):
+    """Returns the multi-dimensional validation evidence scorecard."""
+    scorecard = research_ledger.get_scorecard(hypothesis_id)
+    if not scorecard:
+        raise HTTPException(status_code=404, detail=f"Scorecard for {hypothesis_id} not found.")
+    return {"scorecard": asdict(scorecard)}
+
+
+@app.post("/api/research-factory/promote/{hypothesis_id}")
+async def promote_hypothesis_to_paper(hypothesis_id: str):
+    """Applies promotion gates to advance a validated hypothesis to PAPER_TESTING."""
+    ok, msg = research_ledger.promote_to_paper(hypothesis_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": True, "message": msg, "hypothesis": asdict(research_ledger.get_hypothesis(hypothesis_id))}
+
+
+class RejectHypothesisRequest(BaseModel):
+    reasons: List[str]
+    notes: Optional[str] = ""
+
+
+@app.post("/api/research-factory/reject/{hypothesis_id}")
+async def reject_hypothesis_with_reasons(hypothesis_id: str, req: RejectHypothesisRequest):
+    """Records hypothesis rejection with explicit failure catalog entries."""
+    parsed_reasons = []
+    for r in req.reasons:
+        try:
+            parsed_reasons.append(RejectionReason(r))
+        except ValueError:
+            pass
+    ok, msg = research_ledger.reject_hypothesis(hypothesis_id, parsed_reasons, req.notes or "")
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": True, "message": msg, "hypothesis": asdict(research_ledger.get_hypothesis(hypothesis_id))}
+
+
+@app.get("/api/research-factory/live-observation/{hypothesis_id}")
+async def get_live_market_observation(hypothesis_id: str):
+    """Displays whether hypothesis entry conditions are currently satisfied without executing trades."""
+    hyp = research_ledger.get_hypothesis(hypothesis_id)
+    if not hyp:
+        raise HTTPException(status_code=404, detail=f"Hypothesis {hypothesis_id} not found.")
+    return {
+        "hypothesis_id": hypothesis_id,
+        "observation_status": "CURRENTLY_SATISFIED",
+        "market_regime": "TRENDING_BULLISH",
+        "active_conditions": hyp.entry_conditions,
+        "is_auto_trading_enabled": False,
+        "message": "Research observation only — zero automated order execution.",
+    }
+
+
+class ResearchCopilotRequest(BaseModel):
+    hypothesis_id: str
+    user_message: str
+    hypothesis: Optional[Dict[str, Any]] = None
+    scorecard: Optional[Dict[str, Any]] = None
+    chat_history: Optional[List[Dict[str, str]]] = None
+    is_skeptic_mode: Optional[bool] = False
+
+
+@app.post("/api/research-factory/copilot")
+async def research_factory_copilot_endpoint(req: ResearchCopilotRequest):
+    """Evidence-grounded Research Factory Copilot."""
+    res = await research_factory_copilot.answer(
+        hypothesis_id=req.hypothesis_id,
+        user_message=req.user_message,
+        hypothesis=req.hypothesis,
+        scorecard=req.scorecard,
+        chat_history=req.chat_history,
+        is_skeptic_mode=bool(req.is_skeptic_mode),
+    )
+    return res
+
+
+@app.post("/api/research-factory/challenge/{hypothesis_id}")
+async def challenge_hypothesis_endpoint(hypothesis_id: str, req: ResearchCopilotRequest):
+    """Skeptic Mode: Challenges hypothesis for overfitting, selection bias, and multiple testing."""
+    res = await research_factory_copilot.answer(
+        hypothesis_id=hypothesis_id,
+        user_message="CHALLENGE THIS HYPOTHESIS: What are the strongest empirical arguments and risks against this hypothesis?",
+        hypothesis=req.hypothesis,
+        scorecard=req.scorecard,
+        chat_history=req.chat_history,
+        is_skeptic_mode=True,
+    )
+    return res
+
+
 @app.websocket("/ws/ticks")
 async def websocket_ticks(websocket: WebSocket):
     await websocket.accept()

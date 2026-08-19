@@ -10,7 +10,8 @@ import {
   Sparkles,
   Zap,
   FlaskConical,
-  Building2
+  Building2,
+  Cpu
 } from 'lucide-react';
 
 export type ActivePage = 
@@ -22,7 +23,8 @@ export type ActivePage =
   | 'backtest'
   | 'learn'
   | 'strategylab'
-  | 'fundamentals';
+  | 'fundamentals'
+  | 'researchfactory';
 
 interface NavigationTabsProps {
   activePage: ActivePage;
@@ -107,6 +109,14 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
       badge: 'NEW',
       badgeColor: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
       color: 'text-emerald-400',
+    },
+    {
+      id: 'researchfactory' as ActivePage,
+      label: 'Research Factory',
+      icon: Cpu,
+      badge: 'PRO',
+      badgeColor: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
+      color: 'text-cyan-400',
     },
   ];
 

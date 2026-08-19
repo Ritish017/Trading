@@ -857,3 +857,166 @@ Answer concisely, citing exact evidence and numbers:"""
 paper_copilot_agent = PaperCopilotAgent()
 
 
+class ResearchFactoryCopilotAgent:
+    """
+    Evidence-grounded Research Factory Copilot.
+    Interrogates research hypotheses, out-of-sample stability, cross-symbol generalization,
+    cost resilience, parameter surfaces, and structured failure reasons.
+    Supports Skeptic Mode ('CHALLENGE THIS HYPOTHESIS') to ruthlessly probe for overfitting and data snooping.
+    """
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+
+    async def answer(
+        self,
+        hypothesis_id: str,
+        user_message: str,
+        hypothesis: Optional[Dict[str, Any]] = None,
+        scorecard: Optional[Dict[str, Any]] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        is_skeptic_mode: bool = False,
+    ) -> Dict[str, Any]:
+        evidence_block = self._build_evidence_block(hypothesis_id, hypothesis, scorecard)
+
+        if not self.client:
+            if is_skeptic_mode:
+                return self._build_deterministic_skeptic_critique(hypothesis_id, hypothesis, scorecard)
+            return self._build_deterministic_summary(hypothesis_id, hypothesis, scorecard)
+
+        history_str = ""
+        if chat_history:
+            history_str = "\nPREVIOUS CONVERSATION:\n" + "\n".join(
+                f"{h.get('role', 'user').upper()}: {h.get('text', '')}"
+                for h in chat_history[-6:]
+            )
+
+        skeptic_instructions = """
+SKEPTIC MODE ACTIVE ("CHALLENGE THIS HYPOTHESIS"):
+- Act as an unforgiving academic journal reviewer and quantitative auditor.
+- Probe for selection bias, multiple-testing risk (high K), parameter cliff drop-offs, regime fragility, and cost drag.
+- Flag any missing or weak dimensions.
+- Conclude whether evidence is INSUFFICIENT or hypothesis is VULNERABLE.
+""" if is_skeptic_mode else ""
+
+        system_prompt = f"""You are the APEX Research Factory Copilot — an expert quantitative strategy discovery and empirical validation assistant.
+
+STRICT INVARIANTS:
+1. Base EVERY statement directly on the VERIFIED EVIDENCE below. Cite exact numerical values.
+2. Clearly distinguish between In-Sample fitting and Out-of-Sample realization.
+3. This is pure research validation — DO NOT provide trade recommendations or guarantee returns.
+{skeptic_instructions}
+
+VERIFIED HYPOTHESIS EVIDENCE FOR {hypothesis_id}:
+{evidence_block}
+{history_str}
+
+User Question: {user_message}
+
+Answer concisely, citing exact evidence and numbers:"""
+
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=system_prompt,
+            )
+            reply_text = response.text.strip() if response and response.text else (
+                "Evidence is available but the AI interpreter is temporarily offline."
+            )
+        except Exception as exc:
+            logger.warning("ResearchFactoryCopilotAgent Gemini call failed: %s", exc)
+            reply_text = "AI interpreter temporarily unavailable — please review validation scorecard directly."
+
+        return {"reply": reply_text, "evidence_cited": ["Validation Scorecard", "OOS Walk-Forward", "Regime Stress"]}
+
+    def _build_evidence_block(
+        self,
+        hypothesis_id: str,
+        hypothesis: Optional[Dict[str, Any]],
+        scorecard: Optional[Dict[str, Any]],
+    ) -> str:
+        lines = [f"=== RESEARCH HYPOTHESIS EVIDENCE: {hypothesis_id} ==="]
+        def _g(o, k, d=None):
+            return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+
+        if hypothesis:
+            lines.append(f"Name: {_g(hypothesis, 'name')}")
+            lines.append(f"Category: {_g(hypothesis, 'category')}, Status: {_g(hypothesis, 'status')}")
+            lines.append(f"Universe: {', '.join(_g(hypothesis, 'universe', []))}")
+            lines.append(f"Technical: {_g(hypothesis, 'technical_dependencies')}, Fundamental: {_g(hypothesis, 'fundamental_dependencies')}")
+
+        if scorecard:
+            oos = _g(scorecard, "oos_result", {})
+            lines.append(f"\nOOS Walk-Forward: IS Sharpe={_g(oos, 'is_sharpe')}, OOS Sharpe={_g(oos, 'oos_sharpe')}, Degradation={_g(oos, 'oos_degradation_pct')}%")
+            cross = _g(scorecard, "cross_symbol_result", {})
+            lines.append(f"Cross-Symbol: Median Return={_g(cross, 'median_return_pct')}%, IQR={_g(cross, 'iqr_return_pct')}%, Winning Stocks={_g(cross, 'winning_symbols_count')}")
+            cost = _g(scorecard, "cost_result", {})
+            lines.append(f"Cost Stress: Zero Friction={_g(cost, 'zero_friction_cagr')}%, Normal={_g(cost, 'normal_friction_cagr')}%, Drag={_g(cost, 'cost_drag_pct')}%")
+            param = _g(scorecard, "parameter_result", {})
+            lines.append(f"Parameter Neighborhood: {_g(param, 'plateau_stability')}")
+            lines.append(f"Multiple Testing K: {_g(scorecard, 'multiple_testing_k')} (Risk: {_g(scorecard, 'multiple_testing_risk')})")
+            lines.append(f"Overall Recommendation: {_g(scorecard, 'overall_recommendation')}")
+
+        return "\n".join(lines)
+
+    def _build_deterministic_summary(
+        self,
+        hypothesis_id: str,
+        hypothesis: Optional[Dict[str, Any]],
+        scorecard: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        def _g(o, k, d=None):
+            return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+        name = _g(hypothesis or {}, "name", hypothesis_id)
+        rec = _g(scorecard or {}, "overall_recommendation", "FURTHER_TESTING_REQUIRED")
+        oos = _g(scorecard or {}, "oos_result", {})
+        reply = (
+            f"**Validation Summary for {name}:**\n\n"
+            f"• **Recommendation:** `{rec}`\n"
+            f"• **OOS Sharpe Ratio:** {_g(oos, 'oos_sharpe', 'N/A')} (Degradation: {_g(oos, 'oos_degradation_pct', 'N/A')}%)\n"
+            f"• **Cross-Symbol Median:** {_g(_g(scorecard or {}, 'cross_symbol_result', {}), 'median_return_pct', 'N/A')}%\n"
+            f"• **Cost Drag:** {_g(_g(scorecard or {}, 'cost_result', {}), 'cost_drag_pct', 'N/A')}%\n"
+            f"• **Multiple Testing Factor (K):** {_g(scorecard or {}, 'multiple_testing_k', 1)}\n\n"
+            f"*Based on multi-dimensional empirical walk-forward and stress testing.*"
+        )
+        return {"reply": reply, "evidence_cited": ["Validation Scorecard", "OOS Evidence"]}
+
+    def _build_deterministic_skeptic_critique(
+        self,
+        hypothesis_id: str,
+        hypothesis: Optional[Dict[str, Any]],
+        scorecard: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        critiques = []
+        def _g(o, k, d=None):
+            return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+
+        if scorecard:
+            oos = _g(scorecard, "oos_result", {})
+            if _g(oos, "oos_degradation_pct", 0) > 30.0:
+                critiques.append(f"• **Out-of-Sample Decay**: Performance degraded by {_g(oos, 'oos_degradation_pct')}% in OOS validation.")
+            cross = _g(scorecard, "cross_symbol_result", {})
+            if _g(cross, "losing_symbols_count", 0) > 0:
+                critiques.append(f"• **Symbol Dependency**: Hypothesis failed on {_g(cross, 'losing_symbols_count')} symbols in universe.")
+            cost = _g(scorecard, "cost_result", {})
+            if _g(cost, "cost_drag_pct", 0) > 20.0:
+                critiques.append(f"• **Friction Vulnerability**: Frictions consume {_g(cost, 'cost_drag_pct')}% of gross alpha.")
+            if _g(scorecard, "multiple_testing_risk") == "ELEVATED":
+                critiques.append(f"• **Multiple Testing Risk**: Tested K={_g(scorecard, 'multiple_testing_k')} configurations; elevated risk of selection bias.")
+
+        if not critiques:
+            critiques.append("• Audit regime shifts and test against high volatility regimes before promoting to paper trading.")
+
+        reply = (
+            f"**Quantitative Skeptic Critique for {hypothesis_id}:**\n\n"
+            + "\n".join(critiques)
+            + "\n\n*Note: High historical in-sample return without out-of-sample and cross-symbol generalization indicates data snooping.*"
+        )
+        return {"reply": reply, "evidence_cited": ["Skeptic Audit", "OOS Degradation", "Cross-Symbol Test"]}
+
+
+research_factory_copilot = ResearchFactoryCopilotAgent()
+
+
+

@@ -242,12 +242,49 @@ class StrategyCopilotAgent:
         evaluation: Optional[Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
         research_summary: Optional[Dict[str, Any]] = None,
+        backtest_result: Optional[Dict[str, Any]] = None,
+        scorecard: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Format the evaluation result, research summary, and market context as a terse evidence block."""
+        """Format the evaluation result, research summary, backtest results, and market context as a terse evidence block."""
         lines = []
+
+        if backtest_result:
+            wf = backtest_result.get("walk_forward", {})
+            cs = backtest_result.get("cost_sensitivity", {})
+            lines.extend([
+                f"=== BACKTEST EXECUTION & WALK-FORWARD EVIDENCE ===",
+                f"Strategy: {backtest_result.get('strategy_id', 'Unknown')} (v{backtest_result.get('strategy_version', '1.0.0')})",
+                f"Symbol: {backtest_result.get('symbol', 'UNKNOWN')}, Timeframe: {backtest_result.get('timeframe', '5m')}",
+                f"Total Trades: {backtest_result.get('total_trades', 0)} (Win Rate: {backtest_result.get('win_rate_pct', 0)}%)",
+                f"Net Profit: ₹{backtest_result.get('netProfit', 0)} | Total Net Return: {backtest_result.get('total_return_pct', 0)}% (Gross: {backtest_result.get('grossReturnPct', 0)}%)",
+                f"Sharpe Ratio: {backtest_result.get('sharpe_ratio', 0)} | CAGR: {backtest_result.get('cagr', 0)}% | Max Drawdown: {backtest_result.get('max_drawdown_pct', 0)}%",
+                f"Profit Factor: {backtest_result.get('profit_factor', 0)} | Avg Trade: {backtest_result.get('avg_trade_return_pct', 0)}% (Median: {backtest_result.get('median_trade_return_pct', 0)}%)",
+                f"Friction Costs: ₹{backtest_result.get('total_friction_costs', 0)} (Brokerage: ₹{backtest_result.get('total_fees', 0)}, Slippage: ₹{backtest_result.get('total_slippage', 0)})",
+                f"Walk-Forward (70% IS / 30% OOS):",
+                f"  • In-Sample: Return={wf.get('in_sample_return_pct')}%, Trades={wf.get('in_sample_trades')}, WinRate={wf.get('in_sample_win_rate')}%",
+                f"  • Out-of-Sample: Return={wf.get('out_of_sample_return_pct')}%, Trades={wf.get('out_of_sample_trades')}, WinRate={wf.get('out_of_sample_win_rate')}%",
+                f"  • Overfitting Classification: {wf.get('overfitting_status', 'N/A')}",
+                f"Cost Sensitivity Scenarios:",
+                f"  • Zero Friction Return: {cs.get('zero_friction_return_pct')}%",
+                f"  • Configured Friction: {cs.get('configured_friction_return_pct')}%",
+                f"  • High Friction Return: {cs.get('high_friction_return_pct')}% (Cost Drag: {cs.get('cost_drag_pct')}%)",
+            ])
+
+        if scorecard:
+            lines.extend([
+                "",
+                f"=== RESEARCH SCORECARD ===",
+                f"Overall Research Status: {scorecard.get('overall_status', 'N/A')}",
+                f"Sample Size Rating: {scorecard.get('sample_size_rating', {}).get('rating', 'N/A')} ({scorecard.get('sample_size_rating', {}).get('evidence', '')})",
+                f"OOS Stability: {scorecard.get('oos_stability_rating', {}).get('rating', 'N/A')} ({scorecard.get('oos_stability_rating', {}).get('evidence', '')})",
+                f"Drawdown Risk: {scorecard.get('drawdown_risk_rating', {}).get('rating', 'N/A')} ({scorecard.get('drawdown_risk_rating', {}).get('evidence', '')})",
+                f"Regime Coverage: {scorecard.get('regime_coverage_rating', {}).get('rating', 'N/A')} ({scorecard.get('regime_coverage_rating', {}).get('evidence', '')})",
+                f"Friction Resilience: {scorecard.get('friction_resilience_rating', {}).get('rating', 'N/A')} ({scorecard.get('friction_resilience_rating', {}).get('evidence', '')})",
+            ])
 
         if research_summary:
             lines.extend([
+                "",
                 f"=== HISTORICAL RESEARCH EVIDENCE ===",
                 f"Strategy: {research_summary.get('strategy_name', 'Unknown')} ({research_summary.get('strategy_id', '')})",
                 f"Category: {research_summary.get('category', 'Unknown')}",
@@ -269,30 +306,6 @@ class StrategyCopilotAgent:
                     f"Positive Return Freq={h_data.get('positive_return_pct')}%, "
                     f"Median MAE={h_data.get('median_mae_pct')}%, Median MFE={h_data.get('median_mfe_pct')}%"
                 )
-
-            reg_bd = research_summary.get("regime_breakdown") or {}
-            if reg_bd:
-                lines.append("")
-                lines.append("PERFORMANCE BY MARKET REGIME (5-Candle Horizon):")
-                for reg_k, reg_v in reg_bd.items():
-                    is_low = " [LOW SAMPLE]" if reg_v.get("is_low_sample") else ""
-                    lines.append(
-                        f"  • {reg_k}: N={reg_v.get('activations')}{is_low}, "
-                        f"Median Return={reg_v.get('median_5candle_return')}%, "
-                        f"Positive Freq={reg_v.get('positive_frequency_pct')}%"
-                    )
-
-            conf_bd = research_summary.get("confluence_breakdown") or {}
-            if conf_bd:
-                lines.append("")
-                lines.append("CONFLUENCE BREAKDOWN:")
-                for conf_k, conf_v in conf_bd.items():
-                    is_low = " [LOW SAMPLE]" if conf_v.get("is_low_sample") else ""
-                    lines.append(
-                        f"  • {conf_k}: N={conf_v.get('activations')}{is_low}, "
-                        f"Median Return={conf_v.get('median_5candle_return')}%, "
-                        f"Positive Freq={conf_v.get('positive_frequency_pct')}%"
-                    )
 
         if evaluation:
             lines.extend([
@@ -322,12 +335,6 @@ class StrategyCopilotAgent:
                         f"  [{rule.get('outcome', 'UNKNOWN')}] {rule.get('label', '')} "
                         f"(value: {rule.get('actual_value_label', 'UNAVAILABLE')})"
                     )
-            fv = evaluation.get("feature_vector", {})
-            if fv:
-                lines.append("")
-                lines.append("COMPUTED INDICATORS (verified, non-fabricated):")
-                for k, v in list(fv.items())[:14]:
-                    lines.append(f"  {k}: {v}")
 
         if context:
             if context.get("market_regime"):
@@ -351,13 +358,42 @@ class StrategyCopilotAgent:
         chat_history: Optional[List[Dict[str, str]]] = None,
         context: Optional[Dict[str, Any]] = None,
         research_summary: Optional[Dict[str, Any]] = None,
+        backtest_result: Optional[Dict[str, Any]] = None,
+        scorecard: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Answer a user question about strategy evaluation or historical research with full multi-turn context.
+        Answer a user question about strategy evaluation, historical research, or backtests with full multi-turn context.
         """
-        evidence_block = self._build_evidence_block(evaluation, context, research_summary)
+        evidence_block = self._build_evidence_block(
+            evaluation=evaluation,
+            context=context,
+            research_summary=research_summary,
+            backtest_result=backtest_result,
+            scorecard=scorecard,
+        )
 
         if not self.client:
+            if backtest_result:
+                s_name = backtest_result.get('strategy_id', 'Strategy')
+                tot_trades = backtest_result.get('total_trades', 0)
+                tot_ret = backtest_result.get('total_return_pct', 0.0)
+                win_rt = backtest_result.get('win_rate_pct', 0.0)
+                sharpe = backtest_result.get('sharpe_ratio', 0.0)
+                max_dd = backtest_result.get('max_drawdown_pct', 0.0)
+                wf = backtest_result.get('walk_forward', {})
+                oos_ret = wf.get('out_of_sample_return_pct', 0.0)
+                ovf = wf.get('overfitting_status', 'N/A')
+                reply = (
+                    f"**{s_name}** Backtest on **{symbol}** recorded **{tot_trades} completed trades** with a **{win_rt}% win rate**.\n\n"
+                    f"**Key Quantitative Performance:**\n"
+                    f"• Total Net Return: **{tot_ret}%**\n"
+                    f"• Sharpe Ratio: **{sharpe}** | Max Drawdown: **{max_dd}%**\n"
+                    f"• In-Sample Return: **{wf.get('in_sample_return_pct')}%** | Out-of-Sample Return: **{oos_ret}%**\n"
+                    f"• Overfitting Assessment: **{ovf}**\n\n"
+                    f"*(Note: Simulated execution incorporates ₹{backtest_result.get('total_fees', 0)} brokerage and ₹{backtest_result.get('total_slippage', 0)} slippage.)*"
+                )
+                return {"reply": reply, "evidence_cited": ["Total Trades", "Net Return", "Sharpe Ratio", "Walk-Forward OOS"]}
+
             if research_summary:
                 s_name = research_summary.get('strategy_name', 'Strategy')
                 tot_act = research_summary.get('total_activations', 0)
@@ -401,15 +437,15 @@ class StrategyCopilotAgent:
                 for h in chat_history[-6:]
             )
 
-        system_prompt = f"""You are the APEX Strategy Copilot — an expert quantitative strategy observatory assistant.
+        system_prompt = f"""You are the APEX Strategy Copilot — an expert quantitative strategy observatory and backtesting assistant.
 
 STRICT INVARIANTS:
 1. Base EVERY statement directly on the VERIFIED EVIDENCE below. Cite exact numerical values.
 2. CANNOT invent, approximate, or extrapolate missing metrics. If an indicator is UNAVAILABLE, explicitly state: "Data unavailable".
 3. CANNOT alter the strategy state or convert an ACTIVE condition into a "BUY NOW" command.
 4. If Data Freshness is STALE or market is CLOSED, frame the analysis as: "Based on the last available candle..." and explicitly state that it reflects historical data.
-5. If asked for trade recommendations or "Should I buy?", clarify that Strategy Lab provides deterministic rule verification for research, not trading or execution advice.
-6. Explain the mathematics, invalidation triggers, and comparisons factually and concisely.
+5. If asked for trade recommendations or "Should I buy?", clarify that Strategy Lab provides deterministic rule verification and simulation for research, not financial advice.
+6. Distinguish between historical research forward observations (pre-friction) and backtested performance (post-friction).
 
 VERIFIED EVIDENCE FOR {symbol}:
 {evidence_block}
@@ -429,15 +465,7 @@ Answer concisely, citing exact evidence and numbers:"""
             )
         except Exception as exc:
             logger.warning("StrategyCopilotAgent Gemini call failed: %s", exc)
-            reply_text = (
-                f"Strategy state is {evaluation.get('state', 'UNKNOWN')} "
-                f"({evaluation.get('entry_rules_passing', 0)}/{evaluation.get('entry_rules_total', 0)} "
-                f"entry conditions met). AI interpreter temporarily unavailable — please review the rule checklist directly."
-            )
+            reply_text = "AI interpreter temporarily unavailable — please review the quantitative scorecard directly."
 
-        evidence_cited = [
-            r.get("label", "") for r in evaluation.get("rule_evaluations", [])
-            if r.get("outcome") in ("PASS", "FAIL") and r.get("actual_value_label", "") != "UNAVAILABLE"
-        ]
-
+        evidence_cited = ["Verified Backtest Evidence", "Quantitative Metrics"]
         return {"reply": reply_text, "evidence_cited": evidence_cited}

@@ -614,11 +614,197 @@ async def research_strategies(symbol: str, req: StrategyResearchRequest):
         return summaries
 
 
+from backend.app.strategy_engine.validation_engine import (
+    strategy_validation_engine,
+    StrategyHypothesis,
+)
+
+
+class StrategyBacktestRequest(BaseModel):
+    candles: Optional[List[Dict[str, Any]]] = None
+    strategy_id: str
+    timeframe: Optional[str] = "5m"
+    initial_capital: Optional[float] = 1000000.0
+    position_size_value: Optional[float] = 0.10
+    target_atr_multiple: Optional[float] = 2.0
+    stop_atr_multiple: Optional[float] = 1.0
+    slippage_pct: Optional[float] = 0.05
+    brokerage_per_trade: Optional[float] = 20.0
+    walk_forward_split: Optional[float] = 0.70
+
+
+@app.post("/api/strategies/backtest/{symbol}")
+async def backtest_strategy(symbol: str, req: StrategyBacktestRequest):
+    """
+    Formal Event-Driven Backtest Simulation for a Strategy Hypothesis.
+    Enforces next-bar execution, realistic friction, IS/OOS walk-forward validation,
+    and trade-level evidence retention.
+    """
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 15:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DATA_UNAVAILABLE: Insufficient candle history for {symbol} ({len(candles) if candles else 0} candles).",
+        )
+
+    hyp = StrategyHypothesis(
+        strategy_id=req.strategy_id,
+        symbol=symbol,
+        timeframe=tf,
+        initial_capital=req.initial_capital or 1000000.0,
+        position_size_value=req.position_size_value or 0.10,
+        target_atr_multiple=req.target_atr_multiple or 2.0,
+        stop_atr_multiple=req.stop_atr_multiple or 1.0,
+        slippage_pct=req.slippage_pct if req.slippage_pct is not None else 0.05,
+        brokerage_per_trade=req.brokerage_per_trade if req.brokerage_per_trade is not None else 20.0,
+        walk_forward_split=req.walk_forward_split or 0.70,
+    )
+
+    result = strategy_validation_engine.validate_strategy(
+        candles=candles,
+        strategy_id=req.strategy_id,
+        symbol=symbol,
+        timeframe=tf,
+        hypothesis=hyp,
+    )
+    return result
+
+
+class MatrixRequest(BaseModel):
+    candles: Optional[List[Dict[str, Any]]] = None
+    timeframe: Optional[str] = "5m"
+    strategy_ids: Optional[List[str]] = None
+
+
+@app.post("/api/strategies/matrix/{symbol}")
+async def regime_matrix(symbol: str, req: MatrixRequest):
+    """
+    Computes Market Regime x Strategy Performance Matrix across canonical strategies.
+    """
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 15:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DATA_UNAVAILABLE: Insufficient candles for regime matrix on {symbol}.",
+        )
+
+    result = strategy_validation_engine.compute_regime_matrix(
+        candles=candles,
+        symbol=symbol,
+        timeframe=tf,
+        strategy_ids=req.strategy_ids,
+    )
+    return result
+
+
+class ConfluenceBacktestRequest(BaseModel):
+    candles: Optional[List[Dict[str, Any]]] = None
+    strategy_ids: List[str]
+    timeframe: Optional[str] = "5m"
+
+
+@app.post("/api/strategies/confluence-backtest/{symbol}")
+async def confluence_backtest(symbol: str, req: ConfluenceBacktestRequest):
+    """
+    Executes multi-strategy logical AND confluence backtest.
+    """
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 15:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DATA_UNAVAILABLE: Insufficient candles for confluence backtest on {symbol}.",
+        )
+
+    result = strategy_validation_engine.compute_confluence_backtest(
+        candles=candles,
+        strategy_ids=req.strategy_ids,
+        symbol=symbol,
+        timeframe=tf,
+    )
+    return result
+
+
+class CorrelationRequest(BaseModel):
+    candles: Optional[List[Dict[str, Any]]] = None
+    timeframe: Optional[str] = "5m"
+    strategy_ids: Optional[List[str]] = None
+
+
+@app.post("/api/strategies/correlation/{symbol}")
+async def strategy_correlation(symbol: str, req: CorrelationRequest):
+    """
+    Computes pairwise strategy signal correlation and redundancy.
+    """
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 15:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DATA_UNAVAILABLE: Insufficient candles for correlation analysis on {symbol}.",
+        )
+
+    result = strategy_validation_engine.compute_strategy_correlation(
+        candles=candles,
+        symbol=symbol,
+        timeframe=tf,
+        strategy_ids=req.strategy_ids,
+    )
+    return result
+
+
+class ScorecardRequest(BaseModel):
+    candles: Optional[List[Dict[str, Any]]] = None
+    strategy_id: str
+    timeframe: Optional[str] = "5m"
+
+
+@app.post("/api/strategies/scorecard/{symbol}")
+async def strategy_scorecard(symbol: str, req: ScorecardRequest):
+    """
+    Generates multi-dimensional quantitative research scorecard.
+    """
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 15:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DATA_UNAVAILABLE: Insufficient candles for scorecard on {symbol}.",
+        )
+
+    scorecard = strategy_validation_engine.generate_scorecard(
+        candles=candles,
+        strategy_id=req.strategy_id,
+        symbol=symbol,
+        timeframe=tf,
+    )
+    return scorecard
+
+
 class StrategyCopilotRequest(BaseModel):
     symbol: str
     strategy_id: str
     evaluation_result: Optional[Dict[str, Any]] = None  # Serialised StrategyEvaluationResult
     research_summary: Optional[Dict[str, Any]] = None   # Serialised StrategyResearchSummary
+    backtest_result: Optional[Dict[str, Any]] = None    # Serialised Backtest Result
+    scorecard: Optional[Dict[str, Any]] = None          # Serialised Scorecard
     user_message: str
     chat_history: Optional[List[Dict[str, str]]] = None
     context: Optional[Dict[str, Any]] = None
@@ -628,7 +814,7 @@ class StrategyCopilotRequest(BaseModel):
 async def strategy_copilot(req: StrategyCopilotRequest):
     """
     Evidence-grounded Strategy Copilot with conversational multi-turn context.
-    AI interprets the pre-computed evaluation result, research outcomes, and market regime.
+    AI interprets the pre-computed evaluation result, research outcomes, backtest results, and market regime.
     """
     if not req.user_message.strip():
         raise HTTPException(status_code=400, detail="user_message cannot be empty")
@@ -639,6 +825,8 @@ async def strategy_copilot(req: StrategyCopilotRequest):
         chat_history=req.chat_history,
         context=req.context,
         research_summary=req.research_summary,
+        backtest_result=req.backtest_result,
+        scorecard=req.scorecard,
     )
     return result
 

@@ -8,6 +8,7 @@ from backend.app.strategy_engine.evaluator import (
     compute_series_indicators,
     compute_strategy_confluence,
     evaluate_strategies_observatory,
+    _evaluate_freshness,
 )
 from backend.app.ai_engine.agents import StrategyCopilotAgent
 
@@ -47,6 +48,35 @@ def test_evaluator_sufficient_candles():
         assert res.candles_used == 60
         assert res.state in [StrategyState.ACTIVE, StrategyState.PARTIAL, StrategyState.INACTIVE, StrategyState.CONFLICTED]
 
+def test_freshness_separation_stale_data():
+    """
+    Ensures that stale data produces data_freshness='STALE' while the strategy
+    state remains a purely mathematical outcome (e.g. ACTIVE, INACTIVE, etc.),
+    verifying strict separation of data quality and mathematical rule evaluation.
+    """
+    seven_hours_ago = time.time() - (7 * 3600 + 12 * 60)
+    candles = [
+        {
+            "open": 100.0 + (i * 0.5),
+            "high": 101.0 + (i * 0.5),
+            "low": 99.5 + (i * 0.5),
+            "close": 100.8 + (i * 0.5),
+            "volume": 5000 + (i * 50),
+            "timestamp": seven_hours_ago + (i * 60),
+        }
+        for i in range(60)
+    ]
+    freshness, age = _evaluate_freshness(candles, is_live_feed=False)
+    assert freshness == "STALE"
+    assert age > 3600
+
+    results = evaluate_all_strategies(candles, is_live_feed=False)
+    for res in results:
+        assert res.data_freshness == "STALE"
+        # Strategy state is mathematical, NOT 'STALE'
+        assert res.state in [StrategyState.ACTIVE, StrategyState.PARTIAL, StrategyState.INACTIVE, StrategyState.CONFLICTED, StrategyState.UNAVAILABLE]
+        assert res.state.value != "STALE"
+
 def test_series_indicators_computation():
     now = time.time()
     candles = [
@@ -83,13 +113,15 @@ def test_observatory_payload_structure():
         }
         for i in range(60)
     ]
-    obs = evaluate_strategies_observatory(candles, is_live_feed=True)
+    obs = evaluate_strategies_observatory(candles, is_live_feed=True, timeframe="15m", provider="UPSTOX")
     assert "market_regime" in obs
     assert "confluence" in obs
     assert "strategies" in obs
     assert "chart_indicators" in obs
     assert "candles" in obs
     assert obs["data_freshness"] == "LIVE"
+    assert obs["timeframe"] == "15m"
+    assert obs["provider"] == "UPSTOX"
     assert len(obs["strategies"]) == len(STRATEGY_REGISTRY)
     assert len(obs["candles"]) == 60
 
@@ -112,6 +144,26 @@ def test_confluence_calculation():
     assert "alignment_score_pct" in confluence
     assert "bullish_confluence" in confluence
     assert "reversal_confluence" in confluence
+
+def test_historical_activations_and_events():
+    now = time.time()
+    candles = [
+        {
+            "open": 100.0 + (i * 0.4),
+            "high": 101.0 + (i * 0.4),
+            "low": 99.5 + (i * 0.4),
+            "close": 100.8 + (i * 0.4),
+            "volume": 5000 + i * 50,
+            "timestamp": now - (70 - i) * 60,
+        }
+        for i in range(70)
+    ]
+    results = evaluate_all_strategies(candles, is_live_feed=True)
+    ema_strat = next(r for r in results if r.strategy_id == "EMA_GOLDEN_CROSS")
+    assert len(ema_strat.historical_states) > 0
+    # Every historical state has a valid mathematical state
+    for hs in ema_strat.historical_states:
+        assert hs["state"] in ["ACTIVE", "PARTIAL", "INACTIVE", "CONFLICTED", "UNAVAILABLE"]
 
 @pytest.mark.asyncio
 async def test_copilot_evidence_grounded_fallback():

@@ -525,6 +525,7 @@ class StrategyEvaluateRequest(BaseModel):
     candles: Optional[List[Dict[str, Any]]] = None
     is_live_feed: bool = False
     strategy_ids: Optional[List[str]] = None
+    timeframe: Optional[str] = "5m"
 
 
 @app.post("/api/strategies/evaluate/{symbol}")
@@ -536,13 +537,15 @@ async def evaluate_strategies(symbol: str, req: StrategyEvaluateRequest):
     - canonical series indicators for chart overlays (EMA, VWAP, BB, ATR, MACD, RVOL)
     - market regime classification
     - confluence and conflict metrics
-    - verified data freshness and age
+    - verified data freshness and age with explicit provider and timeframe
     """
     candles = req.candles
     is_live = req.is_live_feed
+    tf = req.timeframe or "5m"
+    active_prov = getattr(market_data_service.active_provider, "provider_name", "UPSTOX")
 
     if not candles:
-        candles = await market_data_service.get_candles(symbol, "5m", 100)
+        candles = await market_data_service.get_candles(symbol, tf, 100)
         try:
             quote = await market_data_service.get_quote(symbol)
             freshness = evaluate_quote_freshness(quote)
@@ -554,6 +557,8 @@ async def evaluate_strategies(symbol: str, req: StrategyEvaluateRequest):
         candles=candles or [],
         is_live_feed=is_live,
         strategy_ids=req.strategy_ids,
+        timeframe=tf,
+        provider=active_prov,
     )
     return observatory
 

@@ -10,7 +10,8 @@ Rules
     False → FAIL
     None  → UNAVAILABLE (dependency value is None/NaN)
 - No fabricated values. Every condition tests a real computed indicator.
-- Adding new strategies: append to STRATEGY_REGISTRY only. Evaluator is decoupled.
+- Descriptions strictly follow quantitative rigor without unsupported claims
+  (no "guarantees", "predicts", "take profit", or "institutional accumulation").
 """
 
 from typing import Dict
@@ -47,7 +48,7 @@ VWAP_MOMENTUM = StrategyDefinition(
     category="Momentum",
     description=(
         "Long bias when price is above VWAP, EMA20 > EMA50 (trend aligned), "
-        "RSI(14) > 55 (momentum), and Relative Volume ≥ 1.2 (institutional participation)."
+        "RSI(14) > 55 (momentum zone), and Relative Volume ≥ 1.2 (above-average trading volume)."
     ),
     timeframe_hint="5m",
     min_candles=50,
@@ -72,7 +73,7 @@ VWAP_MOMENTUM = StrategyDefinition(
         ),
         StrategyRule(
             rule_id="volume_surge",
-            label="Relative Volume ≥ 1.2  (above-average activity)",
+            label="Relative Volume ≥ 1.2  (above-average volume)",
             dependency_keys=["rvol"],
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 1.2),
         ),
@@ -80,13 +81,13 @@ VWAP_MOMENTUM = StrategyDefinition(
     exit_rules=[
         StrategyRule(
             rule_id="price_below_ema20",
-            label="Price < EMA20  (trend breaking down)",
+            label="Price < EMA20  (trend breakdown — strategy exit condition)",
             dependency_keys=["close", "ema20"],
             condition_fn=lambda fv: _cond(fv, "close", "ema20", fn=lambda c, e: c < e),
         ),
         StrategyRule(
             rule_id="rsi_weakness",
-            label="RSI(14) < 45  (momentum fading)",
+            label="RSI(14) < 45  (momentum fading — strategy exit condition)",
             dependency_keys=["rsi14"],
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r < 45.0),
         ),
@@ -104,7 +105,7 @@ EMA_GOLDEN_CROSS = StrategyDefinition(
     category="Trend Following",
     description=(
         "Classic trend-following setup: EMA20 crosses above EMA50 indicating "
-        "a shift to bullish momentum. RSI must confirm, not overbought (< 70)."
+        "a shift to bullish moving average alignment. RSI(14) < 70 confirms price is not overbought."
     ),
     timeframe_hint="15m",
     min_candles=55,
@@ -123,7 +124,7 @@ EMA_GOLDEN_CROSS = StrategyDefinition(
         ),
         StrategyRule(
             rule_id="rsi_not_overbought",
-            label="RSI(14) < 70  (not overbought)",
+            label="RSI(14) < 70  (not overbought threshold)",
             dependency_keys=["rsi14"],
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r < 70.0),
         ),
@@ -131,7 +132,7 @@ EMA_GOLDEN_CROSS = StrategyDefinition(
     exit_rules=[
         StrategyRule(
             rule_id="ema_death_cross",
-            label="EMA20 < EMA50  (death cross — exit signal)",
+            label="EMA20 < EMA50  (moving average reversal — strategy exit condition)",
             dependency_keys=["ema20", "ema50"],
             condition_fn=lambda fv: _cond(fv, "ema20", "ema50", fn=lambda a, b: a < b),
         ),
@@ -148,27 +149,27 @@ RSI_OVERSOLD_REVERSAL = StrategyDefinition(
     name="RSI Oversold Reversal",
     category="Mean-Reversion",
     description=(
-        "Counter-trend: price is below VWAP (oversold territory), RSI(14) < 35 "
-        "suggesting exhaustion, with a Relative Volume spike confirming the flush."
+        "Counter-trend setup: price is below VWAP, RSI(14) < 35 indicates an oversold condition, "
+        "and Relative Volume ≥ 1.5 indicates heightened liquidity during the move."
     ),
     timeframe_hint="5m",
     min_candles=30,
     entry_rules=[
         StrategyRule(
             rule_id="rsi_oversold",
-            label="RSI(14) < 35  (oversold — potential reversal zone)",
+            label="RSI(14) < 35  (oversold reversal zone)",
             dependency_keys=["rsi14"],
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r < 35.0),
         ),
         StrategyRule(
             rule_id="price_below_vwap",
-            label="Price < VWAP  (extended below fair value)",
+            label="Price < VWAP  (extended below session VWAP)",
             dependency_keys=["close", "vwap"],
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c < v),
         ),
         StrategyRule(
             rule_id="volume_flush",
-            label="Relative Volume ≥ 1.5  (capitulation volume)",
+            label="Relative Volume ≥ 1.5  (elevated volume condition)",
             dependency_keys=["rvol"],
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 1.5),
         ),
@@ -176,13 +177,13 @@ RSI_OVERSOLD_REVERSAL = StrategyDefinition(
     exit_rules=[
         StrategyRule(
             rule_id="rsi_recovered",
-            label="RSI(14) > 55  (momentum recovered — take profit)",
+            label="RSI(14) > 55  (momentum normalized — strategy exit condition)",
             dependency_keys=["rsi14"],
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 55.0),
         ),
         StrategyRule(
             rule_id="price_above_vwap",
-            label="Price > VWAP  (mean reversion complete)",
+            label="Price > VWAP  (mean reversion target — strategy exit condition)",
             dependency_keys=["close", "vwap"],
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c > v),
         ),
@@ -199,28 +200,27 @@ BOLLINGER_SQUEEZE = StrategyDefinition(
     name="Bollinger Band Squeeze",
     category="Breakout",
     description=(
-        "Identifies compression (price near Bollinger midline, bands contracting). "
-        "Entry when price breaks above upper band with momentum (RSI > 50). "
-        "ATR bandwidth proxy: price > bb_upper indicates expansion."
+        "Identifies volatility expansion: price crosses above the upper Bollinger Band (20, 2σ), "
+        "confirmed by RSI(14) > 50 and Relative Volume ≥ 1.3."
     ),
     timeframe_hint="15m",
     min_candles=30,
     entry_rules=[
         StrategyRule(
             rule_id="price_above_bb_upper",
-            label="Price > Bollinger Upper Band  (breakout from compression)",
+            label="Price > Bollinger Upper Band  (band expansion)",
             dependency_keys=["close", "bb_upper"],
             condition_fn=lambda fv: _cond(fv, "close", "bb_upper", fn=lambda c, b: c > b),
         ),
         StrategyRule(
             rule_id="rsi_expanding",
-            label="RSI(14) > 50  (momentum confirms breakout direction)",
+            label="RSI(14) > 50  (positive momentum confirmation)",
             dependency_keys=["rsi14"],
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 50.0),
         ),
         StrategyRule(
             rule_id="volume_confirmation",
-            label="Relative Volume ≥ 1.3  (volume confirms expansion)",
+            label="Relative Volume ≥ 1.3  (volume expansion confirmation)",
             dependency_keys=["rvol"],
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 1.3),
         ),
@@ -228,7 +228,7 @@ BOLLINGER_SQUEEZE = StrategyDefinition(
     exit_rules=[
         StrategyRule(
             rule_id="price_below_bb_middle",
-            label="Price < Bollinger Middle Band  (compression re-entry)",
+            label="Price < Bollinger Middle Band  (re-entry below midline — strategy exit condition)",
             dependency_keys=["close", "bb_middle"],
             condition_fn=lambda fv: _cond(fv, "close", "bb_middle", fn=lambda c, b: c < b),
         ),
@@ -245,8 +245,8 @@ MACD_CROSSOVER = StrategyDefinition(
     name="MACD Bullish Crossover",
     category="Momentum",
     description=(
-        "MACD line crosses above signal line (bullish crossover), histogram positive "
-        "and expanding. Price must remain above EMA50 (trend filter)."
+        "MACD line crosses above the signal line (12, 26, 9), with a positive histogram "
+        "and price positioned above EMA50 (trend filter)."
     ),
     timeframe_hint="15m",
     min_candles=40,
@@ -265,7 +265,7 @@ MACD_CROSSOVER = StrategyDefinition(
         ),
         StrategyRule(
             rule_id="price_above_ema50",
-            label="Price > EMA50  (longer-term trend intact)",
+            label="Price > EMA50  (trend filter intact)",
             dependency_keys=["close", "ema50"],
             condition_fn=lambda fv: _cond(fv, "close", "ema50", fn=lambda c, e: c > e),
         ),
@@ -273,7 +273,7 @@ MACD_CROSSOVER = StrategyDefinition(
     exit_rules=[
         StrategyRule(
             rule_id="macd_bearish_cross",
-            label="MACD Line < Signal Line  (bearish crossover — exit)",
+            label="MACD Line < Signal Line  (bearish crossover — strategy exit condition)",
             dependency_keys=["macd", "macd_signal"],
             condition_fn=lambda fv: _cond(fv, "macd", "macd_signal", fn=lambda m, s: m < s),
         ),
@@ -290,15 +290,15 @@ ORB_BREAKOUT = StrategyDefinition(
     name="Opening Range Breakout (ORB)",
     category="Breakout",
     description=(
-        "Price breaks above the VWAP (a proxy for the session value area) in the "
-        "first segment of the trading day, with RSI > 55 and Relative Volume ≥ 1.5."
+        "Price breaks above session VWAP during early session trading, "
+        "with RSI(14) > 55 and Relative Volume ≥ 1.5 confirming directional expansion."
     ),
     timeframe_hint="5m",
     min_candles=20,
     entry_rules=[
         StrategyRule(
             rule_id="price_above_vwap_orb",
-            label="Price > VWAP  (breakout above session fair value)",
+            label="Price > VWAP  (breakout above session reference level)",
             dependency_keys=["close", "vwap"],
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c > v),
         ),
@@ -310,7 +310,7 @@ ORB_BREAKOUT = StrategyDefinition(
         ),
         StrategyRule(
             rule_id="orb_volume",
-            label="Relative Volume ≥ 1.5  (institutional-grade opening volume)",
+            label="Relative Volume ≥ 1.5  (elevated session volume)",
             dependency_keys=["rvol"],
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 1.5),
         ),
@@ -318,7 +318,7 @@ ORB_BREAKOUT = StrategyDefinition(
     exit_rules=[
         StrategyRule(
             rule_id="price_back_below_vwap",
-            label="Price < VWAP  (breakout failed — exit)",
+            label="Price < VWAP  (breakout invalidation — strategy exit condition)",
             dependency_keys=["close", "vwap"],
             condition_fn=lambda fv: _cond(fv, "close", "vwap", fn=lambda c, v: c < v),
         ),
@@ -328,16 +328,16 @@ ORB_BREAKOUT = StrategyDefinition(
 
 
 # ---------------------------------------------------------------------------
-# Strategy 7 — Supertrend Proxy (ATR-based)
+# Strategy 7 — Supertrend ATR Proxy
 # ---------------------------------------------------------------------------
 SUPERTREND_PROXY = StrategyDefinition(
     strategy_id="SUPERTREND_PROXY",
     name="Supertrend ATR Proxy",
     category="Trend Following",
     description=(
-        "Uses ATR as a volatility proxy for a Supertrend-equivalent filter. "
-        "Price must be > EMA50 (trend) and > (VWAP - 1.5 × ATR/price) interpreted as "
-        "remaining above a dynamic support band. RSI > 50 confirms."
+        "This strategy uses an ATR-based trend and dynamic support approximation (VWAP − 1.5×ATR) "
+        "and is an ATR proxy, not the canonical multi-band Supertrend indicator. "
+        "Price must remain above EMA50 and above the dynamic support level with RSI(14) > 50."
     ),
     timeframe_hint="15m",
     min_candles=50,
@@ -350,13 +350,13 @@ SUPERTREND_PROXY = StrategyDefinition(
         ),
         StrategyRule(
             rule_id="rsi_trend_zone",
-            label="RSI(14) > 50  (not in bearish territory)",
+            label="RSI(14) > 50  (bullish momentum zone)",
             dependency_keys=["rsi14"],
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 50.0),
         ),
         StrategyRule(
             rule_id="atr_dynamic_support",
-            label="Price > VWAP − 1.5×ATR  (within dynamic support band)",
+            label="Price > VWAP − 1.5×ATR  (above dynamic support band)",
             dependency_keys=["close", "vwap", "atr14"],
             condition_fn=lambda fv: _cond(
                 fv, "close", "vwap", "atr14",
@@ -367,7 +367,7 @@ SUPERTREND_PROXY = StrategyDefinition(
     exit_rules=[
         StrategyRule(
             rule_id="price_below_atr_band",
-            label="Price < VWAP − 1.5×ATR  (broke below dynamic support)",
+            label="Price < VWAP − 1.5×ATR  (support level breached — strategy exit condition)",
             dependency_keys=["close", "vwap", "atr14"],
             condition_fn=lambda fv: _cond(
                 fv, "close", "vwap", "atr14",
@@ -375,7 +375,7 @@ SUPERTREND_PROXY = StrategyDefinition(
             ),
         ),
     ],
-    tags=["trend", "atr", "supertrend", "dynamic-support"],
+    tags=["trend", "atr", "supertrend-proxy", "dynamic-support"],
 )
 
 
@@ -387,28 +387,27 @@ RVOL_SURGE = StrategyDefinition(
     name="Relative Volume Surge",
     category="Volume",
     description=(
-        "Flags when Relative Volume spikes ≥ 2.0× the 20-period average, "
-        "price is trending (above EMA20), and RSI is in the 45–70 zone "
-        "— a typical institutional accumulation / distribution signal."
+        "Flags when Relative Volume spikes ≥ 2.0× the 20-period average, price is above EMA20, "
+        "and RSI is within the strategy's defined 45–70 range."
     ),
     timeframe_hint="5m",
     min_candles=25,
     entry_rules=[
         StrategyRule(
             rule_id="rvol_spike",
-            label="Relative Volume ≥ 2.0×  (significant institutional participation)",
+            label="Relative Volume ≥ 2.0×  (unusually high volume relative to 20-period baseline)",
             dependency_keys=["rvol"],
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r >= 2.0),
         ),
         StrategyRule(
             rule_id="price_above_ema20_rvol",
-            label="Price > EMA20  (price in uptrend)",
+            label="Price > EMA20  (price above short-term trend)",
             dependency_keys=["close", "ema20"],
             condition_fn=lambda fv: _cond(fv, "close", "ema20", fn=lambda c, e: c > e),
         ),
         StrategyRule(
             rule_id="rsi_accumulation_zone",
-            label="45 < RSI(14) < 70  (accumulation zone, not overbought)",
+            label="45 < RSI(14) < 70  (strategy defined range, not overbought)",
             dependency_keys=["rsi14"],
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: 45.0 < r < 70.0),
         ),
@@ -416,18 +415,18 @@ RVOL_SURGE = StrategyDefinition(
     exit_rules=[
         StrategyRule(
             rule_id="rvol_normalized",
-            label="Relative Volume < 1.0  (volume dried up — exit)",
+            label="Relative Volume < 1.0  (volume normalization — strategy exit condition)",
             dependency_keys=["rvol"],
             condition_fn=lambda fv: _cond(fv, "rvol", fn=lambda r: r < 1.0),
         ),
         StrategyRule(
             rule_id="rsi_overbought_exit",
-            label="RSI(14) > 70  (overbought — take profit)",
+            label="RSI(14) > 70  (overbought threshold — strategy exit condition)",
             dependency_keys=["rsi14"],
             condition_fn=lambda fv: _cond(fv, "rsi14", fn=lambda r: r > 70.0),
         ),
     ],
-    tags=["volume", "rvol", "accumulation", "institutional"],
+    tags=["volume", "rvol", "surge"],
 )
 
 

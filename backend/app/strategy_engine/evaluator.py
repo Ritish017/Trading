@@ -481,7 +481,7 @@ def compute_strategy_confluence(results: List[StrategyEvaluationResult]) -> Dict
     active_count = sum(1 for r in results if r.state == StrategyState.ACTIVE)
     partial_count = sum(1 for r in results if r.state == StrategyState.PARTIAL)
     inactive_count = sum(1 for r in results if r.state == StrategyState.INACTIVE)
-    unavail_count = sum(1 for r in results if r.state in (StrategyState.UNAVAILABLE, StrategyState.STALE))
+    unavail_count = sum(1 for r in results if r.state == StrategyState.UNAVAILABLE)
     conflicted_count = sum(1 for r in results if r.state == StrategyState.CONFLICTED)
 
     total_entry_rules = sum(r.entry_rules_total for r in results)
@@ -712,6 +712,8 @@ def evaluate_strategies_observatory(
     candles: List[Dict[str, Any]],
     is_live_feed: bool = False,
     strategy_ids: Optional[List[str]] = None,
+    timeframe: str = "5m",
+    provider: str = "UPSTOX",
 ) -> Dict[str, Any]:
     """
     Master observatory endpoint payload generator.
@@ -720,7 +722,7 @@ def evaluate_strategies_observatory(
     2. Canonical indicator series for chart overlays
     3. Market regime classification
     4. Confluence & conflict analysis
-    5. Data freshness metrics
+    5. Data freshness metrics with explicit provider and timeframe
     """
     freshness, data_age = _evaluate_freshness(candles, is_live_feed)
     df = pd.DataFrame(candles) if candles else pd.DataFrame()
@@ -796,6 +798,8 @@ def evaluate_strategies_observatory(
         "data_freshness": freshness,
         "data_age_seconds": data_age,
         "evaluated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "timeframe": timeframe,
+        "provider": provider,
         "strategies": [_serialise_result(r) for r in results],
         "chart_indicators": series_indicators,
         "candles": chart_candles,

@@ -4,17 +4,19 @@ import {
   MinusCircle, Clock, Database, ChevronDown, ChevronUp, ChevronRight,
   TrendingUp, TrendingDown, Info, Send, Loader2, Shield, Activity,
   Sliders, Eye, EyeOff, BarChart2, Layers, Sparkles, MessageSquare,
-  HelpCircle, RefreshCw
+  HelpCircle, RefreshCw, CheckSquare, Square, History, ShieldAlert,
+  BarChart, ArrowUpRight, ArrowDownRight, Compass
 } from 'lucide-react';
 import { NSEStock } from '../../types/indianMarket';
 
 // ---------------------------------------------------------------------------
 // Types & Contracts
 // ---------------------------------------------------------------------------
-type RuleOutcome = 'PASS' | 'FAIL' | 'UNAVAILABLE';
-type StrategyState = 'ACTIVE' | 'PARTIAL' | 'INACTIVE' | 'CONFLICTED' | 'UNAVAILABLE' | 'STALE';
+export type RuleOutcome = 'PASS' | 'FAIL' | 'UNAVAILABLE';
+export type StrategyState = 'ACTIVE' | 'PARTIAL' | 'INACTIVE' | 'CONFLICTED' | 'UNAVAILABLE';
+export type DataFreshness = 'LIVE' | 'RECENT' | 'STALE' | 'UNAVAILABLE';
 
-interface RuleEvaluation {
+export interface RuleEvaluation {
   rule_id: string;
   label: string;
   dependency_keys: string[];
@@ -25,16 +27,16 @@ interface RuleEvaluation {
   math_detail?: string | null;
 }
 
-interface ActivationEvent {
+export interface ActivationEvent {
   candle_index: number;
   timestamp: number;
-  event_type: 'ACTIVATED' | 'INVALIDATED' | 'CONFLICT';
+  event_type: 'ACTIVATED' | 'INVALIDATED' | 'CONFLICT' | 'PARTIAL';
   price: number;
   strategy_id: string;
   label: string;
 }
 
-interface HistoricalState {
+export interface HistoricalState {
   candle_index: number;
   timestamp: number;
   state: StrategyState;
@@ -43,7 +45,7 @@ interface HistoricalState {
   price: number;
 }
 
-interface StrategyResult {
+export interface StrategyResult {
   strategy_id: string;
   strategy_name: string;
   category: string;
@@ -65,7 +67,7 @@ interface StrategyResult {
   activation_events: ActivationEvent[];
 }
 
-interface ChartCandle {
+export interface ChartCandle {
   time: number;
   open: number;
   high: number;
@@ -75,7 +77,7 @@ interface ChartCandle {
   vwap: number;
 }
 
-interface SeriesIndicators {
+export interface SeriesIndicators {
   ema20?: (number | null)[];
   ema50?: (number | null)[];
   ema200?: (number | null)[];
@@ -94,7 +96,7 @@ interface SeriesIndicators {
   orb_low?: (number | null)[];
 }
 
-interface MarketRegimeData {
+export interface MarketRegimeData {
   regime: string;
   confidence: number;
   trend_strength: number;
@@ -103,7 +105,7 @@ interface MarketRegimeData {
   metrics: Record<string, number>;
 }
 
-interface ConfluenceData {
+export interface ConfluenceData {
   active_count: number;
   partial_count: number;
   inactive_count: number;
@@ -119,24 +121,26 @@ interface ConfluenceData {
   conflict_reasons: string[];
 }
 
-interface ObservatoryData {
+export interface ObservatoryData {
   market_regime: MarketRegimeData;
   confluence: ConfluenceData;
   data_freshness: string;
   data_age_seconds?: number | null;
   evaluated_at: string;
+  timeframe?: string;
+  provider?: string;
   strategies: StrategyResult[];
   chart_indicators: SeriesIndicators;
   candles: ChartCandle[];
 }
 
-interface CopilotMessage {
+export interface CopilotMessage {
   role: 'user' | 'assistant';
   text: string;
   evidence_cited?: string[];
 }
 
-interface StrategyLabPageProps {
+export interface StrategyLabPageProps {
   stocks: NSEStock[];
   selectedSymbol: string;
   onSelectSymbol?: (symbol: string) => void;
@@ -161,29 +165,39 @@ const QUICK_SYMBOLS = [
 const SHORT_NAMES: Record<string, string> = {
   VWAP_MOMENTUM: 'VWAP MOM',
   EMA_GOLDEN_CROSS: 'EMA CROSS',
-  RSI_OVERSOLD_REVERSAL: 'RSI REVERS',
+  RSI_OVERSOLD_REVERSAL: 'RSI REVERSAL',
   BOLLINGER_SQUEEZE: 'BB SQUEEZE',
   MACD_CROSSOVER: 'MACD CROSS',
   ORB_BREAKOUT: 'ORB BREAKOUT',
-  SUPERTREND_PROXY: 'SUPERTREND',
+  SUPERTREND_PROXY: 'SUPERTREND PROXY',
   RVOL_SURGE: 'RVOL SURGE',
 };
 
+// Strategy Palette Colors for Multi-Strategy Mode
+const STRATEGY_PALETTE: Record<string, { color: string; fill: string }> = {
+  VWAP_MOMENTUM:        { color: '#e879f9', fill: 'bg-fuchsia-500' },
+  EMA_GOLDEN_CROSS:     { color: '#22d3ee', fill: 'bg-cyan-400' },
+  RSI_OVERSOLD_REVERSAL:{ color: '#f97316', fill: 'bg-orange-500' },
+  BOLLINGER_SQUEEZE:    { color: '#10b981', fill: 'bg-emerald-500' },
+  MACD_CROSSOVER:       { color: '#38bdf8', fill: 'bg-sky-400' },
+  ORB_BREAKOUT:         { color: '#fbbf24', fill: 'bg-amber-400' },
+  SUPERTREND_PROXY:     { color: '#a3e635', fill: 'bg-lime-400' },
+  RVOL_SURGE:           { color: '#a855f7', fill: 'bg-purple-500' },
+};
+
 // ---------------------------------------------------------------------------
-// State Badge Component
+// State Badge Component (Part 6)
 // ---------------------------------------------------------------------------
 const STATE_STYLES: Record<StrategyState, { label: string; bg: string; border: string; text: string; dot: string; icon: React.FC<any> }> = {
   ACTIVE:      { label: 'ACTIVE',      bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', icon: CheckCircle2 },
   PARTIAL:     { label: 'PARTIAL',     bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   icon: AlertTriangle },
   INACTIVE:    { label: 'INACTIVE',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    text: 'text-rose-400',    dot: 'bg-rose-500',    icon: XCircle },
-  CONFLICTED:  { label: 'CONFLICTED',  bg: 'bg-orange-500/15',  border: 'border-orange-500/40',  text: 'text-orange-400',  dot: 'bg-orange-400',  icon: AlertTriangle },
+  CONFLICTED:  { label: 'CONFLICTED',  bg: 'bg-purple-500/15',  border: 'border-purple-500/40',  text: 'text-purple-400',  dot: 'bg-purple-400',  icon: AlertTriangle },
   UNAVAILABLE: { label: 'UNAVAILABLE', bg: 'bg-stone-800/40',   border: 'border-stone-700/40',   text: 'text-stone-400',   dot: 'bg-stone-500',   icon: MinusCircle },
-  STALE:       { label: 'STALE',       bg: 'bg-purple-900/20',  border: 'border-purple-700/40',  text: 'text-purple-400',  dot: 'bg-purple-500',  icon: Clock },
 };
 
 function StateBadge({ state, size = 'md' }: { state: StrategyState; size?: 'sm' | 'md' }) {
   const cfg = STATE_STYLES[state] || STATE_STYLES.UNAVAILABLE;
-  const Icon = cfg.icon;
   const sizeClass = size === 'sm' ? 'px-1.5 py-0.5 text-[9px]' : 'px-2.5 py-1 text-xs';
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border font-bold font-mono ${sizeClass} ${cfg.bg} ${cfg.border} ${cfg.text}`}>
@@ -193,8 +207,18 @@ function StateBadge({ state, size = 'md' }: { state: StrategyState; size?: 'sm' 
   );
 }
 
+// Format duration helper (e.g. 7h 12m or 45s)
+function formatDuration(seconds?: number | null): string {
+  if (seconds === undefined || seconds === null) return 'N/A';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${mins}m`;
+}
+
 // ---------------------------------------------------------------------------
-// Compact Strategy Keypad Tile (Part 2 & 3)
+// Compact Strategy Keypad Tile (Part 5)
 // ---------------------------------------------------------------------------
 function StrategyKeypadButton({
   strategy,
@@ -205,7 +229,6 @@ function StrategyKeypadButton({
   isSelected: boolean;
   onClick: () => void;
 }) {
-  const cfg = STATE_STYLES[strategy.state] || STATE_STYLES.UNAVAILABLE;
   const shortName = SHORT_NAMES[strategy.strategy_id] || strategy.strategy_name;
 
   return (
@@ -240,7 +263,7 @@ function StrategyKeypadButton({
 }
 
 // ---------------------------------------------------------------------------
-// Strategy Alignment & Confluence Gauge (Part 4 & 25)
+// Strategy Alignment & Confluence Gauge (Part 7, 8, 9)
 // ---------------------------------------------------------------------------
 function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
   const total = confluence.total_strategies || 8;
@@ -250,11 +273,11 @@ function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
   const unavailPct = (confluence.unavailable_count / total) * 100;
 
   return (
-    <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+    <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Layers className="w-3.5 h-3.5 text-violet-400" />
-          <span className="text-xs font-bold text-stone-200 uppercase tracking-wide">Strategy Alignment & Confluence</span>
+          <span className="text-xs font-bold text-stone-200 uppercase tracking-wide font-mono">Strategy Alignment & Confluence</span>
         </div>
         <div className="flex items-center gap-2 text-xs font-mono">
           <span className="text-emerald-400 font-bold">{confluence.active_count} Active</span>
@@ -279,26 +302,29 @@ function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
         <div style={{ width: `${unavailPct}%` }} className="bg-stone-700 transition-all duration-500" title={`Unavailable: ${confluence.unavailable_count}`} />
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 mt-2 text-[11px] font-mono">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+        <div className="flex items-center gap-4 flex-wrap">
           <span className="text-stone-400">
             Rule Satisfaction: <strong className="text-stone-200">{confluence.passing_rules_count}/{confluence.total_rules_count}</strong> ({confluence.alignment_score_pct}%)
           </span>
           <span className="text-stone-400">
-            Bullish Confluence: <strong className="text-emerald-400">{confluence.bullish_confluence}</strong>
+            Bullish Confluence: <strong className="text-emerald-400">{confluence.bullish_confluence} strategies</strong>
           </span>
           {confluence.reversal_confluence > 0 && (
             <span className="text-stone-400">
-              Reversal / Exhaustion: <strong className="text-amber-400">{confluence.reversal_confluence}</strong>
+              Reversal / Exhaustion: <strong className="text-amber-400">{confluence.reversal_confluence} strategy</strong>
             </span>
           )}
         </div>
       </div>
 
       {confluence.has_conflicts && (
-        <div className="mt-2 p-2 rounded-lg bg-orange-950/30 border border-orange-700/40 text-orange-300 text-xs flex items-center gap-2">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-orange-400" />
-          <span>{confluence.conflict_reasons.join(' ')}</span>
+        <div className="p-2.5 rounded-lg bg-orange-950/40 border border-orange-700/50 text-orange-300 text-xs flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-orange-400" />
+          <div>
+            <strong className="text-orange-200 font-mono">STRATEGY CONFLICT:</strong>{' '}
+            <span>{confluence.conflict_reasons.join(' ')}</span>
+          </div>
         </div>
       )}
     </div>
@@ -306,12 +332,13 @@ function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
 }
 
 // ---------------------------------------------------------------------------
-// Interactive Observatory Trading Chart (Part 5, 6, 7, 8, 9)
+// Interactive Observatory Trading Chart (Part 10, 11, 12, 13, 14, 15, 16, 19)
 // ---------------------------------------------------------------------------
 interface ObservatoryChartProps {
   candles: ChartCandle[];
   indicators: SeriesIndicators;
   selectedStrategy: StrategyResult | null;
+  allStrategies: StrategyResult[];
   timeframe: string;
   onTimeframeChange: (tf: string) => void;
 }
@@ -320,28 +347,49 @@ function ObservatoryChart({
   candles,
   indicators,
   selectedStrategy,
+  allStrategies,
   timeframe,
   onTimeframeChange,
 }: ObservatoryChartProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
+  // Overlay Mode: 'SELECTED' or 'ALL' (Part 19)
+  const [overlayMode, setOverlayMode] = useState<'SELECTED' | 'ALL'>('SELECTED');
+  const [showLayerMenu, setShowLayerMenu] = useState(false);
+
+  // Manual Layer Toggles (Part 13 & 34)
+  const [layers, setLayers] = useState({
+    candles: true,
+    volume: true,
+    regions: true,
+    events: true,
+    ema20: false,
+    ema50: false,
+    ema200: false,
+    vwap: false,
+    bollinger: false,
+    supertrend: false,
+    orb: false,
+  });
+
   const n = candles.length;
   const chartWidth = 840;
-  const priceChartHeight = 240;
-  const subpanelHeight = 70;
+  const priceChartHeight = 250;
+  const volumeHeight = 50;
+  const subpanelHeight = 65;
   const subpanelGap = 16;
 
-  // Determine if strategy has subpanel (RSI or MACD)
+  // Determine if strategy has dedicated subpanel (RSI or MACD)
   const isRSISubpanel = selectedStrategy?.strategy_id === 'RSI_OVERSOLD_REVERSAL' || selectedStrategy?.strategy_id === 'VWAP_MOMENTUM';
   const isMACDSubpanel = selectedStrategy?.strategy_id === 'MACD_CROSSOVER';
   const hasSubpanel = isRSISubpanel || isMACDSubpanel;
 
-  const totalHeight = priceChartHeight + (hasSubpanel ? subpanelHeight + subpanelGap : 0) + 40;
+  const totalHeight = priceChartHeight + volumeHeight + (hasSubpanel ? subpanelHeight + subpanelGap : 0) + 20;
 
   if (n === 0) {
     return (
-      <div className="h-72 flex items-center justify-center text-stone-500 font-mono text-xs bg-[#11131a] rounded-2xl border border-stone-800">
+      <div className="h-80 flex items-center justify-center text-stone-500 font-mono text-xs bg-[#11131a] rounded-2xl border border-stone-800">
         No candle history available for chart rendering
       </div>
     );
@@ -353,6 +401,8 @@ function ObservatoryChart({
   const maxPrice = Math.max(...highs) * 1.002;
   const priceRange = maxPrice - minPrice || 1;
 
+  const maxVolume = Math.max(...candles.map(c => c.volume), 1);
+
   const candleStep = chartWidth / n;
   const candleWidth = Math.max(1, candleStep * 0.7);
 
@@ -360,13 +410,18 @@ function ObservatoryChart({
     return priceChartHeight - ((val - minPrice) / priceRange) * priceChartHeight;
   };
 
+  const getVolY = (vol: number) => {
+    const top = priceChartHeight;
+    return top + volumeHeight - (vol / maxVolume) * volumeHeight;
+  };
+
   const getSubY = (val: number, minV: number, maxV: number) => {
     const range = maxV - minV || 1;
-    const top = priceChartHeight + subpanelGap;
+    const top = priceChartHeight + volumeHeight + subpanelGap;
     return top + subpanelHeight - ((val - minV) / range) * subpanelHeight;
   };
 
-  // Generate SVG paths for indicators
+  // Generate SVG path for line series
   const makeLinePath = (series?: (number | null)[]) => {
     if (!series || series.length === 0) return '';
     let path = '';
@@ -408,7 +463,7 @@ function ObservatoryChart({
     return path;
   };
 
-  // Active Candle for inspector
+  // Active Candle for crosshair
   const activeIdx = hoverIndex !== null && hoverIndex >= 0 && hoverIndex < n ? hoverIndex : n - 1;
   const activeCandle = candles[activeIdx];
 
@@ -421,19 +476,19 @@ function ObservatoryChart({
     setHoverIndex(idx);
   };
 
-  // Check which overlays to render based on selected strategy
+  // Automatic overlay defaults based on selected strategy
   const sid = selectedStrategy?.strategy_id;
-  const showEMA20 = sid === 'EMA_GOLDEN_CROSS' || sid === 'VWAP_MOMENTUM' || sid === 'RVOL_SURGE';
-  const showEMA50 = sid === 'EMA_GOLDEN_CROSS' || sid === 'VWAP_MOMENTUM' || sid === 'MACD_CROSSOVER' || sid === 'SUPERTREND_PROXY';
-  const showEMA200 = sid === 'EMA_GOLDEN_CROSS';
-  const showVWAP = sid === 'VWAP_MOMENTUM' || sid === 'RSI_OVERSOLD_REVERSAL' || sid === 'ORB_BREAKOUT' || sid === 'SUPERTREND_PROXY';
-  const showBollinger = sid === 'BOLLINGER_SQUEEZE';
-  const showSupertrend = sid === 'SUPERTREND_PROXY';
-  const showORB = sid === 'ORB_BREAKOUT';
+  const isEMA20Active = layers.ema20 || sid === 'EMA_GOLDEN_CROSS' || sid === 'VWAP_MOMENTUM' || sid === 'RVOL_SURGE';
+  const isEMA50Active = layers.ema50 || sid === 'EMA_GOLDEN_CROSS' || sid === 'VWAP_MOMENTUM' || sid === 'MACD_CROSSOVER' || sid === 'SUPERTREND_PROXY';
+  const isEMA200Active = layers.ema200 || sid === 'EMA_GOLDEN_CROSS';
+  const isVWAPActive = layers.vwap || sid === 'VWAP_MOMENTUM' || sid === 'RSI_OVERSOLD_REVERSAL' || sid === 'ORB_BREAKOUT' || sid === 'SUPERTREND_PROXY';
+  const isBollingerActive = layers.bollinger || sid === 'BOLLINGER_SQUEEZE';
+  const isSupertrendActive = layers.supertrend || sid === 'SUPERTREND_PROXY';
+  const isORBActive = layers.orb || sid === 'ORB_BREAKOUT';
 
   return (
     <div className="bg-[#12131a] border border-stone-800/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl">
-      {/* Chart Top Bar */}
+      {/* Chart Top Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-stone-800/60 text-xs">
         <div className="flex items-center gap-3">
           <span className="font-mono font-black text-white text-sm">₹{activeCandle.close.toFixed(2)}</span>
@@ -442,45 +497,103 @@ function ObservatoryChart({
             <span>H: ₹{activeCandle.high.toFixed(2)}</span>
             <span>L: ₹{activeCandle.low.toFixed(2)}</span>
             <span>C: ₹{activeCandle.close.toFixed(2)}</span>
+            <span>Vol: {activeCandle.volume.toLocaleString()}</span>
           </div>
         </div>
 
-        {/* Timeframe selector */}
-        <div className="flex items-center gap-1 bg-stone-900/80 p-0.5 rounded-lg border border-stone-800">
-          {(['1m', '5m', '15m', '1h', '1D'] as const).map(tf => (
+        <div className="flex items-center gap-2">
+          {/* Mode switch: Selected Strategy vs All Strategies (Part 19) */}
+          <div className="flex items-center gap-1 bg-stone-900/80 p-0.5 rounded-lg border border-stone-800 text-[10px] font-mono">
             <button
-              key={tf}
-              onClick={() => onTimeframeChange(tf)}
-              className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded transition-all cursor-pointer ${
-                timeframe === tf
-                  ? 'bg-violet-600 text-white shadow-sm'
-                  : 'text-stone-400 hover:text-stone-200'
+              onClick={() => setOverlayMode('SELECTED')}
+              className={`px-2 py-0.5 rounded transition-all cursor-pointer font-bold ${
+                overlayMode === 'SELECTED' ? 'bg-violet-600 text-white' : 'text-stone-400 hover:text-stone-200'
               }`}
             >
-              {tf}
+              Selected Strategy
             </button>
-          ))}
+            <button
+              onClick={() => setOverlayMode('ALL')}
+              className={`px-2 py-0.5 rounded transition-all cursor-pointer font-bold ${
+                overlayMode === 'ALL' ? 'bg-violet-600 text-white' : 'text-stone-400 hover:text-stone-200'
+              }`}
+            >
+              All Strategies
+            </button>
+          </div>
+
+          {/* Timeframe selector (Part 11 & 36) */}
+          <div className="flex items-center gap-1 bg-stone-900/80 p-0.5 rounded-lg border border-stone-800">
+            {(['1m', '5m', '15m', '1h', '1D'] as const).map(tf => (
+              <button
+                key={tf}
+                onClick={() => onTimeframeChange(tf)}
+                className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded transition-all cursor-pointer ${
+                  timeframe === tf
+                    ? 'bg-violet-600 text-white shadow-sm'
+                    : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+
+          {/* Layer controls toggle button (Part 13 & 34) */}
+          <div className="relative">
+            <button
+              onClick={() => setShowLayerMenu(!showLayerMenu)}
+              className="p-1 px-2 rounded-lg bg-stone-900 hover:bg-stone-800 border border-stone-700 text-stone-300 text-[10px] font-mono flex items-center gap-1 cursor-pointer"
+            >
+              <Sliders className="w-3 h-3" />
+              <span>Layers</span>
+            </button>
+
+            {showLayerMenu && (
+              <div className="absolute right-0 top-7 w-48 bg-[#181a24] border border-stone-700 rounded-xl p-2.5 shadow-2xl z-30 space-y-1.5 text-xs font-mono">
+                <div className="font-bold text-stone-200 border-b border-stone-700/60 pb-1 text-[11px]">Chart Layers</div>
+                {[
+                  { key: 'candles', label: 'Candlesticks' },
+                  { key: 'volume', label: 'Volume Bars' },
+                  { key: 'regions', label: 'Strategy Regions' },
+                  { key: 'events', label: 'Activation Markers' },
+                  { key: 'ema20', label: 'EMA20 (Cyan)' },
+                  { key: 'ema50', label: 'EMA50 (Amber)' },
+                  { key: 'ema200', label: 'EMA200 (Purple)' },
+                  { key: 'vwap', label: 'VWAP (Magenta)' },
+                  { key: 'bollinger', label: 'Bollinger Bands' },
+                  { key: 'supertrend', label: 'Supertrend Proxy' },
+                  { key: 'orb', label: 'ORB High/Low' },
+                ].map(l => (
+                  <label key={l.key} className="flex items-center gap-2 text-stone-300 hover:text-white cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={(layers as any)[l.key]}
+                      onChange={e => setLayers({ ...layers, [l.key]: e.target.checked })}
+                      className="rounded border-stone-700 text-violet-600 focus:ring-0"
+                    />
+                    <span className="text-[10px]">{l.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Active Overlays Legend */}
       <div className="flex items-center gap-3 text-[10px] font-mono text-stone-400 flex-wrap">
         <span className="text-stone-500 font-bold">Overlays:</span>
-        {showEMA20 && <span className="flex items-center gap-1 text-cyan-400"><span className="w-2 h-0.5 bg-cyan-400 inline-block" /> EMA20</span>}
-        {showEMA50 && <span className="flex items-center gap-1 text-amber-400"><span className="w-2 h-0.5 bg-amber-400 inline-block" /> EMA50</span>}
-        {showEMA200 && <span className="flex items-center gap-1 text-purple-400"><span className="w-2 h-0.5 bg-purple-400 inline-block" /> EMA200</span>}
-        {showVWAP && <span className="flex items-center gap-1 text-fuchsia-400"><span className="w-2 h-0.5 bg-fuchsia-400 inline-block" /> VWAP</span>}
-        {showBollinger && <span className="flex items-center gap-1 text-emerald-400"><span className="w-2 h-0.5 bg-emerald-400 inline-block" /> Bollinger Bands (20, 2σ)</span>}
-        {showSupertrend && <span className="flex items-center gap-1 text-lime-400"><span className="w-2 h-0.5 bg-lime-400 inline-block" /> Dynamic Support Band</span>}
-        {showORB && <span className="flex items-center gap-1 text-yellow-400"><span className="w-2 h-0.5 bg-yellow-400 inline-block" /> Opening Range (High/Low)</span>}
-        {selectedStrategy?.activation_events && selectedStrategy.activation_events.length > 0 && (
-          <span className="text-emerald-400 font-bold ml-auto flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-emerald-400" /> {selectedStrategy.activation_events.length} Historical Activation Markers
-          </span>
-        )}
+        {isEMA20Active && <span className="flex items-center gap-1 text-cyan-400"><span className="w-2 h-0.5 bg-cyan-400 inline-block" /> EMA20</span>}
+        {isEMA50Active && <span className="flex items-center gap-1 text-amber-400"><span className="w-2 h-0.5 bg-amber-400 inline-block" /> EMA50</span>}
+        {isEMA200Active && <span className="flex items-center gap-1 text-purple-400"><span className="w-2 h-0.5 bg-purple-400 inline-block" /> EMA200</span>}
+        {isVWAPActive && <span className="flex items-center gap-1 text-fuchsia-400"><span className="w-2 h-0.5 bg-fuchsia-400 inline-block" /> VWAP</span>}
+        {isBollingerActive && <span className="flex items-center gap-1 text-emerald-400"><span className="w-2 h-0.5 bg-emerald-400 inline-block" /> Bollinger (20, 2σ)</span>}
+        {isSupertrendActive && <span className="flex items-center gap-1 text-lime-400"><span className="w-2 h-0.5 bg-lime-400 inline-block" /> Dynamic Support</span>}
+        {isORBActive && <span className="flex items-center gap-1 text-yellow-400"><span className="w-2 h-0.5 bg-yellow-400 inline-block" /> ORB Range</span>}
       </div>
 
-      {/* SVG Canvas */}
+      {/* SVG Canvas (Part 10, 11, 14, 15) */}
       <div className="relative overflow-hidden w-full select-none">
         <svg
           ref={svgRef}
@@ -514,8 +627,8 @@ function ObservatoryChart({
             );
           })}
 
-          {/* Historical Active Regions Highlight Bands (Part 7) */}
-          {selectedStrategy?.historical_states?.map((hs, i) => {
+          {/* Historical Active Regions Highlight Bands (Part 14) */}
+          {layers.regions && overlayMode === 'SELECTED' && selectedStrategy?.historical_states?.map((hs, i) => {
             if (hs.state !== 'ACTIVE') return null;
             const x = hs.candle_index * candleStep;
             return (
@@ -530,8 +643,8 @@ function ObservatoryChart({
             );
           })}
 
-          {/* Candlesticks (Part 5) */}
-          {candles.map((c, i) => {
+          {/* Candlesticks (Part 11) */}
+          {layers.candles && candles.map((c, i) => {
             const x = i * candleStep + candleStep / 2;
             const openY = getY(c.open);
             const closeY = getY(c.close);
@@ -543,7 +656,6 @@ function ObservatoryChart({
 
             return (
               <g key={i}>
-                {/* Wick */}
                 <line
                   x1={x}
                   y1={highY}
@@ -552,7 +664,6 @@ function ObservatoryChart({
                   stroke={isBull ? '#10b981' : '#f43f5e'}
                   strokeWidth={1}
                 />
-                {/* Body */}
                 <rect
                   x={x - candleWidth / 2}
                   y={bodyTop}
@@ -565,8 +676,27 @@ function ObservatoryChart({
             );
           })}
 
-          {/* Indicator Overlays (Part 6) */}
-          {showBollinger && (
+          {/* Volume Subpanel Bars */}
+          {layers.volume && candles.map((c, i) => {
+            const x = i * candleStep + candleStep / 2;
+            const vy = getVolY(c.volume);
+            const vHeight = priceChartHeight + volumeHeight - vy;
+            const isBull = c.close >= c.open;
+            return (
+              <rect
+                key={`vol-${i}`}
+                x={x - candleWidth / 2}
+                y={vy}
+                width={candleWidth}
+                height={Math.max(1, vHeight)}
+                fill={isBull ? '#10b981' : '#f43f5e'}
+                opacity={0.35}
+              />
+            );
+          })}
+
+          {/* Indicator Overlays (Part 12) */}
+          {isBollingerActive && (
             <>
               <path d={makeLinePath(indicators.bb_upper)} stroke="#10b981" strokeWidth={1} fill="none" strokeDasharray="2,2" />
               <path d={makeLinePath(indicators.bb_middle)} stroke="#34d399" strokeWidth={0.8} fill="none" />
@@ -574,33 +704,35 @@ function ObservatoryChart({
             </>
           )}
 
-          {showSupertrend && indicators.supertrend_band && (
+          {isSupertrendActive && indicators.supertrend_band && (
             <path d={makeLinePath(indicators.supertrend_band)} stroke="#a3e635" strokeWidth={1.5} fill="none" strokeDasharray="4,2" />
           )}
 
-          {showORB && indicators.orb_high && indicators.orb_low && (
+          {isORBActive && indicators.orb_high && indicators.orb_low && (
             <>
               <path d={makeLinePath(indicators.orb_high)} stroke="#fbbf24" strokeWidth={1} strokeDasharray="3,3" fill="none" />
               <path d={makeLinePath(indicators.orb_low)} stroke="#fbbf24" strokeWidth={1} strokeDasharray="3,3" fill="none" />
             </>
           )}
 
-          {showEMA20 && <path d={makeLinePath(indicators.ema20)} stroke="#22d3ee" strokeWidth={1.2} fill="none" />}
-          {showEMA50 && <path d={makeLinePath(indicators.ema50)} stroke="#f59e0b" strokeWidth={1.2} fill="none" />}
-          {showEMA200 && <path d={makeLinePath(indicators.ema200)} stroke="#a855f7" strokeWidth={1.5} fill="none" />}
-          {showVWAP && <path d={makeLinePath(indicators.vwap)} stroke="#e879f9" strokeWidth={1.4} fill="none" />}
+          {isEMA20Active && <path d={makeLinePath(indicators.ema20)} stroke="#22d3ee" strokeWidth={1.2} fill="none" />}
+          {isEMA50Active && <path d={makeLinePath(indicators.ema50)} stroke="#f59e0b" strokeWidth={1.2} fill="none" />}
+          {isEMA200Active && <path d={makeLinePath(indicators.ema200)} stroke="#a855f7" strokeWidth={1.5} fill="none" />}
+          {isVWAPActive && <path d={makeLinePath(indicators.vwap)} stroke="#e879f9" strokeWidth={1.4} fill="none" />}
 
-          {/* Strategy Activation Markers (Part 8) */}
-          {selectedStrategy?.activation_events?.map((ev, i) => {
+          {/* Strategy Activation Markers (Part 15 & 19) */}
+          {layers.events && (overlayMode === 'SELECTED' ? selectedStrategy?.activation_events || [] : allStrategies.flatMap(s => s.activation_events || [])).map((ev, i) => {
             const cx = ev.candle_index * candleStep + candleStep / 2;
             const cy = getY(ev.price);
             if (cx < 0 || cx > chartWidth) return null;
 
+            const pal = STRATEGY_PALETTE[ev.strategy_id] || { color: '#10b981' };
+
             if (ev.event_type === 'ACTIVATED') {
               return (
                 <g key={i} transform={`translate(${cx}, ${cy - 12})`}>
-                  <polygon points="0,-4 4,3 -4,3" fill="#10b981" />
-                  <circle cx={0} cy={0} r={5} stroke="#10b981" strokeWidth={1.5} fill="none" />
+                  <polygon points="0,-4 4,3 -4,3" fill={pal.color} />
+                  <circle cx={0} cy={0} r={5} stroke={pal.color} strokeWidth={1.5} fill="none" />
                 </g>
               );
             } else if (ev.event_type === 'INVALIDATED') {
@@ -625,7 +757,7 @@ function ObservatoryChart({
                 x1={hoverIndex * candleStep + candleStep / 2}
                 y1={0}
                 x2={hoverIndex * candleStep + candleStep / 2}
-                y2={priceChartHeight}
+                y2={priceChartHeight + volumeHeight}
                 stroke="#a1a1aa"
                 strokeWidth={0.8}
                 strokeDasharray="2,2"
@@ -644,19 +776,19 @@ function ObservatoryChart({
 
           {/* Subpanels for Oscillators (RSI / MACD) */}
           {isRSISubpanel && indicators.rsi14 && (
-            <g transform={`translate(0, ${priceChartHeight + subpanelGap})`}>
+            <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
               <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
               {/* Guides 70, 50, 35 */}
-              <line x1={0} y1={getSubY(70, 0, 100) - (priceChartHeight + subpanelGap)} x2={chartWidth} y2={getSubY(70, 0, 100) - (priceChartHeight + subpanelGap)} stroke="#f43f5e" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
-              <line x1={0} y1={getSubY(50, 0, 100) - (priceChartHeight + subpanelGap)} x2={chartWidth} y2={getSubY(50, 0, 100) - (priceChartHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
-              <line x1={0} y1={getSubY(35, 0, 100) - (priceChartHeight + subpanelGap)} x2={chartWidth} y2={getSubY(35, 0, 100) - (priceChartHeight + subpanelGap)} stroke="#10b981" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
+              <line x1={0} y1={getSubY(70, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(70, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#f43f5e" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
+              <line x1={0} y1={getSubY(50, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(50, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
+              <line x1={0} y1={getSubY(35, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(35, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#10b981" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
               <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">RSI(14): {indicators.rsi14[activeIdx]?.toFixed(1) || 'N/A'}</text>
               <path d={makeSubpanelPath(indicators.rsi14, 0, 100)} stroke="#a855f7" strokeWidth={1.5} fill="none" />
             </g>
           )}
 
           {isMACDSubpanel && indicators.macd && (
-            <g transform={`translate(0, ${priceChartHeight + subpanelGap})`}>
+            <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
               <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
               <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">MACD (12,26,9)</text>
               <path d={makeSubpanelPath(indicators.macd, -5, 5)} stroke="#38bdf8" strokeWidth={1.2} fill="none" />
@@ -666,14 +798,16 @@ function ObservatoryChart({
         </svg>
       </div>
 
-      {/* Strategy Timeline Feed (Part 10) */}
+      {/* Historical Strategy Timeline (Part 17) */}
       {selectedStrategy?.activation_events && selectedStrategy.activation_events.length > 0 && (
         <div className="pt-2 border-t border-stone-800/60 flex items-center gap-2 overflow-x-auto custom-scrollbar text-[10px] font-mono">
-          <span className="text-stone-500 shrink-0 font-bold">Timeline:</span>
+          <span className="text-stone-500 shrink-0 font-bold flex items-center gap-1">
+            <History className="w-3 h-3 text-stone-400" /> Historical Timeline:
+          </span>
           {selectedStrategy.activation_events.slice(-6).map((ev, i) => (
             <div
               key={i}
-              className={`shrink-0 px-2 py-0.5 rounded-lg border flex items-center gap-1 ${
+              className={`shrink-0 px-2 py-0.5 rounded-lg border flex items-center gap-1.5 ${
                 ev.event_type === 'ACTIVATED'
                   ? 'bg-emerald-950/40 border-emerald-700/40 text-emerald-300'
                   : ev.event_type === 'INVALIDATED'
@@ -692,7 +826,7 @@ function ObservatoryChart({
 }
 
 // ---------------------------------------------------------------------------
-// Selected Strategy Rule Inspector with Mathematical Basis (Part 11 & 12)
+// Selected Strategy Rule Inspector with Mathematical Basis (Part 20, 21, 22)
 // ---------------------------------------------------------------------------
 function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
@@ -752,7 +886,7 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
                   </div>
                 </div>
 
-                {/* Mathematical Basis Drilldown (Part 12) */}
+                {/* Mathematical Basis Drilldown (Part 21) */}
                 {isExpanded && (
                   <div className="mt-2 pt-2 border-t border-stone-800/60 text-[11px] font-mono space-y-1 text-stone-400 bg-stone-950/40 p-2 rounded">
                     <div><strong>Rule ID:</strong> {rule.rule_id}</div>
@@ -773,7 +907,7 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
         <div>
           <div className="flex items-center justify-between text-xs font-bold text-stone-300 uppercase mb-2">
             <span className="flex items-center gap-1.5 text-rose-400">
-              <TrendingDown className="w-3.5 h-3.5" /> Exit / Invalidation Triggers
+              <TrendingDown className="w-3.5 h-3.5" /> Strategy Exit Conditions
             </span>
           </div>
           <div className="space-y-1.5">
@@ -791,7 +925,7 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
 }
 
 // ---------------------------------------------------------------------------
-// Real Conversational Strategy Copilot (Part 13, 14, 15, 16)
+// Real Conversational Strategy Copilot (Part 24, 25, 26, 27, 28, 29)
 // ---------------------------------------------------------------------------
 interface StrategyCopilotProps {
   symbol: string;
@@ -884,7 +1018,7 @@ function StrategyCopilotChat({
       <div className="p-3 border-b border-stone-800/60 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-violet-400" />
-          <span className="font-black text-xs text-white uppercase tracking-wider">AI Strategy Copilot</span>
+          <span className="font-black text-xs text-white uppercase tracking-wider font-mono">AI Strategy Copilot</span>
         </div>
         <span className="text-[9px] font-mono text-stone-500 border border-stone-800 px-1.5 py-0.5 rounded">
           Evidence-Grounded
@@ -940,7 +1074,7 @@ function StrategyCopilotChat({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
+      {/* Input Box */}
       <div className="p-2.5 border-t border-stone-800/60 bg-[#0e0f15]">
         <div className="flex items-center gap-2">
           <input
@@ -966,7 +1100,7 @@ function StrategyCopilotChat({
 }
 
 // ---------------------------------------------------------------------------
-// Main Strategy Lab Observatory Workspace (Part 1 & 2)
+// Main Strategy Lab Observatory Workspace
 // ---------------------------------------------------------------------------
 export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   stocks,
@@ -980,17 +1114,16 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Symbol quick select
   const currentStock = stocks.find(s => s.symbol === symbol) || stocks[0];
 
-  const handleEvaluate = useCallback(async (symToEval = symbol) => {
+  const handleEvaluate = useCallback(async (symToEval = symbol, tfToEval = timeframe) => {
     setIsEvaluating(true);
     setError(null);
     try {
       const res = await fetch(`/api/strategies/evaluate/${encodeURIComponent(symToEval)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_live_feed: true }),
+        body: JSON.stringify({ is_live_feed: true, timeframe: tfToEval }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -999,66 +1132,73 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
       const data: ObservatoryData = await res.json();
       setObservatoryData(data);
 
-      // Auto-select first active or interesting strategy
+      // Auto-select first active strategy or maintain selected
       if (data.strategies && data.strategies.length > 0) {
-        const firstActive = data.strategies.find(s => s.state === 'ACTIVE') || data.strategies[0];
-        setSelectedStrategyId(firstActive.strategy_id);
+        if (!selectedStrategyId || !data.strategies.some(s => s.strategy_id === selectedStrategyId)) {
+          const firstActive = data.strategies.find(s => s.state === 'ACTIVE') || data.strategies[0];
+          setSelectedStrategyId(firstActive.strategy_id);
+        }
       }
     } catch (e: any) {
       setError(e.message || 'Evaluation failed');
     } finally {
       setIsEvaluating(false);
     }
-  }, [symbol]);
+  }, [symbol, timeframe, selectedStrategyId]);
 
-  // Initial evaluation on mount or symbol switch
+  // Initial evaluation on mount or symbol/timeframe switch
   useEffect(() => {
-    handleEvaluate(symbol);
-  }, [symbol]);
+    handleEvaluate(symbol, timeframe);
+  }, [symbol, timeframe]);
 
   const selectedStrategy = observatoryData?.strategies?.find(s => s.strategy_id === selectedStrategyId) || null;
 
-  // Stale data warning banner
+  // Stale & Freshness handling (Part 2 & 3)
   const isStale = observatoryData?.data_freshness === 'STALE';
+  const isLive = observatoryData?.data_freshness === 'LIVE';
+  const isRecent = observatoryData?.data_freshness === 'RECENT';
+  const isUnavailable = observatoryData?.data_freshness === 'UNAVAILABLE';
   const ageSeconds = observatoryData?.data_age_seconds;
+  const provider = observatoryData?.provider || 'UPSTOX';
 
   return (
     <div className="flex-1 flex flex-col h-[calc(100vh-175px)] overflow-y-auto custom-scrollbar p-3 space-y-3 bg-[#0a0b10]">
-      {/* ── Top Header (Part 2) ── */}
+      {/* ── Top Header (Part 4) ── */}
       <div className="bg-[#12131b] border border-stone-800/80 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-violet-600/20 border border-violet-500/40 flex items-center justify-center text-violet-400 font-black shadow-inner">
             <FlaskConical className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-black text-sm text-white tracking-wide font-mono">{symbol}</span>
               <span className="text-xs text-stone-400 font-semibold hidden sm:inline">{currentStock?.name}</span>
               {observatoryData && (
                 <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                  observatoryData.data_freshness === 'LIVE' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
-                  observatoryData.data_freshness === 'RECENT' ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' :
-                  'bg-purple-900/30 text-purple-300 border-purple-700/40'
+                  isLive ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
+                  isRecent ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' :
+                  isStale ? 'bg-purple-900/30 text-purple-300 border-purple-700/40' :
+                  'bg-stone-800 text-stone-400 border-stone-700'
                 }`}>
-                  {observatoryData.data_freshness} {ageSeconds ? `(${ageSeconds}s)` : ''}
+                  {observatoryData.data_freshness} {ageSeconds ? `(${formatDuration(ageSeconds)} old)` : ''}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2 text-xs font-mono mt-0.5">
+            <div className="flex items-center gap-2 text-xs font-mono mt-0.5 flex-wrap">
               <span className="text-stone-100 font-bold">₹{currentStock?.price?.toFixed(2) || '---'}</span>
               <span className={currentStock?.change && currentStock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                 {currentStock?.change && currentStock.change >= 0 ? '+' : ''}{currentStock?.change?.toFixed(2)} ({currentStock?.changePercent?.toFixed(2)}%)
               </span>
               {observatoryData?.market_regime && (
                 <span className="text-stone-400 font-medium hidden md:inline">
-                  · Regime: <strong className="text-amber-400">{observatoryData.market_regime.regime}</strong> ({observatoryData.market_regime.confidence}%)
+                  · Regime: <strong className="text-amber-400">{observatoryData.market_regime.regime}</strong> (Regime Evidence: {observatoryData.market_regime.confidence}%)
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* Quick Symbol Switcher Chips (Part 19) */}
+        {/* Quick Symbol Switcher Chips (Part 35) */}
         <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar max-w-md">
           {QUICK_SYMBOLS.map(sym => (
             <button
@@ -1077,9 +1217,9 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => handleEvaluate(symbol)}
+            onClick={() => handleEvaluate(symbol, timeframe)}
             disabled={isEvaluating}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-violet-500/20 disabled:opacity-60 cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-violet-500/20 disabled:opacity-60 cursor-pointer font-mono"
           >
             {isEvaluating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             {isEvaluating ? 'Evaluating…' : 'Evaluate'}
@@ -1087,14 +1227,28 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       </div>
 
-      {/* Stale Data Warning Banner (Part 20) */}
+      {/* Stale / Live Data Experience Banner (Part 3) */}
       {isStale && (
-        <div className="px-4 py-2.5 rounded-xl bg-purple-950/40 border border-purple-700/50 text-purple-200 text-xs flex items-center justify-between shadow-md">
+        <div className="px-4 py-2.5 rounded-xl bg-purple-950/40 border border-purple-700/50 text-purple-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-md">
           <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-purple-400" />
-            <span><strong>STALE MARKET DATA</strong> — Last evaluated candle timestamp is {ageSeconds ? `${Math.round(ageSeconds / 60)} minutes` : 'several hours'} old. Strategy evaluation is displayed for quantitative research, not current live execution.</span>
+            <Clock className="w-4 h-4 text-purple-400 shrink-0" />
+            <span>
+              <strong>HISTORICAL CONTEXT (DATA AGE: {formatDuration(ageSeconds)}):</strong> Strategy states below describe the last available market data (Provider: {provider}). They are not current live-market conditions.
+            </span>
           </div>
-          <span className="font-mono text-[10px] text-purple-400 border border-purple-600/40 px-2 py-0.5 rounded">HISTORICAL CONTEXT</span>
+          <span className="font-mono text-[10px] text-purple-300 border border-purple-600/40 px-2 py-0.5 rounded shrink-0 self-start sm:self-auto">
+            🟣 HISTORICAL CONTEXT
+          </span>
+        </div>
+      )}
+
+      {isLive && (
+        <div className="px-4 py-2 rounded-xl bg-emerald-950/25 border border-emerald-700/40 text-emerald-300 text-xs flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-emerald-400" />
+            <span><strong>LIVE MARKET STREAM:</strong> Real-time deterministic evaluation active (Provider: {provider}, Age: {formatDuration(ageSeconds)}).</span>
+          </div>
+          <span className="font-mono text-[10px] text-emerald-400 border border-emerald-600/40 px-2 py-0.5 rounded">🟢 LIVE</span>
         </div>
       )}
 
@@ -1105,7 +1259,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {/* ── Compact Strategy Keypad (Part 2 & 3) ── */}
+      {/* ── Compact Strategy Keypad (Part 5) ── */}
       {observatoryData?.strategies && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
           {observatoryData.strategies.map(strat => (
@@ -1119,12 +1273,12 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {/* ── Strategy Alignment & Confluence Panel (Part 4 & 25) ── */}
+      {/* ── Strategy Alignment & Confluence Panel (Part 7, 8, 9) ── */}
       {observatoryData?.confluence && (
         <StrategyAlignmentBar confluence={observatoryData.confluence} />
       )}
 
-      {/* ── Main Layout: Trading Chart + Rule Inspector & Copilot (Part 5, 11, 13) ── */}
+      {/* ── Main Layout: Trading Chart (55-65%) + Rule Inspector & Copilot (Part 10) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         {/* Trading Chart (Left 8 Cols) */}
         <div className="lg:col-span-8 space-y-3">
@@ -1132,6 +1286,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
             candles={observatoryData?.candles || []}
             indicators={observatoryData?.chart_indicators || {}}
             selectedStrategy={selectedStrategy}
+            allStrategies={observatoryData?.strategies || []}
             timeframe={timeframe}
             onTimeframeChange={setTimeframe}
           />

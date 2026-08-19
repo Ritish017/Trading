@@ -697,3 +697,163 @@ Answer concisely, citing exact evidence and numbers:"""
 
 fundamental_copilot_agent = FundamentalCopilotAgent()
 
+
+class PaperCopilotAgent:
+    """
+    Evidence-grounded Paper Trading & Execution Copilot.
+    Explains paper signal triggers, entry/exit evidence, regime alignment, and model drift.
+    Supports Skeptic Mode ('CHALLENGE THIS SIGNAL') to audit weak rules, friction drag, and regime mismatch.
+    """
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+
+    async def answer(
+        self,
+        symbol: str,
+        user_message: str,
+        position: Optional[Dict[str, Any]] = None,
+        signal: Optional[Dict[str, Any]] = None,
+        drift_report: Optional[Dict[str, Any]] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        is_skeptic_mode: bool = False,
+    ) -> Dict[str, Any]:
+        evidence_block = self._build_evidence_block(symbol, position, signal, drift_report)
+
+        if not self.client:
+            if is_skeptic_mode:
+                return self._build_deterministic_skeptic_critique(symbol, position, signal, drift_report)
+            return self._build_deterministic_summary(symbol, position, signal)
+
+        history_str = ""
+        if chat_history:
+            history_str = "\nPREVIOUS CONVERSATION:\n" + "\n".join(
+                f"{h.get('role', 'user').upper()}: {h.get('text', '')}"
+                for h in chat_history[-6:]
+            )
+
+        skeptic_instructions = """
+SKEPTIC MODE ACTIVE ("CHALLENGE THIS SIGNAL"):
+- Act as an aggressive quantitative risk auditor.
+- Audit signal evidence, regime alignment, friction drag, execution delays, and model drift.
+- Conclude whether evidence is INSUFFICIENT or thesis is VULNERABLE.
+""" if is_skeptic_mode else ""
+
+        system_prompt = f"""You are the APEX Paper Trading Copilot — an expert quantitative execution and trade forensics assistant.
+
+STRICT INVARIANTS:
+1. Base EVERY statement directly on the VERIFIED EVIDENCE below. Cite exact numerical values.
+2. Clearly distinguish between simulated paper execution and historical backtest expectations.
+3. This is research/paper simulation — DO NOT provide live trade recommendations or buy/sell advice.
+{skeptic_instructions}
+
+VERIFIED PAPER TRADE EVIDENCE FOR {symbol}:
+{evidence_block}
+{history_str}
+
+User Question: {user_message}
+
+Answer concisely, citing exact evidence and numbers:"""
+
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=system_prompt,
+            )
+            reply_text = response.text.strip() if response and response.text else (
+                "Evidence is available but the AI interpreter is temporarily offline."
+            )
+        except Exception as exc:
+            logger.warning("PaperCopilotAgent Gemini call failed: %s", exc)
+            reply_text = "AI interpreter temporarily unavailable — please review paper trade evidence directly."
+
+        return {"reply": reply_text, "evidence_cited": ["Deterministic Strategy Rules", "Paper Execution Ledger"]}
+
+    def _build_evidence_block(
+        self,
+        symbol: str,
+        position: Optional[Dict[str, Any]],
+        signal: Optional[Dict[str, Any]],
+        drift_report: Optional[Dict[str, Any]],
+    ) -> str:
+        lines = [f"=== PAPER TRADE EVIDENCE FOR {symbol} ==="]
+        def _g(o, k, d=None):
+            return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+
+        if signal:
+            lines.append(f"Signal ID: {_g(signal, 'signal_id')} (Strategy: {_g(signal, 'strategy_id')} v{_g(signal, 'strategy_version')})")
+            lines.append(f"Strategy State: {_g(signal, 'strategy_state')}, Confluence: {_g(signal, 'confluence_state')}")
+            lines.append(f"Market Regime at Entry: {_g(signal, 'regime')}, Data Freshness: {_g(signal, 'data_freshness')}")
+            lines.append("Matched Rules:")
+            for r in (_g(signal, "rule_evidence", []) or []):
+                lines.append(f"  • {r}")
+
+        if position:
+            lines.append(f"\nPosition Details: Side={_g(position, 'side')}, Qty={_g(position, 'quantity')}, Entry=₹{_g(position, 'entry_price')}, Current=₹{_g(position, 'current_price')}")
+            lines.append(f"Unrealized P&L: ₹{_g(position, 'unrealized_pnl')} ({_g(position, 'unrealized_pnl_pct')}%)")
+            lines.append(f"Frictions: Fees Paid=₹{_g(position, 'fees_paid')}, Slippage=₹{_g(position, 'slippage_paid')}")
+
+        if drift_report:
+            lines.append(f"\nModel Drift Status: {_g(drift_report, 'overall_status')}")
+            for m in (_g(drift_report, "metrics", []) or []):
+                lines.append(f"  • {_g(m, 'metric_name')}: Expected={_g(m, 'backtest_expected')}, Realized={_g(m, 'paper_realized')}, Drift={_g(m, 'drift_pct')}%")
+
+        return "\n".join(lines)
+
+    def _build_deterministic_summary(
+        self,
+        symbol: str,
+        position: Optional[Dict[str, Any]],
+        signal: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        def _g(o, k, d=None):
+            return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+        strat = _g(position or signal or {}, "strategy_id", "QUANT_STRATEGY")
+        entry = _g(position or {}, "entry_price", "N/A")
+        pnl = _g(position or {}, "unrealized_pnl", "N/A")
+        reply = (
+            f"**Paper Position for {symbol} ({strat}):**\n\n"
+            f"• **Entry Price:** ₹{entry}\n"
+            f"• **Unrealized P&L:** ₹{pnl}\n"
+            f"• **Strategy State:** {_g(signal or {}, 'strategy_state', 'ACTIVE')}\n"
+            f"• **Regime at Entry:** {_g(position or signal or {}, 'regime_at_entry', 'NORMAL')}\n\n"
+            f"*All paper trades execute on next-bar open with full Indian equity friction deductions.*"
+        )
+        return {"reply": reply, "evidence_cited": ["Paper Execution Audit", "Deterministic Rules"]}
+
+    def _build_deterministic_skeptic_critique(
+        self,
+        symbol: str,
+        position: Optional[Dict[str, Any]],
+        signal: Optional[Dict[str, Any]],
+        drift_report: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        critiques = []
+        def _g(o, k, d=None):
+            return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
+
+        if drift_report and _g(drift_report, "overall_status") == "MODEL_DRIFT_ALERT":
+            critiques.append("• **Model Drift Detected**: Paper performance has diverged significantly from historical backtest distributions.")
+
+        if position:
+            fees = _g(position, "fees_paid", 0)
+            slip = _g(position, "slippage_paid", 0)
+            tot_fric = fees + slip
+            if tot_fric > 50.0:
+                critiques.append(f"• **Friction Drag**: Transaction costs (₹{tot_fric}) consume a substantial portion of potential alpha.")
+
+        if not critiques:
+            critiques.append("• Audit regime compatibility and verify that recent volatility matches historical walk-forward regimes.")
+
+        reply = (
+            f"**Paper Signal Skeptic Critique for {symbol}:**\n\n"
+            + "\n".join(critiques)
+            + "\n\n*Note: High historical returns do not protect against regime mismatch or execution delays.*"
+        )
+        return {"reply": reply, "evidence_cited": ["Skeptic Audit", "Friction Drag", "Model Drift"]}
+
+
+paper_copilot_agent = PaperCopilotAgent()
+
+

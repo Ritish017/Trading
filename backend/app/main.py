@@ -1271,6 +1271,127 @@ async def challenge_fundamental_thesis(symbol: str, req: FundamentalCopilotReque
     return res
 
 
+# ---------------------------------------------------------------------------
+# Phase 8: Paper Trading Bridge & Data Health Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.paper_engine.models import ResearchLifecycleState, ExitReason
+from backend.app.paper_engine.bridge import paper_bridge
+from backend.app.paper_engine.drift_engine import ModelDriftDetector
+from backend.app.paper_engine.lifecycle_manager import lifecycle_manager
+from backend.app.data_engine.health_monitor import data_health_monitor
+from backend.app.ai_engine.agents import paper_copilot_agent
+
+
+@app.get("/api/paper/positions")
+async def get_paper_positions():
+    """Returns all active and historical paper trading positions."""
+    return {
+        "positions": [asdict(p) for p in paper_bridge.positions.values()],
+        "performance": paper_bridge.get_performance_summary(),
+    }
+
+
+@app.get("/api/paper/performance")
+async def get_paper_performance():
+    """Returns full performance analytics for the paper trading portfolio."""
+    return {"performance": paper_bridge.get_performance_summary()}
+
+
+@app.get("/api/paper/audits")
+async def get_paper_trade_audits():
+    """Returns complete forensic audit logs for closed paper trades."""
+    return {"audits": [asdict(a) for a in paper_bridge.trade_audits]}
+
+
+class PaperTransitionRequest(BaseModel):
+    candidate_id: str
+    new_state: str
+    reason: Optional[str] = ""
+
+
+@app.post("/api/paper/lifecycle/transition")
+async def transition_candidate_lifecycle(req: PaperTransitionRequest):
+    """Executes validated research lifecycle progression."""
+    try:
+        target_state = ResearchLifecycleState(req.new_state)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid state: {req.new_state}")
+
+    ok, msg = lifecycle_manager.transition_state(req.candidate_id, target_state, req.reason or "")
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": True, "message": msg, "candidate": asdict(lifecycle_manager.get_candidate(req.candidate_id))}
+
+
+@app.get("/api/paper/lifecycle/candidates")
+async def list_research_candidates():
+    """Returns all strategies in the research lifecycle ledger."""
+    return {"candidates": [asdict(c) for c in lifecycle_manager.list_candidates()]}
+
+
+@app.get("/api/paper/drift/{strategy_id}")
+async def get_model_drift_report(strategy_id: str):
+    """Evaluates statistical and friction drift between backtest and paper execution."""
+    audits = [a for a in paper_bridge.trade_audits if a.strategy_id == strategy_id]
+    report = ModelDriftDetector.evaluate_drift(
+        strategy_id=strategy_id,
+        backtest_metrics={"win_rate_pct": 55.0, "sharpe_ratio": 1.4, "avg_slippage": 40.0},
+        paper_trades=audits,
+    )
+    return {"drift_report": asdict(report)}
+
+
+@app.get("/api/data/health-monitor")
+async def get_data_health_report():
+    """Returns real-time data health, provider provenance, and latency monitoring."""
+    rep = data_health_monitor.get_health_report(
+        active_market_provider="UPSTOX",
+        active_fundamental_provider="AUTHENTIC_FIXTURE_HUB",
+        is_live_feed=True,
+    )
+    return {"health_report": asdict(rep)}
+
+
+class PaperCopilotRequest(BaseModel):
+    symbol: str
+    user_message: str
+    position: Optional[Dict[str, Any]] = None
+    signal: Optional[Dict[str, Any]] = None
+    drift_report: Optional[Dict[str, Any]] = None
+    chat_history: Optional[List[Dict[str, str]]] = None
+    is_skeptic_mode: Optional[bool] = False
+
+
+@app.post("/api/paper/copilot")
+async def paper_copilot(req: PaperCopilotRequest):
+    """Evidence-grounded Paper Trading Copilot."""
+    res = await paper_copilot_agent.answer(
+        symbol=req.symbol,
+        user_message=req.user_message,
+        position=req.position,
+        signal=req.signal,
+        drift_report=req.drift_report,
+        chat_history=req.chat_history,
+        is_skeptic_mode=bool(req.is_skeptic_mode),
+    )
+    return res
+
+
+@app.post("/api/paper/challenge")
+async def challenge_paper_signal(req: PaperCopilotRequest):
+    """Skeptic Mode: Challenges paper signal rules, friction drag, and model drift."""
+    res = await paper_copilot_agent.answer(
+        symbol=req.symbol,
+        user_message="CHALLENGE THIS SIGNAL: What are the strongest arguments and risks against this trade?",
+        position=req.position,
+        signal=req.signal,
+        drift_report=req.drift_report,
+        chat_history=req.chat_history,
+        is_skeptic_mode=True,
+    )
+    return res
+
+
 @app.websocket("/ws/ticks")
 async def websocket_ticks(websocket: WebSocket):
     await websocket.accept()

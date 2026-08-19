@@ -104,15 +104,29 @@ export interface SeriesIndicators {
   ema50?: (number | null)[];
   ema200?: (number | null)[];
   vwap?: (number | null)[];
+  vwap_distance_pct?: (number | null)[];
   rsi14?: (number | null)[];
+  roc12?: (number | null)[];
   macd?: (number | null)[];
   macd_signal?: (number | null)[];
   macd_histogram?: (number | null)[];
+  adx?: (number | null)[];
+  plus_di?: (number | null)[];
+  minus_di?: (number | null)[];
   bb_upper?: (number | null)[];
   bb_middle?: (number | null)[];
   bb_lower?: (number | null)[];
+  donchian_high?: (number | null)[];
+  donchian_mid?: (number | null)[];
+  donchian_low?: (number | null)[];
+  prev_day_high?: (number | null)[];
+  prev_day_low?: (number | null)[];
+  highest_high_20?: (number | null)[];
   atr14?: (number | null)[];
+  atr_sma20?: (number | null)[];
   rvol?: (number | null)[];
+  cmf20?: (number | null)[];
+  obv?: (number | null)[];
   supertrend_band?: (number | null)[];
   orb_high?: (number | null)[];
   orb_low?: (number | null)[];
@@ -389,12 +403,19 @@ function ObservatoryChart({
   const isBollingerActive = layers.bollinger || strategyOverlays.includes('bb_upper') || strategyOverlays.includes('bb_middle');
   const isSupertrendActive = layers.supertrend || strategyOverlays.includes('supertrend_band');
   const isORBActive = layers.orb || strategyOverlays.includes('orb_high') || strategyOverlays.includes('orb_low');
+  const isDonchianActive = strategyOverlays.includes('donchian_high') || strategyOverlays.includes('donchian_low');
+  const isPDHActive = strategyOverlays.includes('prev_day_high') || strategyOverlays.includes('prev_day_low');
+  const isHH20Active = strategyOverlays.includes('highest_high_20');
 
   // Dynamic subpanels from strategy definition metadata
   const strategySubpanels = selectedStrategy?.visualization?.subpanels || [];
   const isRSISubpanel = strategySubpanels.includes('rsi14');
   const isMACDSubpanel = strategySubpanels.includes('macd');
-  const hasSubpanel = isRSISubpanel || isMACDSubpanel;
+  const isADXSubpanel = strategySubpanels.includes('adx');
+  const isROCSubpanel = strategySubpanels.includes('roc12');
+  const isATRSubpanel = strategySubpanels.includes('atr14');
+  const isCMFSubpanel = strategySubpanels.includes('cmf20');
+  const hasSubpanel = isRSISubpanel || isMACDSubpanel || isADXSubpanel || isROCSubpanel || isATRSubpanel || isCMFSubpanel;
 
   const totalHeight = priceChartHeight + volumeHeight + (hasSubpanel ? subpanelHeight + subpanelGap : 0) + 20;
 
@@ -592,6 +613,9 @@ function ObservatoryChart({
         {isBollingerActive && <span className="flex items-center gap-1 text-emerald-400"><span className="w-2 h-0.5 bg-emerald-400 inline-block" /> Bollinger (20, 2σ)</span>}
         {isSupertrendActive && <span className="flex items-center gap-1 text-lime-400"><span className="w-2 h-0.5 bg-lime-400 inline-block" /> Dynamic Support</span>}
         {isORBActive && <span className="flex items-center gap-1 text-yellow-400"><span className="w-2 h-0.5 bg-yellow-400 inline-block" /> ORB Range</span>}
+        {isDonchianActive && <span className="flex items-center gap-1 text-yellow-300"><span className="w-2 h-0.5 bg-yellow-300 inline-block" /> Donchian (20)</span>}
+        {isPDHActive && <span className="flex items-center gap-1 text-orange-400"><span className="w-2 h-0.5 bg-orange-400 inline-block" /> Prev Day H/L</span>}
+        {isHH20Active && <span className="flex items-center gap-1 text-emerald-300"><span className="w-2 h-0.5 bg-emerald-300 inline-block" /> 20-Bar High</span>}
       </div>
 
       {/* SVG Canvas */}
@@ -705,6 +729,25 @@ function ObservatoryChart({
             </>
           )}
 
+          {isDonchianActive && (
+            <>
+              <path d={makeLinePath(indicators.donchian_high)} stroke="#eab308" strokeWidth={1.2} fill="none" strokeDasharray="3,2" />
+              <path d={makeLinePath(indicators.donchian_mid)} stroke="#ca8a04" strokeWidth={0.8} fill="none" strokeDasharray="2,2" />
+              <path d={makeLinePath(indicators.donchian_low)} stroke="#eab308" strokeWidth={1.2} fill="none" strokeDasharray="3,2" />
+            </>
+          )}
+
+          {isPDHActive && (
+            <>
+              <path d={makeLinePath(indicators.prev_day_high)} stroke="#f59e0b" strokeWidth={1.2} strokeDasharray="4,2" fill="none" />
+              <path d={makeLinePath(indicators.prev_day_low)} stroke="#f59e0b" strokeWidth={1.2} strokeDasharray="4,2" fill="none" />
+            </>
+          )}
+
+          {isHH20Active && indicators.highest_high_20 && (
+            <path d={makeLinePath(indicators.highest_high_20)} stroke="#10b981" strokeWidth={1} strokeDasharray="2,2" fill="none" />
+          )}
+
           {isSupertrendActive && indicators.supertrend_band && (
             <path d={makeLinePath(indicators.supertrend_band)} stroke="#a3e635" strokeWidth={1.5} fill="none" strokeDasharray="4,2" />
           )}
@@ -775,7 +818,7 @@ function ObservatoryChart({
             </g>
           )}
 
-          {/* Subpanels for Oscillators (RSI / MACD) */}
+          {/* Subpanels for Oscillators */}
           {isRSISubpanel && indicators.rsi14 && (
             <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
               <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
@@ -783,7 +826,36 @@ function ObservatoryChart({
               <line x1={0} y1={getSubY(50, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(50, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
               <line x1={0} y1={getSubY(35, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(35, 0, 100) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#10b981" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
               <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">RSI(14): {indicators.rsi14[activeIdx]?.toFixed(1) || 'N/A'}</text>
-              <path d={makeSubpanelPath(indicators.rsi14, 0, 100)} stroke="#a855f7" strokeWidth={1.5} fill="none" />
+              <path d={makeSubpanelPath(indicators.rsi14, 0, 100)} stroke="#ec4899" strokeWidth={1.5} fill="none" />
+            </g>
+          )}
+
+          {isADXSubpanel && indicators.adx && (
+            <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
+              <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
+              <line x1={0} y1={getSubY(25, 0, 60) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(25, 0, 60) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#06b6d4" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.6} />
+              <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">ADX(14): {indicators.adx[activeIdx]?.toFixed(1) || 'N/A'}</text>
+              <path d={makeSubpanelPath(indicators.adx, 0, 60)} stroke="#06b6d4" strokeWidth={1.5} fill="none" />
+              <path d={makeSubpanelPath(indicators.plus_di, 0, 60)} stroke="#10b981" strokeWidth={1} fill="none" />
+              <path d={makeSubpanelPath(indicators.minus_di, 0, 60)} stroke="#f43f5e" strokeWidth={1} fill="none" />
+            </g>
+          )}
+
+          {isROCSubpanel && indicators.roc12 && (
+            <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
+              <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
+              <line x1={0} y1={getSubY(0, -6, 6) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(0, -6, 6) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
+              <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">ROC(12): {indicators.roc12[activeIdx]?.toFixed(2) || 'N/A'}%</text>
+              <path d={makeSubpanelPath(indicators.roc12, -6, 6)} stroke="#8b5cf6" strokeWidth={1.5} fill="none" />
+            </g>
+          )}
+
+          {isCMFSubpanel && indicators.cmf20 && (
+            <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
+              <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
+              <line x1={0} y1={getSubY(0, -0.3, 0.3) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(0, -0.3, 0.3) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
+              <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">CMF(20): {indicators.cmf20[activeIdx]?.toFixed(3) || 'N/A'}</text>
+              <path d={makeSubpanelPath(indicators.cmf20, -0.3, 0.3)} stroke="#84cc16" strokeWidth={1.5} fill="none" />
             </g>
           )}
 

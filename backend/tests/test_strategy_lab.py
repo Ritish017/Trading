@@ -10,6 +10,7 @@ from backend.app.strategy_engine.dsl import (
 from backend.app.strategy_engine.registry import (
     STRATEGY_REGISTRY,
     registry_manager,
+    ALL_CANONICAL_STRATEGIES,
 )
 from backend.app.strategy_engine.evaluator import (
     evaluate_all_strategies,
@@ -23,37 +24,61 @@ from backend.app.strategy_engine.evaluator import (
 from backend.app.ai_engine.agents import StrategyCopilotAgent
 
 def test_strategy_registry_completeness():
-    assert len(STRATEGY_REGISTRY) >= 8
+    assert len(STRATEGY_REGISTRY) == 20
+    assert len(ALL_CANONICAL_STRATEGIES) == 20
     for sid, strat in STRATEGY_REGISTRY.items():
         assert strat.strategy_id == sid
         assert len(strat.entry_rules) > 0
         assert strat.min_candles >= 10
         assert strat.short_name is not None
-        assert strat.version is not None
+        assert strat.version == "1.0.0"
         assert strat.requirements is not None
         assert strat.visualization is not None
+        assert isinstance(strat.category, StrategyCategory)
+
+def test_category_distribution():
+    trend = registry_manager.list_by_category(StrategyCategory.TREND)
+    assert len(trend) == 5
+    
+    momentum = registry_manager.list_by_category(StrategyCategory.MOMENTUM)
+    assert len(momentum) == 4
+    
+    mean_rev = registry_manager.list_by_category(StrategyCategory.MEAN_REVERSION)
+    assert len(mean_rev) == 3
+    
+    breakout = registry_manager.list_by_category(StrategyCategory.BREAKOUT)
+    assert len(breakout) == 4
+    
+    volume = registry_manager.list_by_category(StrategyCategory.VOLUME)
+    assert len(volume) == 3
+    
+    volatility = registry_manager.list_by_category(StrategyCategory.VOLATILITY)
+    assert len(volatility) == 1
 
 def test_strategy_registry_manager_queries():
     all_strats = registry_manager.list_all()
-    assert len(all_strats) >= 8
+    assert len(all_strats) == 20
 
     enabled_strats = registry_manager.list_enabled()
-    assert len(enabled_strats) >= 8
+    assert len(enabled_strats) == 20
 
     trend_strats = registry_manager.list_by_category(StrategyCategory.TREND)
-    assert len(trend_strats) >= 2
+    assert len(trend_strats) == 5
     assert any(s.strategy_id == "EMA_GOLDEN_CROSS" for s in trend_strats)
+    assert any(s.strategy_id == "ADX_TREND_STRENGTH" for s in trend_strats)
+    assert any(s.strategy_id == "MOVING_AVERAGE_MOMENTUM_STACK" for s in trend_strats)
 
-    deps = registry_manager.get_all_required_dependencies(["EMA_GOLDEN_CROSS", "VWAP_MOMENTUM"])
+    deps = registry_manager.get_all_required_dependencies(["EMA_GOLDEN_CROSS", "VWAP_MOMENTUM", "ADX_TREND_STRENGTH"])
     assert "ema20" in deps
     assert "ema50" in deps
     assert "vwap" in deps
     assert "rsi14" in deps
+    assert "adx" in deps
+    assert "plus_di" in deps
 
-    vis = registry_manager.get_visualization("EMA_GOLDEN_CROSS")
+    vis = registry_manager.get_visualization("DONCHIAN_BREAKOUT")
     assert vis is not None
-    assert "ema20" in vis.overlays
-    assert "ema50" in vis.overlays
+    assert "donchian_high" in vis.overlays
 
 def test_evaluator_insufficient_candles():
     candles = [
@@ -61,6 +86,7 @@ def test_evaluator_insufficient_candles():
         for i in range(5)
     ]
     results = evaluate_all_strategies(candles)
+    assert len(results) == 20
     for res in results:
         assert res.state == StrategyState.UNAVAILABLE
         assert res.entry_rules_unavailable > 0
@@ -74,15 +100,36 @@ def test_evaluator_sufficient_candles():
             "low": 99.5 + (i * 0.5),
             "close": 100.8 + (i * 0.5),
             "volume": 5000 + (i * 50),
+            "timestamp": now - (250 - i) * 60,
+        }
+        for i in range(250)
+    ]
+    results = evaluate_all_strategies(candles, is_live_feed=True)
+    assert len(results) == 20
+    for res in results:
+        assert res.candles_used == 250
+        assert res.state in [StrategyState.ACTIVE, StrategyState.PARTIAL, StrategyState.INACTIVE, StrategyState.CONFLICTED]
+
+def test_ma_stack_insufficient_history():
+    """
+    Phase 12: Moving Average Momentum Stack requires 200 bars.
+    When 60 bars are provided, it must evaluate to UNAVAILABLE.
+    """
+    now = time.time()
+    candles = [
+        {
+            "open": 100.0 + (i * 0.5),
+            "high": 101.0 + (i * 0.5),
+            "low": 99.5 + (i * 0.5),
+            "close": 100.8 + (i * 0.5),
+            "volume": 5000 + (i * 50),
             "timestamp": now - (60 - i) * 60,
         }
         for i in range(60)
     ]
     results = evaluate_all_strategies(candles, is_live_feed=True)
-    assert len(results) == len(STRATEGY_REGISTRY)
-    for res in results:
-        assert res.candles_used == 60
-        assert res.state in [StrategyState.ACTIVE, StrategyState.PARTIAL, StrategyState.INACTIVE, StrategyState.CONFLICTED]
+    ma_stack = next(r for r in results if r.strategy_id == "MOVING_AVERAGE_MOMENTUM_STACK")
+    assert ma_stack.state == StrategyState.UNAVAILABLE
 
 def test_freshness_separation_stale_data():
     seven_hours_ago = time.time() - (7 * 3600 + 12 * 60)
@@ -124,8 +171,10 @@ def test_series_indicators_computation():
     assert "ema20" in series
     assert "ema50" in series
     assert "vwap" in series
-    assert "bb_upper" in series
-    assert "macd" in series
+    assert "adx" in series
+    assert "donchian_high" in series
+    assert "roc12" in series
+    assert "cmf20" in series
     assert len(series["ema20"]) == 60
     assert series["ema20"][-1] is not None
     assert series["vwap"][-1] is not None
@@ -160,7 +209,7 @@ def test_observatory_payload_structure():
     assert obs["data_freshness"] == "LIVE"
     assert obs["timeframe"] == "15m"
     assert obs["provider"] == "UPSTOX"
-    assert len(obs["strategies"]) == len(STRATEGY_REGISTRY)
+    assert len(obs["strategies"]) == 20
     assert len(obs["candles"]) == 60
     
     # Check V3 Metadata serialized
@@ -270,10 +319,6 @@ def test_market_status_detection():
     assert status in ["OPEN", "CLOSED", "PRE_OPEN"]
 
 def test_backtest_hypothesis_evaluation():
-    """
-    Phase 17: Backtester compatibility without React or UI dependencies.
-    """
-    now = time.time()
     data = {
         "open": [100.0 + i for i in range(50)],
         "high": [102.0 + i for i in range(50)],

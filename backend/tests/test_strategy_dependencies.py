@@ -287,15 +287,15 @@ def test_strategy_dependency_declarations_against_specs():
 
 def test_strategy_evaluation_with_hardened_dependency_engine():
     """
-    Phase 25: All 8 existing strategies evaluate cleanly and deterministically with the hardened engine.
+    Phase 25: All 20 strategies evaluate cleanly and deterministically with the hardened engine.
     """
     candles = generate_synthetic_candles(n=60, base_price=100.0)
     results = evaluate_all_strategies(candles, is_live_feed=True)
     
-    assert len(results) == 8
+    assert len(results) == 20
     for res in results:
         assert res.strategy_id in STRATEGY_REGISTRY
-        assert res.state in [StrategyState.ACTIVE, StrategyState.PARTIAL, StrategyState.INACTIVE, StrategyState.CONFLICTED]
+        assert res.state in [StrategyState.ACTIVE, StrategyState.PARTIAL, StrategyState.INACTIVE, StrategyState.CONFLICTED, StrategyState.UNAVAILABLE]
         assert len(res.rule_evaluations) > 0
         for re in res.rule_evaluations:
             assert re.outcome in [RuleOutcome.PASS, RuleOutcome.FAIL, RuleOutcome.UNAVAILABLE]

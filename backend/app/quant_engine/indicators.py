@@ -140,3 +140,94 @@ def calculate_relative_volume(series: pd.Series, period: int = 20) -> pd.Series:
     rvol = np.where(avg_vol > 0, series / avg_vol, np.nan)
     return pd.Series(rvol, index=series.index)
 
+
+def calculate_adx(
+    df: pd.DataFrame, period: int = 14
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Average Directional Index (ADX) & Directional Movement (+DI, -DI).
+    Requires df columns: 'high', 'low', 'close'.
+    Returns: (adx, plus_di, minus_di)
+    """
+    if df.empty or len(df) < period * 2:
+        empty = pd.Series(np.nan, index=df.index)
+        return empty, empty, empty
+
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    prev_close = close.shift(1)
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    up_move = high - prev_high
+    down_move = prev_low - low
+
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+    # Wilder's Smoothing (alpha = 1 / period)
+    atr = tr.ewm(alpha=1.0 / period, adjust=False).mean()
+    plus_di = 100.0 * pd.Series(plus_dm, index=df.index).ewm(alpha=1.0 / period, adjust=False).mean() / np.where(atr > 0, atr, np.nan)
+    minus_di = 100.0 * pd.Series(minus_dm, index=df.index).ewm(alpha=1.0 / period, adjust=False).mean() / np.where(atr > 0, atr, np.nan)
+
+    di_sum = plus_di + minus_di
+    di_diff = (plus_di - minus_di).abs()
+    dx = 100.0 * np.where(di_sum > 0, di_diff / di_sum, 0.0)
+    adx = pd.Series(dx, index=df.index).ewm(alpha=1.0 / period, adjust=False).mean()
+
+    return adx, plus_di, minus_di
+
+
+def calculate_donchian_channel(
+    df: pd.DataFrame, period: int = 20
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Donchian Channel using strictly prior candles (no lookahead bias).
+    Returns: (upper_band, middle_band, lower_band)
+    """
+    upper = df['high'].shift(1).rolling(window=period).max()
+    lower = df['low'].shift(1).rolling(window=period).min()
+    middle = (upper + lower) / 2.0
+    return upper, middle, lower
+
+
+def calculate_obv(df: pd.DataFrame) -> pd.Series:
+    """
+    On-Balance Volume (OBV).
+    Requires df columns: 'close', 'volume'.
+    """
+    if 'volume' not in df.columns or 'close' not in df.columns:
+        return pd.Series(np.nan, index=df.index)
+
+    close_diff = df['close'].diff()
+    direction = np.where(close_diff > 0, 1.0, np.where(close_diff < 0, -1.0, 0.0))
+    # First row has no diff
+    direction[0] = 0.0
+    obv = (direction * df['volume']).cumsum()
+    return pd.Series(obv, index=df.index)
+
+
+def calculate_cmf(df: pd.DataFrame, period: int = 20) -> pd.Series:
+    """
+    Chaikin Money Flow (CMF).
+    Requires df columns: 'high', 'low', 'close', 'volume'.
+    """
+    if not all(c in df.columns for c in ['high', 'low', 'close', 'volume']):
+        return pd.Series(np.nan, index=df.index)
+
+    hl_range = df['high'] - df['low']
+    cl_range = (df['close'] - df['low']) - (df['high'] - df['close'])
+    mfm = np.where(hl_range > 0, cl_range / hl_range, 0.0)
+    mfv = mfm * df['volume']
+
+    sum_mfv = pd.Series(mfv, index=df.index).rolling(window=period).sum()
+    sum_vol = df['volume'].rolling(window=period).sum()
+    cmf = np.where(sum_vol > 0, sum_mfv / sum_vol, np.nan)
+    return pd.Series(cmf, index=df.index)
+

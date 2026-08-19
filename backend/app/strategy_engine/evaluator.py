@@ -174,9 +174,12 @@ def _compute_math_detail(rule: StrategyRule, fv: Dict) -> Optional[str]:
     if rule.rule_id == "price_above_vwap":
         c, v = fv.get("close"), fv.get("vwap")
         return f"Price (₹{c:.2f}) − VWAP (₹{v:.2f}) = {c - v:+.2f}"
-    elif rule.rule_id in ("ema_trend_aligned", "ema20_above_ema50"):
+    elif rule.rule_id in ("ema_trend_aligned", "ema20_above_ema50", "ema_fast_above_medium"):
         e20, e50 = fv.get("ema20"), fv.get("ema50")
         return f"EMA20 (₹{e20:.2f}) − EMA50 (₹{e50:.2f}) = {e20 - e50:+.2f}"
+    elif rule.rule_id == "ema_medium_above_slow":
+        e50, e200 = fv.get("ema50"), fv.get("ema200")
+        return f"EMA50 (₹{e50:.2f}) − EMA200 (₹{e200:.2f}) = {e50 - e200:+.2f}"
     elif rule.rule_id == "rsi_momentum":
         r = fv.get("rsi14")
         return f"RSI14 ({r:.1f}) − Threshold (55.0) = {r - 55.0:+.1f}"
@@ -196,6 +199,37 @@ def _compute_math_detail(rule: StrategyRule, fv: Dict) -> Optional[str]:
         c, v, a = fv.get("close"), fv.get("vwap"), fv.get("atr14")
         sup = v - 1.5 * a
         return f"Price (₹{c:.2f}) − Dynamic Support (₹{sup:.2f}) = {c - sup:+.2f}"
+    elif rule.rule_id == "adx_strong_trend":
+        a = fv.get("adx")
+        return f"ADX14 ({a:.1f}) − Threshold (25.0) = {a - 25.0:+.1f}"
+    elif rule.rule_id == "bullish_directional_movement":
+        p, m = fv.get("plus_di"), fv.get("minus_di")
+        return f"+DI ({p:.1f}) − -DI ({m:.1f}) = {p - m:+.1f}"
+    elif rule.rule_id == "roc_acceleration":
+        r = fv.get("roc12")
+        return f"ROC12 ({r:+.2f}%) − Threshold (+1.50%) = {r - 1.50:+.2f}%"
+    elif rule.rule_id == "donchian_channel_breakout":
+        c, dh = fv.get("close"), fv.get("donchian_high")
+        return f"Price (₹{c:.2f}) − Donchian High (₹{dh:.2f}) = {c - dh:+.2f}"
+    elif rule.rule_id == "breakout_above_pdh":
+        c, pdh = fv.get("close"), fv.get("prev_day_high")
+        return f"Price (₹{c:.2f}) − Prev Day High (₹{pdh:.2f}) = {c - pdh:+.2f}"
+    elif rule.rule_id == "vwap_downside_stretch":
+        d = fv.get("vwap_distance_pct")
+        return f"VWAP Distance ({d:+.2f}%) <= Threshold (-1.50%)"
+    elif rule.rule_id == "positive_money_flow":
+        cmf = fv.get("cmf20")
+        return f"CMF20 ({cmf:+.3f}) − Threshold (+0.100) = {cmf - 0.100:+.3f}"
+    elif rule.rule_id == "atr_expansion_spike":
+        a, ab = fv.get("atr14"), fv.get("atr_sma20")
+        return f"ATR14 ({a:.2f}) − 1.3x Baseline ({1.3 * ab:.2f}) = {a - 1.3 * ab:+.2f}"
+
+    # Generic mathematical formatting
+    if rule.threshold is not None and len(keys) == 1 and vals[0] is not None:
+        v = vals[0]
+        return f"{keys[0]} ({v:.2f}) {rule.operator} {rule.threshold:.2f} (diff = {v - rule.threshold:+.2f})"
+    elif len(keys) == 2 and vals[0] is not None and vals[1] is not None:
+        return f"{keys[0]} ({vals[0]:.2f}) {rule.operator} {keys[1]} ({vals[1]:.2f}) (diff = {vals[0] - vals[1]:+.2f})"
 
     return None
 
@@ -306,11 +340,11 @@ def compute_strategy_confluence(results: List[StrategyEvaluationResult]) -> Dict
     alignment_score = round((passing_entry_rules / total_entry_rules) * 100, 1) if total_entry_rules > 0 else 0.0
 
     # Bullish vs Reversal counts
-    bullish_strategies = {"VWAP_MOMENTUM", "EMA_GOLDEN_CROSS", "BOLLINGER_SQUEEZE", "MACD_CROSSOVER", "ORB_BREAKOUT", "SUPERTREND_PROXY", "RVOL_SURGE"}
-    reversal_strategies = {"RSI_OVERSOLD_REVERSAL"}
+    bullish_categories = {"Trend Following", "Momentum", "Breakout", "Volume", "Volatility"}
+    reversal_categories = {"Mean-Reversion"}
 
-    bullish_active = sum(1 for r in results if r.strategy_id in bullish_strategies and r.state == StrategyState.ACTIVE)
-    reversal_active = sum(1 for r in results if r.strategy_id in reversal_strategies and r.state == StrategyState.ACTIVE)
+    bullish_active = sum(1 for r in results if r.category in bullish_categories and r.state == StrategyState.ACTIVE)
+    reversal_active = sum(1 for r in results if r.category in reversal_categories and r.state == StrategyState.ACTIVE)
 
     conflicts: List[str] = []
     if bullish_active >= 2 and reversal_active >= 1:

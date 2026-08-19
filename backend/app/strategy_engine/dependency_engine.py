@@ -1,6 +1,6 @@
 """
-Strategy Engine — Canonical Dependency & Indicator Engine (V3 Hardening)
-========================================================================
+Strategy Engine — Canonical Dependency & Indicator Engine (V3 Hardening & Expansion)
+====================================================================================
 Implements the single-calculation invariant, canonical dependency normalization,
 parameterized indicator specifications, strict history enforcement, zero-vs-missing
 distinctions, and lookahead-free series evaluation.
@@ -16,6 +16,7 @@ Architecture Contract
 
 import math
 from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Set, Tuple, Union
 import numpy as np
 import pandas as pd
@@ -28,6 +29,11 @@ from backend.app.quant_engine.indicators import (
     calculate_atr,
     calculate_bollinger_bands,
     calculate_relative_volume,
+    calculate_adx,
+    calculate_donchian_channel,
+    calculate_roc,
+    calculate_obv,
+    calculate_cmf,
 )
 
 
@@ -59,6 +65,18 @@ KEY_ALIASES: Dict[str, str] = {
     "bb_bot": "bb_lower",
     "supertrend": "supertrend_band",
     "supertrend_proxy": "supertrend_band",
+    "roc": "roc12",
+    "roc_12": "roc12",
+    "donchian_upper": "donchian_high",
+    "donchian_lower": "donchian_low",
+    "donchian_middle": "donchian_mid",
+    "cmf": "cmf20",
+    "chaikin_money_flow": "cmf20",
+    "adx_14": "adx",
+    "pdh": "prev_day_high",
+    "pdl": "prev_day_low",
+    "previous_day_high": "prev_day_high",
+    "previous_day_low": "prev_day_low",
 }
 
 
@@ -161,6 +179,14 @@ INDICATOR_SPECS: Dict[str, IndicatorSpec] = {
         requires_high_low=True,
         description="Session-anchored volume weighted average price"
     ),
+    "vwap_distance_pct": IndicatorSpec(
+        canonical_key="vwap_distance_pct",
+        name="VWAP Distance %",
+        category="mean_reversion",
+        min_history=5,
+        requires_volume=True,
+        description="Percentage distance from session VWAP: ((Close - VWAP) / VWAP) * 100"
+    ),
     "rsi14": IndicatorSpec(
         canonical_key="rsi14",
         name="Relative Strength Index (14)",
@@ -168,6 +194,14 @@ INDICATOR_SPECS: Dict[str, IndicatorSpec] = {
         min_history=15,
         parameters={"period": 14},
         description="14-period standard Relative Strength Index"
+    ),
+    "roc12": IndicatorSpec(
+        canonical_key="roc12",
+        name="Rate of Change (12)",
+        category="momentum",
+        min_history=13,
+        parameters={"period": 12},
+        description="12-period Rate of Change percentage"
     ),
     "macd": IndicatorSpec(
         canonical_key="macd",
@@ -193,6 +227,33 @@ INDICATOR_SPECS: Dict[str, IndicatorSpec] = {
         parameters={"fast": 12, "slow": 26, "signal": 9},
         description="MACD line minus MACD Signal line"
     ),
+    "adx": IndicatorSpec(
+        canonical_key="adx",
+        name="Average Directional Index (14)",
+        category="trend",
+        min_history=28,
+        requires_high_low=True,
+        parameters={"period": 14},
+        description="14-period Average Directional Index measuring trend strength"
+    ),
+    "plus_di": IndicatorSpec(
+        canonical_key="plus_di",
+        name="+Directional Indicator (+DI 14)",
+        category="trend",
+        min_history=28,
+        requires_high_low=True,
+        parameters={"period": 14},
+        description="14-period Positive Directional Indicator"
+    ),
+    "minus_di": IndicatorSpec(
+        canonical_key="minus_di",
+        name="-Directional Indicator (-DI 14)",
+        category="trend",
+        min_history=28,
+        requires_high_low=True,
+        parameters={"period": 14},
+        description="14-period Negative Directional Indicator"
+    ),
     "atr14": IndicatorSpec(
         canonical_key="atr14",
         name="Average True Range (14)",
@@ -201,6 +262,15 @@ INDICATOR_SPECS: Dict[str, IndicatorSpec] = {
         requires_high_low=True,
         parameters={"period": 14},
         description="14-period Average True Range of price volatility"
+    ),
+    "atr_sma20": IndicatorSpec(
+        canonical_key="atr_sma20",
+        name="ATR 20-Period Baseline",
+        category="volatility",
+        min_history=35,
+        requires_high_low=True,
+        parameters={"period": 20},
+        description="20-period simple moving average of ATR14 baseline"
     ),
     "bb_upper": IndicatorSpec(
         canonical_key="bb_upper",
@@ -226,6 +296,56 @@ INDICATOR_SPECS: Dict[str, IndicatorSpec] = {
         parameters={"period": 20, "std": 2.0},
         description="Lower Bollinger band at SMA20 - 2 standard deviations"
     ),
+    "donchian_high": IndicatorSpec(
+        canonical_key="donchian_high",
+        name="Donchian Channel High (20)",
+        category="breakout",
+        min_history=21,
+        requires_high_low=True,
+        parameters={"period": 20},
+        description="Prior 20-period highest high"
+    ),
+    "donchian_mid": IndicatorSpec(
+        canonical_key="donchian_mid",
+        name="Donchian Channel Middle (20)",
+        category="breakout",
+        min_history=21,
+        requires_high_low=True,
+        parameters={"period": 20},
+        description="Prior 20-period middle channel"
+    ),
+    "donchian_low": IndicatorSpec(
+        canonical_key="donchian_low",
+        name="Donchian Channel Low (20)",
+        category="breakout",
+        min_history=21,
+        requires_high_low=True,
+        parameters={"period": 20},
+        description="Prior 20-period lowest low"
+    ),
+    "prev_day_high": IndicatorSpec(
+        canonical_key="prev_day_high",
+        name="Previous Day High",
+        category="breakout",
+        min_history=20,
+        requires_high_low=True,
+        description="Highest high recorded during the previous trading day"
+    ),
+    "prev_day_low": IndicatorSpec(
+        canonical_key="prev_day_low",
+        name="Previous Day Low",
+        category="breakout",
+        min_history=20,
+        requires_high_low=True,
+        description="Lowest low recorded during the previous trading day"
+    ),
+    "highest_high_20": IndicatorSpec(
+        canonical_key="highest_high_20",
+        name="Highest Close (20)",
+        category="breakout",
+        min_history=21,
+        description="Prior 20-period highest closing price"
+    ),
     "rvol": IndicatorSpec(
         canonical_key="rvol",
         name="Relative Volume (20)",
@@ -234,6 +354,24 @@ INDICATOR_SPECS: Dict[str, IndicatorSpec] = {
         requires_volume=True,
         parameters={"period": 20},
         description="Current volume divided by 20-period rolling average volume"
+    ),
+    "cmf20": IndicatorSpec(
+        canonical_key="cmf20",
+        name="Chaikin Money Flow (20)",
+        category="volume",
+        min_history=20,
+        requires_volume=True,
+        requires_high_low=True,
+        parameters={"period": 20},
+        description="20-period Chaikin Money Flow"
+    ),
+    "obv": IndicatorSpec(
+        canonical_key="obv",
+        name="On-Balance Volume",
+        category="volume",
+        min_history=2,
+        requires_volume=True,
+        description="Cumulative On-Balance Volume"
     ),
     "supertrend_band": IndicatorSpec(
         canonical_key="supertrend_band",
@@ -402,21 +540,31 @@ class DependencyEngine:
             _record("ema200", ema200_s, 200)
 
         # 3. VWAP (Strict Volume & Intraday Check)
-        if "vwap" in keys_to_compute:
-            vwap_s = None
+        vwap_series = None
+        if any(k in keys_to_compute for k in ["vwap", "vwap_distance_pct", "supertrend_band"]):
             if has_hl and has_vol and volume is not None and n >= 5:
-                # If total cumulative volume is 0 or all volume is NaN, VWAP is None
                 tot_vol = volume.sum()
                 if not (math.isnan(tot_vol) or tot_vol <= 0):
-                    vwap_s = calculate_vwap(df)
-            _record("vwap", vwap_s, 5)
+                    vwap_series = calculate_vwap(df)
+            _record("vwap", vwap_series, 5)
+
+        if "vwap_distance_pct" in keys_to_compute:
+            vwap_dist_s = None
+            if vwap_series is not None:
+                vwap_dist_s = ((close - vwap_series) / vwap_series) * 100.0
+            _record("vwap_distance_pct", vwap_dist_s, 5)
 
         # 4. RSI(14)
         if "rsi14" in keys_to_compute:
             rsi_s = calculate_rsi(close, 14) if n >= 15 else None
             _record("rsi14", rsi_s, 15)
 
-        # 5. MACD (12, 26, 9)
+        # 5. ROC(12)
+        if "roc12" in keys_to_compute:
+            roc_s = calculate_roc(close, 12) if n >= 13 else None
+            _record("roc12", roc_s, 13)
+
+        # 6. MACD (12, 26, 9)
         if any(k in keys_to_compute for k in ["macd", "macd_signal", "macd_histogram"]):
             macd_l, macd_s, macd_h = (None, None, None)
             if n >= 35:
@@ -425,12 +573,29 @@ class DependencyEngine:
             _record("macd_signal", macd_s, 35)
             _record("macd_histogram", macd_h, 35)
 
-        # 6. ATR(14)
-        if "atr14" in keys_to_compute:
-            atr_s = calculate_atr(df, 14) if (has_hl and n >= 15) else None
-            _record("atr14", atr_s, 15)
+        # 7. ADX(14)
+        if any(k in keys_to_compute for k in ["adx", "plus_di", "minus_di"]):
+            adx_s, pdi_s, mdi_s = (None, None, None)
+            if has_hl and n >= 28:
+                adx_s, pdi_s, mdi_s = calculate_adx(df, 14)
+            _record("adx", adx_s, 28)
+            _record("plus_di", pdi_s, 28)
+            _record("minus_di", mdi_s, 28)
 
-        # 7. Bollinger Bands (20, 2σ)
+        # 8. ATR(14) & ATR SMA Baseline
+        atr_series = None
+        if any(k in keys_to_compute for k in ["atr14", "atr_sma20", "supertrend_band"]):
+            if has_hl and n >= 15:
+                atr_series = calculate_atr(df, 14)
+            _record("atr14", atr_series, 15)
+
+        if "atr_sma20" in keys_to_compute:
+            atr_sma_s = None
+            if atr_series is not None and n >= 35:
+                atr_sma_s = atr_series.rolling(window=20).mean()
+            _record("atr_sma20", atr_sma_s, 35)
+
+        # 9. Bollinger Bands (20, 2σ)
         if any(k in keys_to_compute for k in ["bb_upper", "bb_middle", "bb_lower"]):
             bb_mid, bb_u, bb_l = (None, None, None)
             if n >= 20:
@@ -439,38 +604,101 @@ class DependencyEngine:
             _record("bb_upper", bb_u, 20)
             _record("bb_lower", bb_l, 20)
 
-        # 8. Relative Volume (20)
+        # 10. Donchian Channel (20)
+        if any(k in keys_to_compute for k in ["donchian_high", "donchian_mid", "donchian_low"]):
+            dc_u, dc_m, dc_l = (None, None, None)
+            if has_hl and n >= 21:
+                dc_u, dc_m, dc_l = calculate_donchian_channel(df, 20)
+            _record("donchian_high", dc_u, 21)
+            _record("donchian_mid", dc_m, 21)
+            _record("donchian_low", dc_l, 21)
+
+        # 11. Highest High (20) of close
+        if "highest_high_20" in keys_to_compute:
+            hh20_s = None
+            if n >= 21:
+                hh20_s = close.shift(1).rolling(window=20).max()
+            _record("highest_high_20", hh20_s, 21)
+
+        # 12. Relative Volume (20)
         if "rvol" in keys_to_compute:
             rvol_s = None
             if has_vol and volume is not None and n >= 21:
-                # If volume is available and non-trivial
                 tot_vol = volume.sum()
                 if not (math.isnan(tot_vol) or tot_vol <= 0):
                     rvol_s = calculate_relative_volume(volume, 20)
             _record("rvol", rvol_s, 21)
 
-        # 9. Supertrend ATR Proxy Band
+        # 13. Chaikin Money Flow & OBV
+        if "cmf20" in keys_to_compute:
+            cmf_s = None
+            if has_hl and has_vol and volume is not None and n >= 20:
+                cmf_s = calculate_cmf(df, 20)
+            _record("cmf20", cmf_s, 20)
+
+        if "obv" in keys_to_compute:
+            obv_s = None
+            if has_vol and volume is not None and n >= 2:
+                obv_s = calculate_obv(df)
+            _record("obv", obv_s, 2)
+
+        # 14. Supertrend ATR Proxy Band
         if "supertrend_band" in keys_to_compute:
             st_s = None
-            if "vwap" in ctx.series and "atr14" in ctx.series:
-                vwap_arr = ctx.series["vwap"]
-                atr_arr = ctx.series["atr14"]
-                st_list: List[Optional[float]] = []
-                for v, a in zip(vwap_arr, atr_arr):
-                    if v is not None and a is not None:
-                        st_list.append(round(v - 1.5 * a, 4))
-                    else:
-                        st_list.append(None)
-                ctx.series["supertrend_band"] = st_list
-                ctx.feature_vector["supertrend_band"] = st_list[-1] if st_list else None
-                ctx.calculation_counts["supertrend_band"] = 1
+            if vwap_series is not None and atr_series is not None and n >= 50:
+                st_s = vwap_series - (1.5 * atr_series)
+            _record("supertrend_band", st_s, 50)
 
-        # 10. Opening Range Breakout (ORB) High & Low
+        # 15. Previous Day High & Low
+        if any(k in keys_to_compute for k in ["prev_day_high", "prev_day_low"]):
+            pdh_arr: List[Optional[float]] = [None] * n
+            pdl_arr: List[Optional[float]] = [None] * n
+
+            # Parse dates from timestamps if present
+            timestamps = []
+            for c in candles:
+                ts_val = c.get("time") or c.get("timestamp")
+                if ts_val:
+                    try:
+                        ts_sec = ts_val if ts_val < 1e11 else ts_val // 1000
+                        # Convert to IST Date (+5:30)
+                        dt = datetime.fromtimestamp(ts_sec, tz=timezone.utc) + timedelta(hours=5, minutes=30)
+                        timestamps.append(dt.date())
+                    except Exception:
+                        timestamps.append(None)
+                else:
+                    timestamps.append(None)
+
+            if len(timestamps) == n and all(d is not None for d in timestamps):
+                df_dates = pd.Series(timestamps)
+                unique_dates = df_dates.unique()
+                if len(unique_dates) >= 2:
+                    # Look back at the preceding date
+                    current_date = unique_dates[-1]
+                    prev_date = unique_dates[-2]
+                    prev_mask = df_dates == prev_date
+                    prev_df = df[prev_mask]
+                    if not prev_df.empty and has_hl:
+                        pdh_val = _safe_float(prev_df["high"].max())
+                        pdl_val = _safe_float(prev_df["low"].min())
+                        # Populate for today's bars
+                        for i in range(n):
+                            if df_dates.iloc[i] == current_date:
+                                pdh_arr[i] = pdh_val
+                                pdl_arr[i] = pdl_val
+
+            ctx.series["prev_day_high"] = pdh_arr
+            ctx.series["prev_day_low"] = pdl_arr
+            ctx.feature_vector["prev_day_high"] = pdh_arr[-1]
+            ctx.feature_vector["prev_day_low"] = pdl_arr[-1]
+            ctx.calculation_counts["prev_day_high"] = 1
+            ctx.calculation_counts["prev_day_low"] = 1
+
+        # 16. Opening Range Breakout (ORB) High & Low
         if any(k in keys_to_compute for k in ["orb_high", "orb_low"]):
             orb_h_list: List[Optional[float]] = [None] * n
             orb_l_list: List[Optional[float]] = [None] * n
             if has_hl and n >= 6:
-                # Opening 6 candles define session initial range
                 first_6_h = high.iloc[:6].max()
                 first_6_l = low.iloc[:6].min()
                 if not math.isnan(first_6_h) and not math.isnan(first_6_l):

@@ -20,6 +20,7 @@ from backend.app.strategy_engine.dsl import (
     StrategyCategory,
     StrategyVisualization,
     StrategyDataRequirements,
+    ResearchParameter,
 )
 
 
@@ -73,6 +74,38 @@ EMA_GOLDEN_CROSS = StrategyDefinition(
         subpanels=["rsi14"],
         color="#22d3ee",
     ),
+    research_parameters=[
+        ResearchParameter(
+            parameter_id="fast_period",
+            name="Fast EMA Period",
+            param_type="int",
+            default_value=20,
+            minimum=10,
+            maximum=30,
+            step=5,
+            description="Lookback period for fast exponential moving average",
+        ),
+        ResearchParameter(
+            parameter_id="slow_period",
+            name="Slow EMA Period",
+            param_type="int",
+            default_value=50,
+            minimum=40,
+            maximum=100,
+            step=10,
+            description="Lookback period for slow baseline exponential moving average",
+        ),
+        ResearchParameter(
+            parameter_id="max_rsi",
+            name="Max Overbought RSI",
+            param_type="float",
+            default_value=70.0,
+            minimum=60.0,
+            maximum=80.0,
+            step=5.0,
+            description="Ceiling threshold for RSI(14) to avoid overextended entries",
+        ),
+    ],
     entry_rules=[
         StrategyRule(
             rule_id="ema20_above_ema50",
@@ -137,6 +170,38 @@ SUPERTREND_PROXY = StrategyDefinition(
         subpanels=["rsi14"],
         color="#a3e635",
     ),
+    research_parameters=[
+        ResearchParameter(
+            parameter_id="ema_period",
+            name="Baseline Trend EMA Period",
+            param_type="int",
+            default_value=50,
+            minimum=20,
+            maximum=100,
+            step=10,
+            description="Lookback period for underlying trend filter",
+        ),
+        ResearchParameter(
+            parameter_id="atr_multiplier",
+            name="ATR Support Multiplier",
+            param_type="float",
+            default_value=1.5,
+            minimum=1.0,
+            maximum=3.0,
+            step=0.5,
+            description="Multiplier for dynamic support distance from VWAP",
+        ),
+        ResearchParameter(
+            parameter_id="min_rsi",
+            name="Minimum RSI Zone",
+            param_type="float",
+            default_value=50.0,
+            minimum=40.0,
+            maximum=60.0,
+            step=5.0,
+            description="Floor threshold for RSI(14) momentum",
+        ),
+    ],
     entry_rules=[
         StrategyRule(
             rule_id="price_above_ema50_st",
@@ -205,6 +270,28 @@ ADX_TREND_STRENGTH = StrategyDefinition(
         subpanels=["adx"],
         color="#06b6d4",
     ),
+    research_parameters=[
+        ResearchParameter(
+            parameter_id="min_adx",
+            name="Minimum ADX Trend Level",
+            param_type="float",
+            default_value=25.0,
+            minimum=20.0,
+            maximum=35.0,
+            step=5.0,
+            description="Minimum ADX threshold for strong directional momentum",
+        ),
+        ResearchParameter(
+            parameter_id="ema_trend",
+            name="Trend Filter EMA Period",
+            param_type="int",
+            default_value=50,
+            minimum=20,
+            maximum=100,
+            step=10,
+            description="Lookback period for baseline trend filter",
+        ),
+    ],
     entry_rules=[
         StrategyRule(
             rule_id="adx_strong_trend",
@@ -418,6 +505,28 @@ VWAP_MOMENTUM = StrategyDefinition(
         subpanels=["rsi14"],
         color="#e879f9",
     ),
+    research_parameters=[
+        ResearchParameter(
+            parameter_id="min_rvol",
+            name="Minimum Relative Volume",
+            param_type="float",
+            default_value=1.5,
+            minimum=1.0,
+            maximum=3.0,
+            step=0.25,
+            description="Minimum relative volume multiplier for momentum validation",
+        ),
+        ResearchParameter(
+            parameter_id="min_rsi",
+            name="Minimum Momentum RSI",
+            param_type="float",
+            default_value=55.0,
+            minimum=50.0,
+            maximum=65.0,
+            step=5.0,
+            description="Minimum RSI(14) threshold for momentum acceleration",
+        ),
+    ],
     entry_rules=[
         StrategyRule(
             rule_id="price_above_vwap",
@@ -699,6 +808,28 @@ RSI_OVERSOLD_REVERSAL = StrategyDefinition(
         subpanels=["rsi14"],
         color="#f97316",
     ),
+    research_parameters=[
+        ResearchParameter(
+            parameter_id="oversold_threshold",
+            name="Oversold RSI Floor",
+            param_type="float",
+            default_value=35.0,
+            minimum=20.0,
+            maximum=40.0,
+            step=5.0,
+            description="Oversold threshold for entry trigger",
+        ),
+        ResearchParameter(
+            parameter_id="exit_rsi_threshold",
+            name="Exit Target RSI",
+            param_type="float",
+            default_value=55.0,
+            minimum=45.0,
+            maximum=65.0,
+            step=5.0,
+            description="Normalized RSI threshold for strategy exit",
+        ),
+    ],
     entry_rules=[
         StrategyRule(
             rule_id="rsi_oversold",
@@ -770,6 +901,28 @@ BOLLINGER_MEAN_REVERSION = StrategyDefinition(
         subpanels=["rsi14"],
         color="#0ea5e9",
     ),
+    research_parameters=[
+        ResearchParameter(
+            parameter_id="band_std",
+            name="Bollinger Band Std Deviation",
+            param_type="float",
+            default_value=2.0,
+            minimum=1.5,
+            maximum=2.5,
+            step=0.25,
+            description="Standard deviation width for Bollinger envelope",
+        ),
+        ResearchParameter(
+            parameter_id="min_rsi",
+            name="Maximum Entry RSI",
+            param_type="float",
+            default_value=40.0,
+            minimum=25.0,
+            maximum=45.0,
+            step=5.0,
+            description="RSI ceiling for oversold Bollinger bounce",
+        ),
+    ],
     entry_rules=[
         StrategyRule(
             rule_id="price_at_lower_band",

@@ -805,6 +805,8 @@ class StrategyCopilotRequest(BaseModel):
     research_summary: Optional[Dict[str, Any]] = None   # Serialised StrategyResearchSummary
     backtest_result: Optional[Dict[str, Any]] = None    # Serialised Backtest Result
     scorecard: Optional[Dict[str, Any]] = None          # Serialised Scorecard
+    robustness_summary: Optional[Dict[str, Any]] = None # Serialised Robustness Summary
+    is_skeptic_mode: Optional[bool] = False
     user_message: str
     chat_history: Optional[List[Dict[str, str]]] = None
     context: Optional[Dict[str, Any]] = None
@@ -814,7 +816,7 @@ class StrategyCopilotRequest(BaseModel):
 async def strategy_copilot(req: StrategyCopilotRequest):
     """
     Evidence-grounded Strategy Copilot with conversational multi-turn context.
-    AI interprets the pre-computed evaluation result, research outcomes, backtest results, and market regime.
+    Supports Standard Mode and Skeptic Mode ('CHALLENGE THIS STRATEGY').
     """
     if not req.user_message.strip():
         raise HTTPException(status_code=400, detail="user_message cannot be empty")
@@ -827,8 +829,305 @@ async def strategy_copilot(req: StrategyCopilotRequest):
         research_summary=req.research_summary,
         backtest_result=req.backtest_result,
         scorecard=req.scorecard,
+        robustness_summary=req.robustness_summary,
+        is_skeptic_mode=bool(req.is_skeptic_mode),
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: Strategy Discovery & Robustness Testing Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.strategy_engine.robustness_engine import robustness_engine
+
+
+class ParameterSweepRequest(BaseModel):
+    strategy_id: str
+    timeframe: Optional[str] = "5m"
+    parameter_grid: Optional[List[Dict[str, Any]]] = None
+    base_hypothesis_args: Optional[Dict[str, Any]] = None
+    candles: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/strategies/research/sweep/{symbol}")
+async def run_parameter_sweep(symbol: str, req: ParameterSweepRequest):
+    """Executes a controlled parameter sweep with combinatorial safety bounds."""
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 20:
+        raise HTTPException(status_code=400, detail=f"DATA_UNAVAILABLE: Insufficient candles for sweep on {symbol}.")
+
+    res = robustness_engine.run_parameter_sweep(
+        candles=candles,
+        strategy_id=req.strategy_id,
+        symbol=symbol,
+        timeframe=tf,
+        parameter_grid=req.parameter_grid,
+        base_hypothesis_args=req.base_hypothesis_args,
+    )
+    return res
+
+
+class ParameterSurfaceRequest(BaseModel):
+    strategy_id: str
+    param_1_id: str
+    param_1_values: List[Any]
+    param_2_id: str
+    param_2_values: List[Any]
+    timeframe: Optional[str] = "5m"
+    fixed_params: Optional[Dict[str, Any]] = None
+    candles: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/strategies/research/surface/{symbol}")
+async def generate_parameter_surface(symbol: str, req: ParameterSurfaceRequest):
+    """Generates a 2D parameter performance matrix with metric cells."""
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 20:
+        raise HTTPException(status_code=400, detail=f"DATA_UNAVAILABLE: Insufficient candles for surface on {symbol}.")
+
+    res = robustness_engine.generate_parameter_surface(
+        candles=candles,
+        strategy_id=req.strategy_id,
+        symbol=symbol,
+        param_1_id=req.param_1_id,
+        param_1_values=req.param_1_values,
+        param_2_id=req.param_2_id,
+        param_2_values=req.param_2_values,
+        timeframe=tf,
+        fixed_params=req.fixed_params,
+    )
+    return res
+
+
+class NeighborhoodAnalysisRequest(BaseModel):
+    strategy_id: str
+    target_params: Dict[str, Any]
+    timeframe: Optional[str] = "5m"
+    candles: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/strategies/research/neighborhood/{symbol}")
+async def analyze_neighborhood(symbol: str, req: NeighborhoodAnalysisRequest):
+    """Evaluates parameter stability across adjacent configurations."""
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    if not candles or len(candles) < 20:
+        raise HTTPException(status_code=400, detail=f"DATA_UNAVAILABLE: Insufficient candles for neighborhood analysis on {symbol}.")
+
+    res = robustness_engine.analyze_neighborhood(
+        candles=candles,
+        strategy_id=req.strategy_id,
+        symbol=symbol,
+        target_params=req.target_params,
+        timeframe=tf,
+    )
+    return res
+
+
+class MultiSymbolRobustnessRequest(BaseModel):
+    strategy_id: str
+    parameters: Dict[str, Any]
+    symbols: Optional[List[str]] = None
+    timeframe: Optional[str] = "5m"
+
+
+@app.post("/api/strategies/research/multi-symbol")
+async def evaluate_multi_symbol(req: MultiSymbolRobustnessRequest):
+    """Evaluates cross-symbol generalization across a basket of symbols."""
+    symbols = req.symbols or ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS"]
+    tf = req.timeframe or "5m"
+
+    symbol_candles_map = {}
+    for sym in symbols:
+        c = await market_data_service.get_candles(sym, tf, 200)
+        if c and len(c) >= 20:
+            symbol_candles_map[sym] = c
+
+    res = robustness_engine.evaluate_multi_symbol_robustness(
+        symbol_candles_map=symbol_candles_map,
+        strategy_id=req.strategy_id,
+        params=req.parameters,
+        timeframe=tf,
+    )
+    return res
+
+
+class PeriodRobustnessRequest(BaseModel):
+    strategy_id: str
+    parameters: Dict[str, Any]
+    timeframe: Optional[str] = "5m"
+    subperiods: Optional[int] = 3
+    candles: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/strategies/research/periods/{symbol}")
+async def evaluate_period_robustness(symbol: str, req: PeriodRobustnessRequest):
+    """Subdivides history into chronological subperiods and detects strategy decay."""
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    res = robustness_engine.evaluate_period_robustness(
+        candles=candles,
+        strategy_id=req.strategy_id,
+        params=req.parameters,
+        timeframe=tf,
+        subperiods=req.subperiods or 3,
+    )
+    return res
+
+
+class RegimeTransitionsRequest(BaseModel):
+    strategy_id: str
+    parameters: Dict[str, Any]
+    timeframe: Optional[str] = "5m"
+    candles: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/strategies/research/regime-transitions/{symbol}")
+async def analyze_regime_transitions(symbol: str, req: RegimeTransitionsRequest):
+    """Analyzes strategy performance around market regime transition inflection points."""
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    res = robustness_engine.analyze_regime_transitions(
+        candles=candles,
+        strategy_id=req.strategy_id,
+        params=req.parameters,
+        timeframe=tf,
+    )
+    return res
+
+
+class WalkForwardSelectionRequest(BaseModel):
+    strategy_id: str
+    param_grid: List[Dict[str, Any]]
+    timeframe: Optional[str] = "5m"
+    folds: Optional[int] = 3
+    train_ratio: Optional[float] = 0.70
+    candles: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/strategies/research/walk-forward-selection/{symbol}")
+async def walk_forward_parameter_selection(symbol: str, req: WalkForwardSelectionRequest):
+    """Strictly optimizes parameters on Train (IS) and evaluates on unseen Test (OOS)."""
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 250)
+
+    res = robustness_engine.walk_forward_parameter_selection(
+        candles=candles,
+        strategy_id=req.strategy_id,
+        param_grid=req.param_grid,
+        symbol=symbol,
+        timeframe=tf,
+        folds=req.folds or 3,
+        train_ratio=req.train_ratio or 0.70,
+    )
+    return res
+
+
+class StrategyFamiliesRequest(BaseModel):
+    timeframe: Optional[str] = "5m"
+    candles: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/strategies/research/families/{symbol}")
+async def analyze_strategy_families(symbol: str, req: StrategyFamiliesRequest):
+    """Aggregates all 20 strategies by Category/Family to expose co-activation clusters."""
+    candles = req.candles
+    tf = req.timeframe or "5m"
+    if not candles:
+        candles = await market_data_service.get_candles(symbol, tf, 200)
+
+    res = robustness_engine.analyze_strategy_families(
+        candles=candles,
+        symbol=symbol,
+        timeframe=tf,
+    )
+    return res
+
+
+@app.get("/api/strategies/research/experiments")
+async def list_experiments():
+    """Lists all recorded research experiments from the ledger."""
+    return {"experiments": robustness_engine.list_experiments()}
+
+
+class RecordExperimentRequest(BaseModel):
+    strategy_id: str
+    symbol: str
+    timeframe: str
+    parameters: Dict[str, Any]
+    backtest_result: Dict[str, Any]
+    configurations_tested: Optional[int] = 1
+    workflow_state: Optional[str] = "RESEARCH_CANDIDATE"
+    notes: Optional[str] = None
+
+
+@app.post("/api/strategies/research/experiments")
+async def record_experiment(req: RecordExperimentRequest):
+    """Records an immutable research experiment item in the ledger."""
+    record = robustness_engine.record_experiment(
+        strategy_id=req.strategy_id,
+        symbol=req.symbol,
+        timeframe=req.timeframe,
+        parameters=req.parameters,
+        backtest_result=req.backtest_result,
+        configurations_tested=req.configurations_tested or 1,
+        workflow_state=req.workflow_state or "RESEARCH_CANDIDATE",
+        notes=req.notes,
+    )
+    return {"status": "SUCCESS", "experiment": asdict(record)}
+
+
+class CompareExperimentsRequest(BaseModel):
+    experiment_ids: List[str]
+
+
+@app.post("/api/strategies/research/experiments/compare")
+async def compare_experiments(req: CompareExperimentsRequest):
+    """Compares multiple experiment records side-by-side."""
+    return robustness_engine.compare_experiments(req.experiment_ids)
+
+
+class ChallengeStrategyRequest(BaseModel):
+    symbol: str
+    strategy_id: str
+    backtest_result: Optional[Dict[str, Any]] = None
+    scorecard: Optional[Dict[str, Any]] = None
+    robustness_summary: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/strategies/research/challenge/{symbol}")
+async def challenge_strategy(symbol: str, req: ChallengeStrategyRequest):
+    """Launches Copilot Skeptic Mode to audit and challenge a research hypothesis."""
+    critique = await strategy_copilot_agent.answer(
+        symbol=symbol,
+        evaluation=None,
+        user_message="CHALLENGE THIS STRATEGY: What are the strongest arguments and empirical risks against this strategy?",
+        research_summary=None,
+        backtest_result=req.backtest_result,
+        scorecard=req.scorecard,
+        robustness_summary=req.robustness_summary,
+        is_skeptic_mode=True,
+    )
+    return critique
 
 @app.websocket("/ws/ticks")
 async def websocket_ticks(websocket: WebSocket):

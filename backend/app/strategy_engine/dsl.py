@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List, Optional, Callable, Union
+from typing import Dict, Any, List, Optional, Callable, Union, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 from backend.app.quant_engine.indicators import (
@@ -146,6 +146,47 @@ class StrategyRule:
 
 
 # ---------------------------------------------------------------------------
+# Research Parameter Contract (Phase 6 Discovery & Robustness)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ResearchParameter:
+    """
+    Formal bounded research parameter specification.
+    Exposes only explicitly defined valid domains for parameter sweeps and stability analysis.
+    Prevents combinatorial explosion and unrestricted parameter tampering.
+    """
+    parameter_id: str
+    name: str
+    param_type: str = "int"          # "int" | "float" | "choice" | "bool"
+    default_value: Any = None
+    allowed_values: Optional[List[Any]] = None
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    step: Optional[float] = None
+    description: str = ""
+
+    def validate_value(self, val: Any) -> Tuple[bool, Optional[str]]:
+        if self.allowed_values is not None:
+            if val not in self.allowed_values:
+                return False, f"Value {val} not in allowed choices {self.allowed_values}"
+            return True, None
+
+        if self.param_type in ("int", "float"):
+            try:
+                num = float(val)
+                if self.minimum is not None and num < self.minimum:
+                    return False, f"Value {num} below minimum {self.minimum}"
+                if self.maximum is not None and num > self.maximum:
+                    return False, f"Value {num} above maximum {self.maximum}"
+                return True, None
+            except (ValueError, TypeError):
+                return False, f"Value {val} is not a valid number"
+
+        return True, None
+
+
+# ---------------------------------------------------------------------------
 # Extensible Strategy Definition Contract
 # ---------------------------------------------------------------------------
 
@@ -172,6 +213,7 @@ class StrategyDefinition:
     exit_rules: List[StrategyRule] = field(default_factory=list)
     invalidation_rules: List[StrategyRule] = field(default_factory=list)
     visualization: StrategyVisualization = field(default_factory=StrategyVisualization)
+    research_parameters: List[ResearchParameter] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
 
     def __post_init__(self):

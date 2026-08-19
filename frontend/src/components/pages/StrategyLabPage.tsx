@@ -7,17 +7,30 @@ import {
   HelpCircle, RefreshCw, CheckSquare, Square, History, ShieldAlert,
   BarChart, ArrowUpRight, ArrowDownRight, Compass, Filter, Tag, BookOpen,
   Calendar, Award, Crosshair, Target, Percent, DollarSign, PieChart,
-  Grid, Cpu, CheckCheck, GitMerge, FileText, ChevronLeft
+  Grid, Cpu, CheckCheck, GitMerge, FileText, ChevronLeft, ShieldCheck,
+  Flame, Copy, Bookmark, AlertOctagon, CornerDownRight, BarChart3, Split
 } from 'lucide-react';
 import { NSEStock } from '../../types/indianMarket';
 
 // ---------------------------------------------------------------------------
-// Types & Extensible Contracts (V3, V4, V5)
+// Types & Extensible Contracts (V3, V4, V5, V6)
 // ---------------------------------------------------------------------------
 export type RuleOutcome = 'PASS' | 'FAIL' | 'UNAVAILABLE';
 export type StrategyState = 'ACTIVE' | 'PARTIAL' | 'INACTIVE' | 'CONFLICTED' | 'UNAVAILABLE';
 export type DataFreshness = 'LIVE' | 'RECENT' | 'STALE' | 'UNAVAILABLE';
 export type StrategyDirection = 'BULLISH' | 'BEARISH' | 'BOTH';
+
+export interface ResearchParameterMeta {
+  parameter_id: string;
+  name: string;
+  param_type: string;
+  default_value: any;
+  allowed_values?: any[] | null;
+  minimum?: number | null;
+  maximum?: number | null;
+  step?: number | null;
+  description: string;
+}
 
 export interface RuleEvaluation {
   rule_id: string;
@@ -89,6 +102,7 @@ export interface StrategyResult {
   tags: string[];
   requirements?: StrategyRequirementsMeta;
   visualization?: StrategyVisualizationMeta;
+  research_parameters?: ResearchParameterMeta[];
   historical_states: HistoricalState[];
   activation_events: ActivationEvent[];
 }
@@ -345,52 +359,148 @@ export interface BacktestResultData {
   trades: BacktestTradeData[];
 }
 
-export interface RegimeMatrixCellData {
-  trades: number;
-  net_pnl: number;
+export interface ParameterSweepItemData {
+  configuration_id: string;
+  parameters: Record<string, any>;
+  total_trades: number;
+  gross_return_pct: number;
+  net_return_pct: number;
+  cagr: number;
+  sharpe_ratio: number;
+  max_drawdown_pct: number;
   profit_factor: number;
   win_rate_pct: number;
-  is_low_sample: boolean;
-}
-
-export interface RegimeMatrixItemData {
-  strategy_id: string;
-  strategy_name: string;
-  category: string;
+  is_return_pct: number;
+  oos_return_pct: number;
+  is_win_rate_pct: number;
+  oos_win_rate_pct: number;
+  overfitting_status: string;
+  cost_drag_pct: number;
+  high_friction_return_pct: number;
+  triple_friction_return_pct: number;
   robustness_classification: string;
-  total_trades: number;
-  regimes: Record<string, RegimeMatrixCellData>;
 }
 
-export interface ScorecardDimensionData {
-  score: number;
-  rating: string;
-  evidence: string;
+export interface ParameterSurfaceData {
+  param_1_id: string;
+  param_1_name: string;
+  param_1_values: any[];
+  param_2_id: string;
+  param_2_name: string;
+  param_2_values: any[];
+  cells: Array<{
+    param_1_val: any;
+    param_2_val: any;
+    net_return_pct: number;
+    sharpe_ratio: number;
+    max_drawdown_pct: number;
+    profit_factor: number;
+    total_trades: number;
+    oos_return_pct: number;
+    overfitting_status: string;
+    is_low_sample: boolean;
+  }>;
 }
 
-export interface StrategyScorecardData {
+export interface NeighborhoodAnalysisData {
+  candidate_params: Record<string, any>;
+  candidate_net_return_pct: number;
+  candidate_sharpe: number;
+  neighbor_count: number;
+  mean_neighbor_return_pct: number;
+  median_neighbor_return_pct: number;
+  return_standard_deviation: number;
+  plateau_score: number;
+  stability_classification: string;
+  neighbors: Array<{
+    parameters: Record<string, any>;
+    net_return_pct: number;
+    sharpe_ratio: number;
+    total_trades: number;
+  }>;
+}
+
+export interface MultiSymbolSummaryData {
   strategy_id: string;
-  strategy_name: string;
-  category: string;
-  overall_status: string;
-  sample_size_rating: ScorecardDimensionData;
-  oos_stability_rating: ScorecardDimensionData;
-  drawdown_risk_rating: ScorecardDimensionData;
-  regime_coverage_rating: ScorecardDimensionData;
-  friction_resilience_rating: ScorecardDimensionData;
-  summary_notes: string[];
+  parameters: Record<string, any>;
+  symbols_tested: string[];
+  symbol_count: number;
+  total_trades_all_symbols: number;
+  median_net_return_pct: number;
+  mean_net_return_pct: number;
+  min_return_pct: number;
+  max_return_pct: number;
+  dispersion_iqr_pct: number;
+  best_symbol: string;
+  worst_symbol: string;
+  profitable_symbols_count: number;
+  generalization_classification: string;
+  symbol_breakdown: Record<string, {
+    net_return_pct: number;
+    total_trades: number;
+    sharpe_ratio: number;
+    win_rate_pct: number;
+    profit_factor: number;
+  }>;
 }
 
-export interface CorrelationPairData {
-  strategy_1: string;
-  strategy_1_name: string;
-  strategy_2: string;
-  strategy_2_name: string;
-  s1_activations: number;
-  s2_activations: number;
-  overlap_activations: number;
-  overlap_pct: number;
-  overlap_classification: string;
+export interface PeriodRobustnessData {
+  strategy_id: string;
+  parameters: Record<string, any>;
+  subperiod_count: number;
+  subperiod_results: Array<{
+    period_index: number;
+    period_name: string;
+    start_time: number;
+    end_time: number;
+    bars_count: number;
+    total_trades: number;
+    net_return_pct: number;
+    win_rate_pct: number;
+    sharpe_ratio: number;
+    max_drawdown_pct: number;
+  }>;
+  early_period_return_pct: number;
+  recent_period_return_pct: number;
+  decay_ratio: number;
+  decay_status: string;
+}
+
+export interface WalkForwardSelectionData {
+  strategy_id: string;
+  fold_count: number;
+  train_split_ratio: number;
+  selected_parameters_per_fold: Record<string, any>[];
+  is_returns_per_fold: number[];
+  oos_returns_per_fold: number[];
+  cumulative_oos_return_pct: number;
+  cumulative_oos_sharpe: number;
+  cumulative_oos_drawdown_pct: number;
+  parameter_stability_pct: number;
+  walk_forward_classification: string;
+}
+
+export interface ResearchExperimentData {
+  experiment_id: string;
+  created_at: string;
+  strategy_id: string;
+  strategy_version: string;
+  symbol: string;
+  timeframe: string;
+  parameters: Record<string, any>;
+  configurations_tested_count: number;
+  data_snooping_risk: string;
+  sample_size_bars: number;
+  total_trades: number;
+  net_return_pct: number;
+  sharpe_ratio: number;
+  max_drawdown_pct: number;
+  is_return_pct: number;
+  oos_return_pct: number;
+  robustness_status: string;
+  cost_drag_pct: number;
+  workflow_state: string;
+  notes?: string;
 }
 
 export interface CopilotMessage {
@@ -442,7 +552,6 @@ function StateBadge({ state, size = 'md' }: { state: StrategyState; size?: 'sm' 
   );
 }
 
-// Format duration helper (e.g. 7h 12m or 45s)
 function formatDuration(seconds?: number | null): string {
   if (seconds === undefined || seconds === null) return 'N/A';
   if (seconds < 60) return `${Math.round(seconds)}s`;
@@ -529,7 +638,6 @@ function StrategyAlignmentBar({ confluence }: { confluence: ConfluenceData }) {
         </div>
       </div>
 
-      {/* Visual Alignment Meter */}
       <div className="h-2 w-full bg-stone-900 rounded-full overflow-hidden flex border border-stone-800">
         <div style={{ width: `${actPct}%` }} className="bg-emerald-500 transition-all duration-500" title={`Active: ${confluence.active_count}`} />
         <div style={{ width: `${partPct}%` }} className="bg-amber-500 transition-all duration-500" title={`Partial: ${confluence.partial_count}`} />
@@ -590,12 +698,9 @@ function ObservatoryChart({
 }: ObservatoryChartProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-
-  // Overlay Mode: 'SELECTED' or 'ALL'
   const [overlayMode, setOverlayMode] = useState<'SELECTED' | 'ALL'>('SELECTED');
   const [showLayerMenu, setShowLayerMenu] = useState(false);
 
-  // Manual Layer Toggles
   const [layers, setLayers] = useState({
     candles: true,
     volume: true,
@@ -617,7 +722,6 @@ function ObservatoryChart({
   const subpanelHeight = 65;
   const subpanelGap = 16;
 
-  // Dynamic visualization overlays from strategy definition metadata
   const strategyOverlays = selectedStrategy?.visualization?.overlays || [];
   const isEMA20Active = layers.ema20 || strategyOverlays.includes('ema20');
   const isEMA50Active = layers.ema50 || strategyOverlays.includes('ema50');
@@ -630,7 +734,6 @@ function ObservatoryChart({
   const isPDHActive = strategyOverlays.includes('prev_day_high') || strategyOverlays.includes('prev_day_low');
   const isHH20Active = strategyOverlays.includes('highest_high_20');
 
-  // Dynamic subpanels from strategy definition metadata
   const strategySubpanels = selectedStrategy?.visualization?.subpanels || [];
   const isRSISubpanel = strategySubpanels.includes('rsi14');
   const isMACDSubpanel = strategySubpanels.includes('macd');
@@ -655,28 +758,18 @@ function ObservatoryChart({
   const minPrice = Math.min(...lows) * 0.998;
   const maxPrice = Math.max(...highs) * 1.002;
   const priceRange = maxPrice - minPrice || 1;
-
   const maxVolume = Math.max(...candles.map(c => c.volume), 1);
 
   const candleStep = chartWidth / n;
   const candleWidth = Math.max(1, candleStep * 0.7);
 
-  const getY = (val: number) => {
-    return priceChartHeight - ((val - minPrice) / priceRange) * priceChartHeight;
-  };
-
-  const getVolY = (vol: number) => {
-    const top = priceChartHeight;
-    return top + volumeHeight - (vol / maxVolume) * volumeHeight;
-  };
-
+  const getY = (val: number) => priceChartHeight - ((val - minPrice) / priceRange) * priceChartHeight;
+  const getVolY = (vol: number) => priceChartHeight + volumeHeight - (vol / maxVolume) * volumeHeight;
   const getSubY = (val: number, minV: number, maxV: number) => {
     const range = maxV - minV || 1;
-    const top = priceChartHeight + volumeHeight + subpanelGap;
-    return top + subpanelHeight - ((val - minV) / range) * subpanelHeight;
+    return priceChartHeight + volumeHeight + subpanelGap + subpanelHeight - ((val - minV) / range) * subpanelHeight;
   };
 
-  // Generate SVG path for line series
   const makeLinePath = (series?: (number | null)[]) => {
     if (!series || series.length === 0) return '';
     let path = '';
@@ -697,7 +790,6 @@ function ObservatoryChart({
     return path;
   };
 
-  // Generate Subpanel Path
   const makeSubpanelPath = (series?: (number | null)[], minV = 0, maxV = 100) => {
     if (!series || series.length === 0) return '';
     let path = '';
@@ -718,13 +810,11 @@ function ObservatoryChart({
     return path;
   };
 
-  // Active Candle for crosshair
   const activeIdx = hoverIndex !== null && hoverIndex >= 0 && hoverIndex < n
     ? hoverIndex
     : (highlightIndex !== undefined && highlightIndex !== null && highlightIndex >= 0 && highlightIndex < n ? highlightIndex : n - 1);
   const activeCandle = candles[activeIdx];
 
-  // Mouse handler
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
@@ -735,7 +825,6 @@ function ObservatoryChart({
 
   return (
     <div className="bg-[#12131b] border border-stone-800/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl">
-      {/* Chart Top Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-stone-800/60 text-xs">
         <div className="flex items-center gap-3">
           <span className="font-mono font-black text-white text-sm">₹{activeCandle.close.toFixed(2)}</span>
@@ -749,7 +838,6 @@ function ObservatoryChart({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Mode switch: Selected Strategy vs All Strategies */}
           <div className="flex items-center gap-1 bg-stone-900/80 p-0.5 rounded-lg border border-stone-800 text-[10px] font-mono">
             <button
               onClick={() => setOverlayMode('SELECTED')}
@@ -769,16 +857,13 @@ function ObservatoryChart({
             </button>
           </div>
 
-          {/* Timeframe selector */}
           <div className="flex items-center gap-1 bg-stone-900/80 p-0.5 rounded-lg border border-stone-800">
             {(['1m', '5m', '15m', '1h', '1D'] as const).map(tf => (
               <button
                 key={tf}
                 onClick={() => onTimeframeChange(tf)}
                 className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded transition-all cursor-pointer ${
-                  timeframe === tf
-                    ? 'bg-violet-600 text-white shadow-sm'
-                    : 'text-stone-400 hover:text-stone-200'
+                  timeframe === tf ? 'bg-violet-600 text-white shadow-sm' : 'text-stone-400 hover:text-stone-200'
                 }`}
               >
                 {tf}
@@ -786,7 +871,6 @@ function ObservatoryChart({
             ))}
           </div>
 
-          {/* Layer controls toggle button */}
           <div className="relative">
             <button
               onClick={() => setShowLayerMenu(!showLayerMenu)}
@@ -828,7 +912,6 @@ function ObservatoryChart({
         </div>
       </div>
 
-      {/* Active Overlays Legend */}
       <div className="flex items-center gap-3 text-[10px] font-mono text-stone-400 flex-wrap">
         <span className="text-stone-500 font-bold">Active Overlays:</span>
         {isEMA20Active && <span className="flex items-center gap-1 text-cyan-400"><span className="w-2 h-0.5 bg-cyan-400 inline-block" /> EMA20</span>}
@@ -843,7 +926,6 @@ function ObservatoryChart({
         {isHH20Active && <span className="flex items-center gap-1 text-emerald-300"><span className="w-2 h-0.5 bg-emerald-300 inline-block" /> 20-Bar High</span>}
       </div>
 
-      {/* SVG Canvas */}
       <div className="relative overflow-hidden w-full select-none">
         <svg
           ref={svgRef}
@@ -853,17 +935,12 @@ function ObservatoryChart({
           onMouseLeave={() => setHoverIndex(null)}
         >
           <defs>
-            <linearGradient id="bbAreaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.08" />
-              <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
-            </linearGradient>
             <linearGradient id="activeZoneGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.12" />
               <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.02" />
             </linearGradient>
           </defs>
 
-          {/* Price Grid Horizontal Lines */}
           {[0.2, 0.4, 0.6, 0.8].map(ratio => {
             const y = ratio * priceChartHeight;
             const px = maxPrice - ratio * priceRange;
@@ -877,23 +954,14 @@ function ObservatoryChart({
             );
           })}
 
-          {/* Historical Active Regions Highlight Bands */}
           {layers.regions && overlayMode === 'SELECTED' && selectedStrategy?.historical_states?.map((hs, i) => {
             if (hs.state !== 'ACTIVE') return null;
             const x = hs.candle_index * candleStep;
             return (
-              <rect
-                key={i}
-                x={x}
-                y={0}
-                width={candleStep}
-                height={priceChartHeight}
-                fill="url(#activeZoneGrad)"
-              />
+              <rect key={i} x={x} y={0} width={candleStep} height={priceChartHeight} fill="url(#activeZoneGrad)" />
             );
           })}
 
-          {/* Candlesticks */}
           {layers.candles && candles.map((c, i) => {
             const x = i * candleStep + candleStep / 2;
             const openY = getY(c.open);
@@ -906,46 +974,22 @@ function ObservatoryChart({
 
             return (
               <g key={i}>
-                <line
-                  x1={x}
-                  y1={highY}
-                  x2={x}
-                  y2={lowY}
-                  stroke={isBull ? '#10b981' : '#f43f5e'}
-                  strokeWidth={1}
-                />
-                <rect
-                  x={x - candleWidth / 2}
-                  y={bodyTop}
-                  width={candleWidth}
-                  height={bodyHeight}
-                  fill={isBull ? '#10b981' : '#f43f5e'}
-                  rx={0.5}
-                />
+                <line x1={x} y1={highY} x2={x} y2={lowY} stroke={isBull ? '#10b981' : '#f43f5e'} strokeWidth={1} />
+                <rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} fill={isBull ? '#10b981' : '#f43f5e'} rx={0.5} />
               </g>
             );
           })}
 
-          {/* Volume Subpanel Bars */}
           {layers.volume && candles.map((c, i) => {
             const x = i * candleStep + candleStep / 2;
             const vy = getVolY(c.volume);
             const vHeight = priceChartHeight + volumeHeight - vy;
             const isBull = c.close >= c.open;
             return (
-              <rect
-                key={`vol-${i}`}
-                x={x - candleWidth / 2}
-                y={vy}
-                width={candleWidth}
-                height={Math.max(1, vHeight)}
-                fill={isBull ? '#10b981' : '#f43f5e'}
-                opacity={0.35}
-              />
+              <rect key={`vol-${i}`} x={x - candleWidth / 2} y={vy} width={candleWidth} height={Math.max(1, vHeight)} fill={isBull ? '#10b981' : '#f43f5e'} opacity={0.35} />
             );
           })}
 
-          {/* Indicator Overlays */}
           {isBollingerActive && (
             <>
               <path d={makeLinePath(indicators.bb_upper)} stroke="#10b981" strokeWidth={1} fill="none" strokeDasharray="2,2" />
@@ -989,12 +1033,10 @@ function ObservatoryChart({
           {isEMA200Active && <path d={makeLinePath(indicators.ema200)} stroke="#a855f7" strokeWidth={1.5} fill="none" />}
           {isVWAPActive && <path d={makeLinePath(indicators.vwap)} stroke="#e879f9" strokeWidth={1.4} fill="none" />}
 
-          {/* Strategy Activation Markers */}
           {layers.events && (overlayMode === 'SELECTED' ? selectedStrategy?.activation_events || [] : allStrategies.flatMap(s => s.activation_events || [])).map((ev, i) => {
             const cx = ev.candle_index * candleStep + candleStep / 2;
             const cy = getY(ev.price);
             if (cx < 0 || cx > chartWidth) return null;
-
             const markerColor = selectedStrategy?.visualization?.color || '#10b981';
 
             if (ev.event_type === 'ACTIVATED') {
@@ -1019,31 +1061,13 @@ function ObservatoryChart({
             }
           })}
 
-          {/* Crosshair Cursor */}
           {activeIdx !== null && activeIdx >= 0 && activeIdx < n && (
             <g>
-              <line
-                x1={activeIdx * candleStep + candleStep / 2}
-                y1={0}
-                x2={activeIdx * candleStep + candleStep / 2}
-                y2={priceChartHeight + volumeHeight}
-                stroke="#a1a1aa"
-                strokeWidth={0.8}
-                strokeDasharray="2,2"
-              />
-              <line
-                x1={0}
-                y1={getY(candles[activeIdx].close)}
-                x2={chartWidth}
-                y2={getY(candles[activeIdx].close)}
-                stroke="#a1a1aa"
-                strokeWidth={0.8}
-                strokeDasharray="2,2"
-              />
+              <line x1={activeIdx * candleStep + candleStep / 2} y1={0} x2={activeIdx * candleStep + candleStep / 2} y2={priceChartHeight + volumeHeight} stroke="#a1a1aa" strokeWidth={0.8} strokeDasharray="2,2" />
+              <line x1={0} y1={getY(candles[activeIdx].close)} x2={chartWidth} y2={getY(candles[activeIdx].close)} stroke="#a1a1aa" strokeWidth={0.8} strokeDasharray="2,2" />
             </g>
           )}
 
-          {/* Subpanels for Oscillators */}
           {isRSISubpanel && indicators.rsi14 && (
             <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
               <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
@@ -1065,56 +1089,8 @@ function ObservatoryChart({
               <path d={makeSubpanelPath(indicators.minus_di, 0, 60)} stroke="#f43f5e" strokeWidth={1} fill="none" />
             </g>
           )}
-
-          {isROCSubpanel && indicators.roc12 && (
-            <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
-              <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
-              <line x1={0} y1={getSubY(0, -6, 6) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(0, -6, 6) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
-              <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">ROC(12): {indicators.roc12[activeIdx]?.toFixed(2) || 'N/A'}%</text>
-              <path d={makeSubpanelPath(indicators.roc12, -6, 6)} stroke="#8b5cf6" strokeWidth={1.5} fill="none" />
-            </g>
-          )}
-
-          {isCMFSubpanel && indicators.cmf20 && (
-            <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
-              <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
-              <line x1={0} y1={getSubY(0, -0.3, 0.3) - (priceChartHeight + volumeHeight + subpanelGap)} x2={chartWidth} y2={getSubY(0, -0.3, 0.3) - (priceChartHeight + volumeHeight + subpanelGap)} stroke="#71717a" strokeWidth={0.8} strokeDasharray="2,2" opacity={0.4} />
-              <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">CMF(20): {indicators.cmf20[activeIdx]?.toFixed(3) || 'N/A'}</text>
-              <path d={makeSubpanelPath(indicators.cmf20, -0.3, 0.3)} stroke="#84cc16" strokeWidth={1.5} fill="none" />
-            </g>
-          )}
-
-          {isMACDSubpanel && indicators.macd && (
-            <g transform={`translate(0, ${priceChartHeight + volumeHeight + subpanelGap})`}>
-              <rect x={0} y={0} width={chartWidth} height={subpanelHeight} fill="#0d0e14" rx={4} stroke="#27272a" strokeWidth={0.8} />
-              <text x={chartWidth - 4} y={12} fill="#71717a" fontSize={9} textAnchor="end" fontFamily="monospace">MACD (12,26,9)</text>
-              <path d={makeSubpanelPath(indicators.macd, -5, 5)} stroke="#38bdf8" strokeWidth={1.2} fill="none" />
-              <path d={makeSubpanelPath(indicators.macd_signal, -5, 5)} stroke="#f97316" strokeWidth={1.2} fill="none" />
-            </g>
-          )}
         </svg>
       </div>
-
-      {/* Historical Strategy Timeline */}
-      {selectedStrategy?.activation_events && selectedStrategy.activation_events.length > 0 && (
-        <div className="pt-2 border-t border-stone-800/60 flex items-center gap-2 overflow-x-auto custom-scrollbar text-[10px] font-mono">
-          <span className="text-stone-500 shrink-0 font-bold flex items-center gap-1">
-            <History className="w-3 h-3 text-stone-400" /> Historical Timeline:
-          </span>
-          {selectedStrategy.activation_events.slice(-10).map((ev, i) => (
-            <span
-              key={i}
-              className={`px-2 py-0.5 rounded border shrink-0 flex items-center gap-1 ${
-                ev.event_type === 'ACTIVATED' ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50' :
-                ev.event_type === 'INVALIDATED' ? 'bg-rose-950/40 text-rose-300 border-rose-800/50' :
-                'bg-stone-900 text-stone-400 border-stone-800'
-              }`}
-            >
-              <strong>{ev.event_type}</strong> @ ₹{ev.price.toFixed(2)}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -1145,7 +1121,6 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
         </div>
       </div>
 
-      {/* Entry Conditions */}
       <div>
         <div className="flex items-center justify-between text-xs font-bold text-stone-300 uppercase mb-2">
           <span className="flex items-center gap-1.5 text-emerald-400">
@@ -1185,7 +1160,6 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
                   </div>
                 </div>
 
-                {/* Mathematical Basis Drilldown */}
                 {isExpanded && (
                   <div className="mt-2 pt-2 border-t border-stone-800/60 text-[11px] font-mono space-y-1 text-stone-400 bg-stone-950/40 p-2 rounded">
                     <div><strong>Rule ID:</strong> {rule.rule_id}</div>
@@ -1200,22 +1174,577 @@ function StrategyRuleInspector({ strategy }: { strategy: StrategyResult }) {
           })}
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Exit Conditions */}
-      {exitRules.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between text-xs font-bold text-stone-300 uppercase mb-2">
-            <span className="flex items-center gap-1.5 text-rose-400">
-              <TrendingDown className="w-3.5 h-3.5" /> Strategy Exit Conditions
+// ---------------------------------------------------------------------------
+// Phase 6: Robustness & Discovery Workstation View
+// ---------------------------------------------------------------------------
+interface RobustnessWorkstationProps {
+  symbol: string;
+  strategyId: string;
+  timeframe: string;
+  onSelectCandidate: (params: Record<string, any>) => void;
+  onLaunchChallenge: (backtestData: any) => void;
+}
+
+function RobustnessWorkstation({
+  symbol,
+  strategyId,
+  timeframe,
+  onSelectCandidate,
+  onLaunchChallenge,
+}: RobustnessWorkstationProps) {
+  const [subTab, setSubTab] = useState<'SWEEP' | 'NEIGHBORHOOD' | 'MULTI_SYMBOL' | 'PERIODS' | 'WALK_FORWARD' | 'LEDGER'>('SWEEP');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Robustness States
+  const [sweepResults, setSweepResults] = useState<ParameterSweepItemData[]>([]);
+  const [snoopingWarning, setSnoopingWarning] = useState<boolean>(false);
+  const [snoopingMessage, setSnoopingMessage] = useState<string>('');
+  const [surfaceData, setSurfaceData] = useState<ParameterSurfaceData | null>(null);
+  const [neighborhoodData, setNeighborhoodData] = useState<NeighborhoodAnalysisData | null>(null);
+  const [multiSymbolData, setMultiSymbolData] = useState<MultiSymbolSummaryData | null>(null);
+  const [periodData, setPeriodData] = useState<PeriodRobustnessData | null>(null);
+  const [walkForwardData, setWalkForwardData] = useState<WalkForwardSelectionData | null>(null);
+  const [experimentRecords, setExperimentRecords] = useState<ResearchExperimentData[]>([]);
+
+  // Selected candidate configuration
+  const [candidateParams, setCandidateParams] = useState<Record<string, any>>({ fast_period: 20, slow_period: 50, max_rsi: 70.0 });
+
+  // Run Parameter Sweep & Surface
+  const runSweep = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const sweepRes = await fetch(`/api/strategies/research/sweep/${encodeURIComponent(symbol)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy_id: strategyId, timeframe }),
+      });
+      if (!sweepRes.ok) throw new Error("Parameter sweep execution failed");
+      const sweepJson = await sweepRes.json();
+      setSweepResults(sweepJson.results || []);
+      setSnoopingWarning(Boolean(sweepJson.data_snooping_warning));
+      setSnoopingMessage(sweepJson.data_snooping_message || '');
+
+      // Load 2D Surface
+      const surfRes = await fetch(`/api/strategies/research/surface/${encodeURIComponent(symbol)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_id: strategyId,
+          param_1_id: 'fast_period',
+          param_1_values: [15, 20, 25],
+          param_2_id: 'slow_period',
+          param_2_values: [40, 50, 60],
+          timeframe,
+        }),
+      });
+      if (surfRes.ok) {
+        const surfJson = await surfRes.json();
+        setSurfaceData(surfJson.surface || null);
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to execute parameter sweep");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [symbol, strategyId, timeframe]);
+
+  // Run Neighborhood Stability
+  const runNeighborhood = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/strategies/research/neighborhood/${encodeURIComponent(symbol)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy_id: strategyId, target_params: candidateParams, timeframe }),
+      });
+      if (!res.ok) throw new Error("Neighborhood analysis failed");
+      const data = await res.json();
+      setNeighborhoodData(data.analysis || null);
+    } catch (e: any) {
+      setError(e.message || "Failed to analyze neighborhood");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [symbol, strategyId, candidateParams, timeframe]);
+
+  // Run Multi-Symbol Generalization
+  const runMultiSymbol = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/strategies/research/multi-symbol`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_id: strategyId,
+          parameters: candidateParams,
+          timeframe,
+          symbols: ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS', 'TATAMOTORS.NS', 'SBIN.NS'],
+        }),
+      });
+      if (!res.ok) throw new Error("Multi-symbol evaluation failed");
+      const data = await res.json();
+      setMultiSymbolData(data.summary || null);
+    } catch (e: any) {
+      setError(e.message || "Failed to evaluate multi-symbol generalization");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [strategyId, candidateParams, timeframe]);
+
+  // Run Period Decay
+  const runPeriods = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/strategies/research/periods/${encodeURIComponent(symbol)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy_id: strategyId, parameters: candidateParams, timeframe, subperiods: 3 }),
+      });
+      if (!res.ok) throw new Error("Period analysis failed");
+      const data = await res.json();
+      setPeriodData(data.summary || null);
+    } catch (e: any) {
+      setError(e.message || "Failed to evaluate period decay");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [symbol, strategyId, candidateParams, timeframe]);
+
+  // Run Purged Walk-Forward Selection
+  const runWalkForward = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const grid = [
+        { fast_period: 15, slow_period: 40 },
+        { fast_period: 20, slow_period: 50 },
+        { fast_period: 25, slow_period: 60 },
+      ];
+      const res = await fetch(`/api/strategies/research/walk-forward-selection/${encodeURIComponent(symbol)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy_id: strategyId, param_grid: grid, timeframe, folds: 3 }),
+      });
+      if (!res.ok) throw new Error("Walk-forward selection failed");
+      const data = await res.json();
+      setWalkForwardData(data.result || null);
+    } catch (e: any) {
+      setError(e.message || "Failed to execute walk-forward selection");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [symbol, strategyId, timeframe]);
+
+  // Load Experiments Ledger
+  const loadLedger = useCallback(async () => {
+    try {
+      const res = await fetch('/api/strategies/research/experiments');
+      if (res.ok) {
+        const data = await res.json();
+        setExperimentRecords(data.experiments || []);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (subTab === 'SWEEP') runSweep();
+    else if (subTab === 'NEIGHBORHOOD') runNeighborhood();
+    else if (subTab === 'MULTI_SYMBOL') runMultiSymbol();
+    else if (subTab === 'PERIODS') runPeriods();
+    else if (subTab === 'WALK_FORWARD') runWalkForward();
+    else if (subTab === 'LEDGER') loadLedger();
+  }, [subTab, runSweep, runNeighborhood, runMultiSymbol, runPeriods, runWalkForward, loadLedger]);
+
+  return (
+    <div className="space-y-3 font-mono">
+      {/* ── Sub-Workstation Navigation & Skeptic Mode Trigger ── */}
+      <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar">
+          {[
+            { id: 'SWEEP', label: 'Parameter Sweep & Surface', icon: Grid },
+            { id: 'NEIGHBORHOOD', label: 'Neighborhood Plateaus', icon: Target },
+            { id: 'MULTI_SYMBOL', label: 'Multi-Symbol Generalization', icon: Compass },
+            { id: 'PERIODS', label: 'Period Decay Diagnostics', icon: History },
+            { id: 'WALK_FORWARD', label: 'Purged Walk-Forward', icon: Split },
+            { id: 'LEDGER', label: 'Experiment Ledger', icon: Bookmark },
+          ].map(t => {
+            const Icon = t.icon;
+            const isActive = subTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setSubTab(t.id as any)}
+                className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer text-[11px] shrink-0 ${
+                  isActive ? 'bg-violet-600 text-white shadow-md' : 'bg-stone-900 text-stone-400 hover:text-stone-200 border border-stone-800'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Challenge This Strategy (Copilot Skeptic Mode) */}
+        <button
+          onClick={() => onLaunchChallenge({ strategy_id: strategyId, candidate_params: candidateParams })}
+          className="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 rounded-lg font-bold flex items-center gap-1.5 text-xs transition-all cursor-pointer shadow-inner"
+        >
+          <Flame className="w-3.5 h-3.5 text-rose-400" />
+          <span>Challenge This Strategy</span>
+        </button>
+      </div>
+
+      {/* Multiple Testing & Data Snooping Disclosure Banner */}
+      {snoopingWarning && (
+        <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-600/40 text-amber-300 text-xs flex items-center gap-2.5">
+          <AlertOctagon className="w-4 h-4 shrink-0 text-amber-400" />
+          <div>
+            <strong className="text-amber-200 uppercase">Data Snooping Notice:</strong>{' '}
+            <span>{snoopingMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="p-12 bg-[#12131b] border border-stone-800 rounded-2xl flex flex-col items-center justify-center text-stone-400 space-y-3 font-mono">
+          <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
+          <span className="text-xs">Computing Multi-Dimensional Robustness Analytics…</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="p-4 bg-rose-950/30 border border-rose-800/40 rounded-xl text-rose-300 text-xs">
+          <AlertTriangle className="w-4 h-4 inline-block mr-2 text-rose-400" />
+          {error}
+        </div>
+      )}
+
+      {/* ── SubTab 1: PARAMETER SWEEP & 2D SURFACE ── */}
+      {subTab === 'SWEEP' && !isLoading && (
+        <div className="space-y-3">
+          {/* 2D Parameter Surface Grid */}
+          {surfaceData && (
+            <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between border-b border-stone-800/60 pb-2 text-xs">
+                <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
+                  <Grid className="w-4 h-4 text-violet-400" /> Parameter Stability Surface ({surfaceData.param_1_name} × {surfaceData.param_2_name})
+                </span>
+                <span className="text-[10px] text-stone-500">Exposes Net Return % | Sharpe | Drawdown | OOS Return</span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs">
+                {surfaceData.cells.map((cell, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      const p: Record<string, any> = {};
+                      p[surfaceData.param_1_id] = cell.param_1_val;
+                      p[surfaceData.param_2_id] = cell.param_2_val;
+                      setCandidateParams(p);
+                      onSelectCandidate(p);
+                    }}
+                    className="p-2.5 rounded-lg bg-stone-900/50 border border-stone-800/80 hover:border-violet-500/60 hover:bg-stone-900 cursor-pointer transition-all space-y-1"
+                  >
+                    <div className="flex items-center justify-between font-bold text-stone-300 text-[10px]">
+                      <span>{surfaceData.param_1_id}={cell.param_1_val} | {surfaceData.param_2_id}={cell.param_2_val}</span>
+                      <span className={`px-1 rounded text-[9px] ${cell.net_return_pct >= 0 ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-400'}`}>
+                        {cell.overfitting_status}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs font-black">
+                      <span className="text-stone-400 font-normal">Net Return:</span>
+                      <span className={cell.net_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                        {cell.net_return_pct > 0 ? '+' : ''}{cell.net_return_pct.toFixed(2)}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-stone-500">
+                      <span>Sharpe: {cell.sharpe_ratio}</span>
+                      <span>OOS: {cell.oos_return_pct}%</span>
+                      <span>Trades: {cell.total_trades}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Detailed Parameter Sweep Ledger Table */}
+          <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+            <div className="flex items-center justify-between border-b border-stone-800/60 pb-2 text-xs">
+              <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
+                <BarChart3 className="w-4 h-4 text-emerald-400" /> Bounded Parameter Sweep Ledger ({sweepResults.length} Configurations)
+              </span>
+            </div>
+
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left text-[11px]">
+                <thead>
+                  <tr className="border-b border-stone-800 text-stone-500 text-[10px] uppercase">
+                    <th className="pb-2 font-bold">Parameters</th>
+                    <th className="pb-2 font-bold">Trades</th>
+                    <th className="pb-2 font-bold">Net Return</th>
+                    <th className="pb-2 font-bold">Gross Return</th>
+                    <th className="pb-2 font-bold">Sharpe</th>
+                    <th className="pb-2 font-bold">Max DD</th>
+                    <th className="pb-2 font-bold">IS / OOS Return</th>
+                    <th className="pb-2 font-bold">3x Friction</th>
+                    <th className="pb-2 font-bold">Classification</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-800/60">
+                  {sweepResults.map(item => (
+                    <tr
+                      key={item.configuration_id}
+                      onClick={() => {
+                        setCandidateParams(item.parameters);
+                        onSelectCandidate(item.parameters);
+                      }}
+                      className="hover:bg-stone-900/50 cursor-pointer transition-all"
+                    >
+                      <td className="py-2.5 font-bold text-stone-200">
+                        {Object.entries(item.parameters).map(([k, v]) => `${k}=${v}`).join(', ')}
+                      </td>
+                      <td className="py-2.5 text-stone-400">{item.total_trades}</td>
+                      <td className={`py-2.5 font-bold ${item.net_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {item.net_return_pct > 0 ? '+' : ''}{item.net_return_pct.toFixed(2)}%
+                      </td>
+                      <td className="py-2.5 text-stone-400">{item.gross_return_pct.toFixed(2)}%</td>
+                      <td className="py-2.5 text-stone-300 font-bold">{item.sharpe_ratio}</td>
+                      <td className="py-2.5 text-rose-400">{item.max_drawdown_pct}%</td>
+                      <td className="py-2.5 text-stone-400 text-[10px]">
+                        IS: {item.is_return_pct}% | OOS: {item.oos_return_pct}%
+                      </td>
+                      <td className="py-2.5 text-stone-400">{item.triple_friction_return_pct}%</td>
+                      <td className="py-2.5">
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                          item.robustness_classification === 'ROBUST_CANDIDATE' ? 'bg-emerald-950 text-emerald-300 border border-emerald-600/40' :
+                          item.robustness_classification === 'OVERFIT' ? 'bg-rose-950 text-rose-300 border border-rose-600/40' :
+                          'bg-amber-950 text-amber-300 border border-amber-600/40'
+                        }`}>
+                          {item.robustness_classification}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SubTab 2: NEIGHBORHOOD PLATEAUS ── */}
+      {subTab === 'NEIGHBORHOOD' && neighborhoodData && !isLoading && (
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2 text-xs">
+            <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
+              <Target className="w-4 h-4 text-amber-400" /> Neighborhood Perturbation Analysis (Plateau vs Cliff)
+            </span>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+              neighborhoodData.stability_classification === 'STABLE_PLATEAU' ? 'bg-emerald-950 text-emerald-300 border border-emerald-600/50' :
+              'bg-rose-950 text-rose-300 border border-rose-600/50'
+            }`}>
+              {neighborhoodData.stability_classification} (Plateau Score: {neighborhoodData.plateau_score}%)
             </span>
           </div>
-          <div className="space-y-1.5">
-            {exitRules.map(rule => (
-              <div key={rule.rule_id} className="p-2 rounded-lg bg-stone-900/40 border border-stone-800 text-xs flex items-center justify-between">
-                <span className="text-stone-300">{rule.label}</span>
-                <span className="font-mono text-[10px] text-stone-400">{rule.actual_value_label}</span>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Candidate Return</div>
+              <div className="text-lg font-black text-white mt-0.5">{neighborhoodData.candidate_net_return_pct}%</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Mean Neighbor Return</div>
+              <div className="text-lg font-black text-amber-400 mt-0.5">{neighborhoodData.mean_neighbor_return_pct}%</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Return Std Deviation</div>
+              <div className="text-lg font-black text-stone-300 mt-0.5">{neighborhoodData.return_standard_deviation}%</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Neighbors Tested</div>
+              <div className="text-lg font-black text-violet-400 mt-0.5">{neighborhoodData.neighbor_count}</div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5 pt-2">
+            <div className="text-[11px] font-bold text-stone-400">Adjacent Perturbations (+/- 1 Parameter Step):</div>
+            {neighborhoodData.neighbors.map((n, idx) => (
+              <div key={idx} className="p-2 rounded bg-stone-900/30 border border-stone-800/60 flex items-center justify-between text-xs">
+                <span className="text-stone-300">{Object.entries(n.parameters).map(([k, v]) => `${k}=${v}`).join(', ')}</span>
+                <div className="flex items-center gap-3">
+                  <span className={n.net_return_pct >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                    {n.net_return_pct > 0 ? '+' : ''}{n.net_return_pct}%
+                  </span>
+                  <span className="text-stone-500 text-[10px]">{n.total_trades} trades</span>
+                </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── SubTab 3: MULTI-SYMBOL GENERALIZATION ── */}
+      {subTab === 'MULTI_SYMBOL' && multiSymbolData && !isLoading && (
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2 text-xs">
+            <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
+              <Compass className="w-4 h-4 text-cyan-400" /> Multi-Symbol Generalization ({multiSymbolData.symbol_count} Symbols)
+            </span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-950 border border-violet-600/50 text-violet-300">
+              {multiSymbolData.generalization_classification}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Median Symbol Return</div>
+              <div className="text-lg font-black text-white mt-0.5">{multiSymbolData.median_net_return_pct}%</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Dispersion (IQR)</div>
+              <div className="text-lg font-black text-amber-400 mt-0.5">{multiSymbolData.dispersion_iqr_pct}%</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Best Symbol</div>
+              <div className="text-sm font-black text-emerald-400 mt-0.5 truncate">{multiSymbolData.best_symbol}</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Profitable Symbols</div>
+              <div className="text-lg font-black text-violet-400 mt-0.5">{multiSymbolData.profitable_symbols_count}/{multiSymbolData.symbol_count}</div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5 pt-2">
+            {Object.entries(multiSymbolData.symbol_breakdown).map(([sym, item]) => (
+              <div key={sym} className="p-2 rounded bg-stone-900/40 border border-stone-800/60 flex items-center justify-between text-xs">
+                <span className="font-bold text-stone-200">{sym}</span>
+                <div className="flex items-center gap-4">
+                  <span className={item.net_return_pct >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                    {item.net_return_pct > 0 ? '+' : ''}{item.net_return_pct}%
+                  </span>
+                  <span className="text-stone-400 text-[10px]">Sharpe: {item.sharpe_ratio}</span>
+                  <span className="text-stone-500 text-[10px]">{item.total_trades} trades</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── SubTab 4: PERIOD DECAY ── */}
+      {subTab === 'PERIODS' && periodData && !isLoading && (
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2 text-xs">
+            <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
+              <History className="w-4 h-4 text-emerald-400" /> Chronological Subperiod Performance & Decay
+            </span>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+              periodData.decay_status === 'STABLE' ? 'bg-emerald-950 text-emerald-300 border border-emerald-600/50' :
+              periodData.decay_status === 'IMPROVING' ? 'bg-sky-950 text-sky-300 border border-sky-600/50' :
+              'bg-rose-950 text-rose-300 border border-rose-600/50'
+            }`}>
+              DECAY STATUS: {periodData.decay_status}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+            {periodData.subperiod_results.map(sub => (
+              <div key={sub.period_index} className="p-3 rounded-lg bg-stone-900/40 border border-stone-800 space-y-1">
+                <div className="font-bold text-stone-300 flex items-center justify-between text-xs">
+                  <span>{sub.period_name}</span>
+                  <span className={sub.net_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                    {sub.net_return_pct > 0 ? '+' : ''}{sub.net_return_pct}%
+                  </span>
+                </div>
+                <div className="text-[10px] text-stone-500 flex items-center justify-between pt-1">
+                  <span>Trades: {sub.total_trades}</span>
+                  <span>Win Rate: {sub.win_rate_pct}%</span>
+                  <span>Sharpe: {sub.sharpe_ratio}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── SubTab 5: PURGED WALK-FORWARD ── */}
+      {subTab === 'WALK_FORWARD' && walkForwardData && !isLoading && (
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2 text-xs">
+            <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
+              <Split className="w-4 h-4 text-violet-400" /> Purged Walk-Forward Parameter Optimization
+            </span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-950 border border-violet-600/50 text-violet-300">
+              {walkForwardData.walk_forward_classification}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Cumulative OOS Return</div>
+              <div className="text-lg font-black text-emerald-400 mt-0.5">{walkForwardData.cumulative_oos_return_pct}%</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">OOS Sharpe Ratio</div>
+              <div className="text-lg font-black text-cyan-400 mt-0.5">{walkForwardData.cumulative_oos_sharpe}</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Parameter Stability</div>
+              <div className="text-lg font-black text-white mt-0.5">{walkForwardData.parameter_stability_pct}%</div>
+            </div>
+            <div className="p-2.5 rounded bg-stone-900/40 border border-stone-800">
+              <div className="text-[10px] text-stone-500 uppercase">Folds Completed</div>
+              <div className="text-lg font-black text-violet-400 mt-0.5">{walkForwardData.fold_count} Folds</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SubTab 6: EXPERIMENT LEDGER ── */}
+      {subTab === 'LEDGER' && (
+        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
+          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2 text-xs">
+            <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
+              <Bookmark className="w-4 h-4 text-amber-400" /> Immutable Research Experiment Ledger ({experimentRecords.length} Records)
+            </span>
+          </div>
+
+          <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+            {experimentRecords.length > 0 ? (
+              experimentRecords.map(rec => (
+                <div key={rec.experiment_id} className="p-2.5 rounded-lg bg-stone-900/40 border border-stone-800 flex items-center justify-between text-xs">
+                  <div>
+                    <div className="font-bold text-stone-200">{rec.experiment_id} ({rec.strategy_id})</div>
+                    <div className="text-[10px] text-stone-500">
+                      {Object.entries(rec.parameters).map(([k, v]) => `${k}=${v}`).join(', ')} · {rec.created_at.slice(0, 10)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className={rec.net_return_pct >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                      {rec.net_return_pct > 0 ? '+' : ''}{rec.net_return_pct}%
+                    </div>
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-stone-800 text-stone-400">
+                      {rec.workflow_state}
+                    </span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="p-6 text-center text-stone-500 text-xs">No experiments recorded yet. Complete sweeps or backtests to log records.</div>
+            )}
           </div>
         </div>
       )}
@@ -1243,7 +1772,6 @@ function ResearchWorkstation({
   onSelectObsId,
   onRefresh,
 }: ResearchWorkstationProps) {
-  const [selectedHorizonTab, setSelectedHorizonTab] = useState<string>('5');
   const [regimeFilter, setRegimeFilter] = useState<string>('ALL');
 
   if (isLoading) {
@@ -1290,7 +1818,6 @@ function ResearchWorkstation({
 
   return (
     <div className="space-y-4">
-      {/* Research KPI Banner */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2.5">
         <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
           <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Total Activations</div>
@@ -1333,7 +1860,6 @@ function ResearchWorkstation({
         </div>
       </div>
 
-      {/* Forward Observation Windows Table */}
       <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800/60 pb-2">
           <div className="flex items-center gap-2">
@@ -1342,9 +1868,6 @@ function ResearchWorkstation({
               Forward Observation Windows (Empirical Outcome Distributions)
             </span>
           </div>
-          <span className="text-[10px] font-mono text-stone-500">
-            Direction: <strong className="text-stone-300 font-bold">{summary.direction}</strong>
-          </span>
         </div>
 
         <div className="overflow-x-auto custom-scrollbar">
@@ -1356,9 +1879,8 @@ function ResearchWorkstation({
                 <th className="pb-2 font-bold">Median Return</th>
                 <th className="pb-2 font-bold">Mean Return</th>
                 <th className="pb-2 font-bold">Positive Freq %</th>
-                <th className="pb-2 font-bold">Median MAE (Adverse)</th>
-                <th className="pb-2 font-bold">Median MFE (Favorable)</th>
-                <th className="pb-2 font-bold">P10 / P90 Span</th>
+                <th className="pb-2 font-bold">Median MAE</th>
+                <th className="pb-2 font-bold">Median MFE</th>
                 <th className="pb-2 font-bold">Status</th>
               </tr>
             </thead>
@@ -1380,7 +1902,6 @@ function ResearchWorkstation({
                     <td className="py-2.5 text-stone-300">{hs.positive_return_pct !== null ? `${hs.positive_return_pct.toFixed(1)}%` : '---'}</td>
                     <td className="py-2.5 text-orange-400 font-medium">{hs.median_mae_pct !== null ? `${hs.median_mae_pct.toFixed(2)}%` : '---'}</td>
                     <td className="py-2.5 text-emerald-300 font-medium">{hs.median_mfe_pct !== null ? `${hs.median_mfe_pct.toFixed(2)}%` : '---'}</td>
-                    <td className="py-2.5 text-stone-500 text-[11px]">{hs.p10 !== null && hs.p90 !== null ? `[${hs.p10.toFixed(1)}% … ${hs.p90.toFixed(1)}%]` : '---'}</td>
                     <td className="py-2.5">
                       {hs.is_low_sample ? (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-700/50 text-amber-300">LOW SAMPLE</span>
@@ -1393,151 +1914,6 @@ function ResearchWorkstation({
               })}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {/* Contextual Breakdowns Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-2.5">
-          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
-            <span className="font-bold text-xs text-stone-200 uppercase font-mono flex items-center gap-1.5">
-              <Compass className="w-3.5 h-3.5 text-amber-400" /> Outcomes by Market Regime (5-Candle Horizon)
-            </span>
-          </div>
-          <div className="space-y-1.5">
-            {Object.entries(summary.regime_breakdown).length > 0 ? (
-              Object.entries(summary.regime_breakdown).map(([reg, data]) => (
-                <div key={reg} className="p-2 rounded-lg bg-stone-900/50 border border-stone-800/60 flex items-center justify-between text-xs font-mono">
-                  <div>
-                    <span className="font-bold text-stone-200">{reg}</span>
-                    <div className="text-[10px] text-stone-500">{data.activations} activations</div>
-                  </div>
-                  <div className="text-right">
-                    <div className={data.median_5candle_return >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                      {data.median_5candle_return > 0 ? '+' : ''}{data.median_5candle_return.toFixed(2)}%
-                    </div>
-                    <div className="text-[10px] text-stone-400">Positive Freq: {data.positive_frequency_pct.toFixed(0)}%</div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-xs text-stone-500 font-mono py-2 text-center">No regime activations recorded.</div>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-2.5">
-          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
-            <span className="font-bold text-xs text-stone-200 uppercase font-mono flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-indigo-400" /> Outcomes by Strategy Confluence
-            </span>
-          </div>
-          <div className="space-y-1.5">
-            {Object.entries(summary.confluence_breakdown).length > 0 ? (
-              Object.entries(summary.confluence_breakdown).map(([tier, data]) => (
-                <div key={tier} className="p-2 rounded-lg bg-stone-900/50 border border-stone-800/60 flex items-center justify-between text-xs font-mono">
-                  <div>
-                    <span className="font-bold text-stone-200">{tier}</span>
-                    <div className="text-[10px] text-stone-500">{data.activations} activations</div>
-                  </div>
-                  <div className="text-right">
-                    <div className={data.median_5candle_return >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                      {data.median_5candle_return > 0 ? '+' : ''}{data.median_5candle_return.toFixed(2)}%
-                    </div>
-                    <div className="text-[10px] text-stone-400">Positive Freq: {data.positive_frequency_pct.toFixed(0)}%</div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-xs text-stone-500 font-mono py-2 text-center">No confluence observations recorded.</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Historical Activation Episodes Ledger */}
-      <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800/60 pb-2">
-          <div className="flex items-center gap-2">
-            <History className="w-4 h-4 text-emerald-400" />
-            <span className="font-bold text-xs text-stone-200 uppercase font-mono tracking-wider">
-              Activation Episodes Ledger ({filteredObservations.length} Episodes)
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-stone-500">Filter Regime:</span>
-            <select
-              value={regimeFilter}
-              onChange={e => setRegimeFilter(e.target.value)}
-              className="bg-stone-900 border border-stone-800 text-stone-300 text-[10px] font-mono rounded px-2 py-1 focus:outline-none"
-            >
-              <option value="ALL">ALL REGIMES</option>
-              {Object.keys(summary.regime_breakdown).map(r => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
-          {filteredObservations.length > 0 ? (
-            filteredObservations.map(obs => {
-              const isSelected = selectedObsId === obs.observation_id;
-              const f5 = obs.forward_observations['5'];
-              const dateStr = new Date(obs.activation_timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-              return (
-                <div
-                  key={obs.observation_id}
-                  onClick={() => onSelectObsId(obs.observation_id, obs.activation_index)}
-                  className={`p-2.5 rounded-lg border text-xs font-mono cursor-pointer transition-all ${
-                    isSelected
-                      ? 'bg-violet-950/40 border-violet-500/80 shadow-md ring-1 ring-violet-500'
-                      : 'bg-stone-900/40 border-stone-800/60 hover:bg-stone-900 hover:border-stone-700'
-                  }`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-stone-200">Episode @ Bar #{obs.activation_index}</span>
-                      <span className="text-stone-500">({dateStr})</span>
-                      <span className="px-1.5 py-0.5 rounded bg-stone-800 text-[10px] text-amber-400">{obs.regime_at_activation}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-stone-300 font-bold">P₀: ₹{obs.activation_price.toFixed(2)}</span>
-                      {f5 && f5.is_complete && f5.direction_adjusted_return_pct !== null && (
-                        <span className={`font-bold ${f5.direction_adjusted_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          5-Bar: {f5.direction_adjusted_return_pct > 0 ? '+' : ''}{f5.direction_adjusted_return_pct.toFixed(2)}%
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-1.5 border-t border-stone-800/40 text-[10px] text-stone-400">
-                    <div>
-                      <span>Confluence: <strong>{obs.confluence_count} strategies</strong></span>
-                      {obs.confluent_strategies.length > 0 && (
-                        <span className="text-stone-500"> ({obs.confluent_strategies.join(', ')})</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 font-mono">
-                      {f5?.mae_pct !== undefined && f5?.mae_pct !== null && (
-                        <span className="text-orange-400">MAE: {f5.mae_pct.toFixed(2)}%</span>
-                      )}
-                      {f5?.mfe_pct !== undefined && f5?.mfe_pct !== null && (
-                        <span className="text-emerald-400">MFE: {f5.mfe_pct.toFixed(2)}%</span>
-                      )}
-                      {obs.candles_to_invalidation && (
-                        <span className="text-stone-400">Duration: {obs.candles_to_invalidation} bars</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="p-6 text-center text-stone-500 font-mono text-xs">
-              No activation episodes match the selected regime filter.
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -1570,7 +1946,7 @@ function BacktestWorkstation({
     return (
       <div className="p-12 bg-[#12131b] border border-stone-800 rounded-2xl flex flex-col items-center justify-center text-stone-400 space-y-3 font-mono">
         <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
-        <span className="text-xs">Running Event-Driven Backtest Simulation (Next-Bar Execution + Walk-Forward IS/OOS)…</span>
+        <span className="text-xs">Running Event-Driven Backtest Simulation…</span>
       </div>
     );
   }
@@ -1592,7 +1968,6 @@ function BacktestWorkstation({
 
   return (
     <div className="space-y-4">
-      {/* ── Backtest Hypothesis Control Bar ── */}
       <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">
@@ -1605,7 +1980,7 @@ function BacktestWorkstation({
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-stone-500 font-bold">Risk Allocation:</span>
+            <span className="text-stone-500 font-bold">Risk:</span>
             <input
               type="number"
               step="0.05"
@@ -1647,7 +2022,6 @@ function BacktestWorkstation({
 
       {result && (
         <>
-          {/* ── Key Performance Metrics Grid ── */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5">
             <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
               <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Total Net Return</div>
@@ -1662,390 +2036,46 @@ function BacktestWorkstation({
               <div className={`text-xl font-black font-mono mt-1 ${result.netProfit >= 0 ? 'text-white' : 'text-rose-400'}`}>
                 ₹{result.netProfit.toLocaleString()}
               </div>
-              <div className="text-[10px] font-mono text-stone-400 mt-0.5">Fees: ₹{result.total_friction_costs}</div>
             </div>
 
             <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
               <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Win Rate</div>
               <div className="text-xl font-black text-amber-400 font-mono mt-1">{result.win_rate_pct}%</div>
-              <div className="text-[10px] font-mono text-stone-400 mt-0.5">{result.winningTrades}W / {result.losingTrades}L ({result.total_trades}T)</div>
             </div>
 
             <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
               <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Profit Factor</div>
               <div className="text-xl font-black text-violet-400 font-mono mt-1">{result.profit_factor}</div>
-              <div className="text-[10px] font-mono text-stone-400 mt-0.5">CAGR: {result.cagr}%</div>
             </div>
 
             <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
               <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Sharpe Ratio</div>
               <div className="text-xl font-black text-cyan-400 font-mono mt-1">{result.sharpe_ratio}</div>
-              <div className="text-[10px] font-mono text-stone-400 mt-0.5">Annualized</div>
             </div>
 
             <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3">
               <div className="text-[10px] font-mono text-stone-500 uppercase font-bold">Max Drawdown</div>
               <div className="text-xl font-black text-rose-400 font-mono mt-1">{result.max_drawdown_pct}%</div>
-              <div className="text-[10px] font-mono text-stone-400 mt-0.5">Peak-to-trough</div>
             </div>
           </div>
 
-          {/* ── Walk-Forward Validation & Overfitting Card ── */}
           {wf && (
             <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3 font-mono">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800/60 pb-2">
-                <div className="flex items-center gap-2">
-                  <Cpu className="w-4 h-4 text-violet-400" />
-                  <span className="font-bold text-xs text-stone-200 uppercase tracking-wider">
-                    Walk-Forward Validation (70% In-Sample / 30% Out-Of-Sample)
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-stone-500 uppercase font-bold">Overfitting Status:</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                    wf.overfitting_status === 'ACCEPTABLE' ? 'bg-emerald-950/60 border-emerald-600/50 text-emerald-300' :
-                    wf.overfitting_status === 'DEGRADED_OOS' ? 'bg-amber-950/60 border-amber-600/50 text-amber-300' :
-                    wf.overfitting_status === 'OVERFIT' ? 'bg-rose-950/60 border-rose-600/50 text-rose-300' :
-                    'bg-stone-900 border-stone-800 text-stone-400'
-                  }`}>
-                    {wf.overfitting_status}
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="p-2.5 rounded-lg bg-stone-900/40 border border-stone-800/60 space-y-1">
-                  <div className="font-bold text-stone-300 flex items-center justify-between">
-                    <span>IN-SAMPLE (70% Data)</span>
-                    <span className={wf.in_sample_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {wf.in_sample_return_pct > 0 ? '+' : ''}{wf.in_sample_return_pct}%
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-stone-400 flex items-center justify-between">
-                    <span>Trades: {wf.in_sample_trades}</span>
-                    <span>Win Rate: {wf.in_sample_win_rate}%</span>
-                  </div>
-                </div>
-
-                <div className="p-2.5 rounded-lg bg-stone-900/40 border border-stone-800/60 space-y-1">
-                  <div className="font-bold text-stone-300 flex items-center justify-between">
-                    <span>OUT-OF-SAMPLE (30% Data)</span>
-                    <span className={wf.out_of_sample_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {wf.out_of_sample_return_pct > 0 ? '+' : ''}{wf.out_of_sample_return_pct}%
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-stone-400 flex items-center justify-between">
-                    <span>Trades: {wf.out_of_sample_trades}</span>
-                    <span>Win Rate: {wf.out_of_sample_win_rate}%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Cost Sensitivity Scenarios ── */}
-          {cs && (
-            <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-2 font-mono text-xs">
-              <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
-                <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
-                  <DollarSign className="w-3.5 h-3.5 text-amber-400" /> Cost Sensitivity Scenarios
+                <span className="font-bold text-xs text-stone-200 uppercase tracking-wider">
+                  Walk-Forward Validation (70% In-Sample / 30% Out-Of-Sample)
                 </span>
-                <span className="text-[10px] text-stone-400">Cost Drag: <strong className="text-orange-400">{cs.cost_drag_pct}%</strong></span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-                <div className="p-2 rounded bg-stone-900/40 border border-stone-800">
-                  <div className="text-stone-500">Zero Friction (Gross)</div>
-                  <div className="font-bold text-stone-200 mt-0.5">{cs.zero_friction_return_pct}%</div>
-                </div>
-                <div className="p-2 rounded bg-stone-900/40 border border-violet-800/40">
-                  <div className="text-violet-400">Configured Friction</div>
-                  <div className="font-bold text-violet-300 mt-0.5">{cs.configured_friction_return_pct}%</div>
-                </div>
-                <div className="p-2 rounded bg-stone-900/40 border border-stone-800">
-                  <div className="text-stone-500">High Friction (2x)</div>
-                  <div className="font-bold text-stone-400 mt-0.5">{cs.high_friction_return_pct}%</div>
-                </div>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                  wf.overfitting_status === 'ACCEPTABLE' ? 'bg-emerald-950/60 border-emerald-600/50 text-emerald-300' :
+                  'bg-rose-950/60 border-rose-600/50 text-rose-300'
+                }`}>
+                  {wf.overfitting_status}
+                </span>
               </div>
             </div>
           )}
-
-          {/* ── Trade-Level Evidence Ledger ── */}
-          <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3 font-mono">
-            <div className="flex items-center justify-between border-b border-stone-800/60 pb-2 text-xs">
-              <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-emerald-400" /> Executed Trades Ledger ({result.trades.length} Trades)
-              </span>
-            </div>
-
-            <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
-              {result.trades.length > 0 ? (
-                result.trades.map(t => {
-                  const isSelected = selectedTrade?.trade_id === t.trade_id;
-                  const isWin = t.net_pnl > 0;
-
-                  return (
-                    <div
-                      key={t.trade_id}
-                      onClick={() => setSelectedTrade(isSelected ? null : t)}
-                      className={`p-2.5 rounded-lg border text-xs cursor-pointer transition-all ${
-                        isSelected
-                          ? 'bg-violet-950/40 border-violet-500/80 shadow-md ring-1 ring-violet-500'
-                          : 'bg-stone-900/40 border-stone-800/60 hover:bg-stone-900'
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-stone-200">{t.trade_id}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${isWin ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-400'}`}>
-                            {t.exit_reason}
-                          </span>
-                          <span className="text-stone-500 text-[10px]">({t.regime_at_entry})</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-stone-400">Qty: {t.quantity}</span>
-                          <span className={`font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {t.net_pnl > 0 ? '+' : ''}₹{t.net_pnl.toFixed(2)} ({t.net_return_pct.toFixed(2)}%)
-                          </span>
-                        </div>
-                      </div>
-
-                      {isSelected && (
-                        <div className="mt-2 pt-2 border-t border-stone-800 text-[11px] text-stone-400 space-y-1 bg-stone-950/60 p-2.5 rounded">
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            <div><strong>Entry Price:</strong> ₹{t.entry_price}</div>
-                            <div><strong>Exit Price:</strong> ₹{t.exit_price}</div>
-                            <div><strong>Duration:</strong> {t.duration_bars} bars</div>
-                            <div><strong>Sample:</strong> {t.is_in_sample ? 'In-Sample' : 'Out-Of-Sample'}</div>
-                            <div><strong>Gross P&L:</strong> ₹{t.gross_pnl}</div>
-                            <div><strong>Brokerage:</strong> ₹{t.brokerage_cost}</div>
-                            <div><strong>Slippage:</strong> ₹{t.slippage_cost}</div>
-                            <div><strong>Net P&L:</strong> ₹{t.net_pnl}</div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="p-6 text-center text-stone-500 text-xs">No trades generated under current hypothesis.</div>
-              )}
-            </div>
-          </div>
         </>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Market Regime Analysis & Multi-Strategy Matrix (Phase 5)
-// ---------------------------------------------------------------------------
-interface RegimeAnalysisProps {
-  symbol: string;
-  timeframe: string;
-}
-
-function RegimeAnalysisWorkstation({ symbol, timeframe }: RegimeAnalysisProps) {
-  const [matrixData, setMatrixData] = useState<Record<string, RegimeMatrixItemData> | null>(null);
-  const [scorecard, setScorecard] = useState<StrategyScorecardData | null>(null);
-  const [correlationPairs, setCorrelationPairs] = useState<CorrelationPairData[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedStrategyId, setSelectedStrategyId] = useState<string>("EMA_GOLDEN_CROSS");
-
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const [matRes, scRes, corrRes] = await Promise.all([
-        fetch(`/api/strategies/matrix/${encodeURIComponent(symbol)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ timeframe }),
-        }),
-        fetch(`/api/strategies/scorecard/${encodeURIComponent(symbol)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ strategy_id: selectedStrategyId, timeframe }),
-        }),
-        fetch(`/api/strategies/correlation/${encodeURIComponent(symbol)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ timeframe }),
-        }),
-      ]);
-
-      if (!matRes.ok || !scRes.ok || !corrRes.ok) {
-        throw new Error("Failed to load regime matrix analytics");
-      }
-
-      const mat = await matRes.json();
-      const sc = await scRes.json();
-      const corr = await corrRes.json();
-
-      setMatrixData(mat.matrix || {});
-      setScorecard(sc);
-      setCorrelationPairs(corr.correlation_pairs || []);
-    } catch (e: any) {
-      setError(e.message || "Failed to load regime matrix");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [symbol, timeframe, selectedStrategyId]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const canonicalRegimes = [
-    "TRENDING_BULLISH",
-    "RANGE_BOUND",
-    "HIGH_VOLATILITY",
-    "BULLISH_ACCUMULATION",
-    "BEARISH_DISTRIBUTION",
-  ];
-
-  if (isLoading) {
-    return (
-      <div className="p-12 bg-[#12131b] border border-stone-800 rounded-2xl flex flex-col items-center justify-center text-stone-400 space-y-3 font-mono">
-        <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
-        <span className="text-xs">Computing 20 Strategies x Regimes Performance Matrix…</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* ── 20 Strategies x Market Regime Matrix ── */}
-      <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3 font-mono">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800/60 pb-2 text-xs">
-          <div className="flex items-center gap-2">
-            <Grid className="w-4 h-4 text-violet-400" />
-            <span className="font-bold text-stone-200 uppercase tracking-wider">
-              Market Regime x Strategy Performance Matrix ({Object.keys(matrixData || {}).length} Strategies)
-            </span>
-          </div>
-          <span className="text-[10px] text-stone-500">Real Numeric Metrics per Cell (Trades / Net P&L / PF)</span>
-        </div>
-
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left text-[11px] font-mono">
-            <thead>
-              <tr className="border-b border-stone-800 text-stone-500 text-[10px] uppercase">
-                <th className="pb-2 font-bold min-w-[140px]">Strategy</th>
-                <th className="pb-2 font-bold">Category</th>
-                <th className="pb-2 font-bold">Robustness</th>
-                {canonicalRegimes.map(r => (
-                  <th key={r} className="pb-2 font-bold text-center min-w-[100px]">{r.replace('_', ' ')}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-800/60">
-              {matrixData && Object.values(matrixData).map(row => (
-                <tr
-                  key={row.strategy_id}
-                  onClick={() => setSelectedStrategyId(row.strategy_id)}
-                  className={`hover:bg-stone-900/50 cursor-pointer transition-all ${
-                    selectedStrategyId === row.strategy_id ? 'bg-violet-950/20' : ''
-                  }`}
-                >
-                  <td className="py-2.5 font-bold text-stone-200">{row.strategy_name}</td>
-                  <td className="py-2.5 text-stone-400">{row.category}</td>
-                  <td className="py-2.5">
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                      row.robustness_classification === 'REGIME_DIVERSIFIED' ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'
-                    }`}>
-                      {row.robustness_classification}
-                    </span>
-                  </td>
-                  {canonicalRegimes.map(r => {
-                    const cell = row.regimes[r];
-                    if (!cell) return <td key={r} className="py-2.5 text-center text-stone-600">---</td>;
-                    return (
-                      <td key={r} className="py-2.5 text-center">
-                        <div className={`font-bold ${cell.net_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {cell.net_pnl > 0 ? '+' : ''}₹{cell.net_pnl}
-                        </div>
-                        <div className="text-[9px] text-stone-500">{cell.trades}T | PF {cell.profit_factor}</div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ── Strategy Research Scorecard & Correlation Grid ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* Strategy Research Scorecard */}
-        {scorecard && (
-          <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3 font-mono text-xs">
-            <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
-              <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
-                <Award className="w-4 h-4 text-amber-400" /> Research Scorecard ({scorecard.strategy_name})
-              </span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-950 border border-violet-700/50 text-violet-300">
-                {scorecard.overall_status}
-              </span>
-            </div>
-
-            <div className="space-y-2">
-              {[
-                { label: 'Sample Size', dim: scorecard.sample_size_rating },
-                { label: 'Out-Of-Sample Stability', dim: scorecard.oos_stability_rating },
-                { label: 'Drawdown Risk', dim: scorecard.drawdown_risk_rating },
-                { label: 'Regime Coverage', dim: scorecard.regime_coverage_rating },
-                { label: 'Friction Resilience', dim: scorecard.friction_resilience_rating },
-              ].map(d => (
-                <div key={d.label} className="p-2 rounded bg-stone-900/40 border border-stone-800 flex items-center justify-between">
-                  <div>
-                    <span className="text-stone-300 font-bold">{d.label}</span>
-                    <div className="text-[10px] text-stone-500">{d.dim.evidence}</div>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    d.dim.rating === 'EXCELLENT' ? 'bg-emerald-950 text-emerald-400' :
-                    d.dim.rating === 'GOOD' ? 'bg-sky-950 text-sky-400' :
-                    d.dim.rating === 'MODERATE' ? 'bg-amber-950 text-amber-400' :
-                    'bg-rose-950 text-rose-400'
-                  }`}>
-                    {d.dim.rating}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Strategy Correlation & Redundancy Heatmap */}
-        <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-3 font-mono text-xs">
-          <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
-            <span className="font-bold text-stone-200 uppercase flex items-center gap-1.5">
-              <GitMerge className="w-4 h-4 text-indigo-400" /> Strategy Correlation & Signal Redundancy
-            </span>
-          </div>
-
-          <div className="space-y-1.5 max-h-72 overflow-y-auto custom-scrollbar">
-            {correlationPairs.slice(0, 10).map((p, idx) => (
-              <div key={idx} className="p-2 rounded bg-stone-900/40 border border-stone-800 flex items-center justify-between">
-                <div>
-                  <div className="text-stone-200 font-bold">{p.strategy_1_name} × {p.strategy_2_name}</div>
-                  <div className="text-[10px] text-stone-500">{p.overlap_activations} simultaneous activations</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-stone-200 font-bold">{p.overlap_pct}% Overlap</div>
-                  <span className={`text-[9px] font-bold ${
-                    p.overlap_classification === 'HIGH_OVERLAP' ? 'text-rose-400' : 'text-emerald-400'
-                  }`}>
-                    {p.overlap_classification}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -2083,43 +2113,22 @@ function StrategyCopilotChat({
     setMessages([]);
   }, [symbol, selectedStrategy?.strategy_id, timeframe]);
 
-  const quickChips = backtestResult ? [
-    'Explain the walk-forward out-of-sample result',
-    'What caused the maximum drawdown?',
-    'How sensitive is this strategy to transaction costs?',
-    'Compare In-Sample vs Out-of-Sample performance',
-  ] : researchSummary ? [
-    'How often did this strategy activate historically?',
-    'What is the median 5-candle forward return?',
-    'How does it perform in Trending vs Range-Bound regimes?',
-    'What is the typical adverse excursion (MAE)?',
-  ] : [
-    'Explain this strategy',
-    'Why is it active right now?',
-    'What would invalidate this strategy?',
-    'Compare with VWAP Momentum',
+  const quickChips = [
+    'CHALLENGE THIS STRATEGY',
+    'Which parameter region is stable?',
+    'How much did OOS performance degrade?',
+    'Is this strategy dependent on one symbol?',
   ];
 
   const handleSend = async (userText: string) => {
     if (!userText.trim() || !selectedStrategy || isLoading) return;
     const textToSend = userText.trim();
+    const isSkeptic = textToSend.toUpperCase().includes('CHALLENGE');
     setInput('');
     setMessages(prev => [...prev, { role: 'user', text: textToSend }]);
     setIsLoading(true);
 
     try {
-      const context = {
-        market_regime: regime,
-        confluence: confluence,
-        timeframe,
-        other_strategies: allStrategies.map(s => ({
-          name: s.strategy_name,
-          state: s.state,
-          passing_count: s.entry_rules_passing,
-          total_count: s.entry_rules_total,
-        })),
-      };
-
       const res = await fetch('/api/strategies/copilot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2131,7 +2140,7 @@ function StrategyCopilotChat({
           backtest_result: backtestResult || null,
           user_message: textToSend,
           chat_history: messages.slice(-4),
-          context,
+          is_skeptic_mode: isSkeptic,
         }),
       });
 
@@ -2167,7 +2176,7 @@ function StrategyCopilotChat({
             <div className="text-xs font-bold text-white flex items-center gap-1.5">
               <span>Strategy Copilot</span>
               <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-violet-950 border border-violet-700/50 text-violet-300">
-                {backtestResult ? 'BACKTEST' : researchSummary ? 'RESEARCH' : 'OBSERVATORY'}
+                DISCOVERY LAB
               </span>
             </div>
             <div className="text-[10px] text-stone-400 font-mono">
@@ -2182,7 +2191,7 @@ function StrategyCopilotChat({
           <div className="text-center py-4 space-y-2">
             <MessageSquare className="w-8 h-8 text-stone-600 mx-auto" />
             <p className="text-xs text-stone-400 font-medium">
-              Ask about {selectedStrategy?.strategy_name} rule logic, backtest results, or forward outcomes.
+              Ask about parameter stability, OOS degradation, or challenge this strategy.
             </p>
             <div className="flex flex-wrap gap-1.5 justify-center pt-2">
               {quickChips.map(chip => (
@@ -2238,7 +2247,7 @@ function StrategyCopilotChat({
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder={`Ask about ${selectedStrategy?.short_name || 'strategy'}…`}
+            placeholder="Ask or Challenge this strategy…"
             className="flex-1 bg-stone-900 border border-stone-800 rounded-lg px-2.5 py-1.5 text-xs text-stone-200 placeholder-stone-600 focus:outline-none focus:border-violet-500 font-mono"
           />
           <button
@@ -2255,7 +2264,7 @@ function StrategyCopilotChat({
 }
 
 // ---------------------------------------------------------------------------
-// Master Strategy Lab Component (Phase 5 Workstation)
+// Master Strategy Lab Component (Phase 6 Discovery & Robustness Lab)
 // ---------------------------------------------------------------------------
 export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
   stocks,
@@ -2264,27 +2273,22 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
 }) => {
   const [symbol, setSymbol] = useState<string>(selectedSymbol || 'RELIANCE.NS');
   const [timeframe, setTimeframe] = useState<string>('5m');
-  const [activeTab, setActiveTab] = useState<'OBSERVATORY' | 'RESEARCH' | 'BACKTEST' | 'REGIME'>('OBSERVATORY');
+  const [activeTab, setActiveTab] = useState<'OBSERVATORY' | 'RESEARCH' | 'BACKTEST' | 'ROBUSTNESS'>('OBSERVATORY');
 
-  // Observatory Data State
   const [observatoryData, setObservatoryData] = useState<ObservatoryData | null>(null);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Research Workstation State (Phase 4)
   const [researchSummary, setResearchSummary] = useState<StrategyResearchSummaryData | null>(null);
   const [isLoadingResearch, setIsLoadingResearch] = useState<boolean>(false);
   const [researchError, setResearchError] = useState<string | null>(null);
-  const [highlightCandleIdx, setHighlightCandleIdx] = useState<number | null>(null);
   const [selectedObsId, setSelectedObsId] = useState<string | null>(null);
 
-  // Backtest Workstation State (Phase 5)
   const [backtestResult, setBacktestResult] = useState<BacktestResultData | null>(null);
   const [isLoadingBacktest, setIsLoadingBacktest] = useState<boolean>(false);
   const [backtestError, setBacktestError] = useState<string | null>(null);
 
-  // Filters (Category, State, Search)
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [stateFilter, setStateFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -2294,12 +2298,9 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
 
   const currentStock = stocks.find(s => s.symbol === symbol) || stocks[0];
 
-  // Evaluate Observatory
   const handleEvaluate = useCallback(async (symToEval = symbol, tfToEval = timeframe) => {
     const reqId = ++activeReqId.current;
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    if (abortControllerRef.current) abortControllerRef.current.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -2323,26 +2324,19 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
 
       if (data.strategies && data.strategies.length > 0) {
         setSelectedStrategyId(prev => {
-          if (prev && data.strategies.some(s => s.strategy_id === prev)) {
-            return prev;
-          }
+          if (prev && data.strategies.some(s => s.strategy_id === prev)) return prev;
           const firstActive = data.strategies.find(s => s.state === 'ACTIVE') || data.strategies[0];
           return firstActive.strategy_id;
         });
       }
     } catch (e: any) {
       if (e.name === 'AbortError') return;
-      if (reqId === activeReqId.current) {
-        setError(e.message || 'Evaluation failed');
-      }
+      if (reqId === activeReqId.current) setError(e.message || 'Evaluation failed');
     } finally {
-      if (reqId === activeReqId.current) {
-        setIsEvaluating(false);
-      }
+      if (reqId === activeReqId.current) setIsEvaluating(false);
     }
   }, [symbol, timeframe]);
 
-  // Run Research Replay (Phase 4)
   const handleRunResearch = useCallback(async (stratId = selectedStrategyId, sym = symbol, tf = timeframe) => {
     if (!stratId) return;
     setIsLoadingResearch(true);
@@ -2357,7 +2351,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
           candles: observatoryData?.candles || null,
         }),
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
@@ -2371,7 +2364,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
     }
   }, [selectedStrategyId, symbol, timeframe, observatoryData?.candles]);
 
-  // Run Backtest Simulation (Phase 5)
   const handleRunBacktest = useCallback(async (params: any = {}) => {
     if (!selectedStrategyId) return;
     setIsLoadingBacktest(true);
@@ -2390,7 +2382,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
           candles: observatoryData?.candles || null,
         }),
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
@@ -2404,12 +2395,10 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
     }
   }, [selectedStrategyId, symbol, timeframe, observatoryData?.candles]);
 
-  // Initial evaluation on mount or symbol/timeframe switch
   useEffect(() => {
     handleEvaluate(symbol, timeframe);
   }, [symbol, timeframe]);
 
-  // Auto-run handlers on view tab switch
   useEffect(() => {
     if (activeTab === 'RESEARCH' && selectedStrategyId) {
       handleRunResearch(selectedStrategyId, symbol, timeframe);
@@ -2420,13 +2409,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
 
   const selectedStrategy = observatoryData?.strategies?.find(s => s.strategy_id === selectedStrategyId) || null;
 
-  // Stale & Freshness handling
-  const isStale = observatoryData?.data_freshness === 'STALE';
-  const isLive = observatoryData?.data_freshness === 'LIVE';
-  const isRecent = observatoryData?.data_freshness === 'RECENT';
-  const ageSeconds = observatoryData?.data_age_seconds;
-
-  // Dynamic Category Extraction
   const availableCategories = useMemo(() => {
     if (!observatoryData?.strategies) return ['ALL'];
     const cats = new Set<string>();
@@ -2436,7 +2418,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
     return ['ALL', ...Array.from(cats)];
   }, [observatoryData?.strategies]);
 
-  // Dynamic Strategy Filtering
   const filteredStrategies = useMemo(() => {
     if (!observatoryData?.strategies) return [];
     return observatoryData.strategies.filter(s => {
@@ -2465,32 +2446,16 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-black text-sm text-white tracking-wide font-mono">{symbol}</span>
               <span className="text-xs text-stone-400 font-semibold hidden sm:inline">{currentStock?.name}</span>
-              {observatoryData && (
-                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                  isLive ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
-                  isRecent ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' :
-                  isStale ? 'bg-purple-900/30 text-purple-300 border-purple-700/40' :
-                  'bg-stone-800 text-stone-400 border-stone-700'
-                }`}>
-                  {observatoryData.data_freshness} {ageSeconds ? `(${formatDuration(ageSeconds)} old)` : ''}
-                </span>
-              )}
             </div>
             <div className="flex items-center gap-2 text-xs font-mono mt-0.5 flex-wrap">
               <span className="text-stone-100 font-bold">₹{currentStock?.price?.toFixed(2) || '---'}</span>
               <span className={currentStock?.change && currentStock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                 {currentStock?.change && currentStock.change >= 0 ? '+' : ''}{currentStock?.change?.toFixed(2)} ({currentStock?.changePercent?.toFixed(2)}%)
               </span>
-              {observatoryData?.market_regime && (
-                <span className="text-stone-400 font-medium hidden md:inline">
-                  · Regime: <strong className="text-amber-400">{observatoryData.market_regime.regime}</strong> ({observatoryData.market_regime.confidence}%)
-                </span>
-              )}
             </div>
           </div>
         </div>
 
-        {/* Quick Symbol Switcher Chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar max-w-md">
           {QUICK_SYMBOLS.map(sym => (
             <button
@@ -2507,7 +2472,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
           ))}
         </div>
 
-        {/* 4-View Workstation Navigation Tabs */}
         <div className="flex items-center gap-2">
           <div className="flex items-center bg-stone-900 p-0.5 rounded-xl border border-stone-800 font-mono text-xs">
             <button
@@ -2538,13 +2502,13 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
               <span className="hidden sm:inline">Backtest</span>
             </button>
             <button
-              onClick={() => setActiveTab('REGIME')}
+              onClick={() => setActiveTab('ROBUSTNESS')}
               className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'REGIME' ? 'bg-violet-600 text-white shadow-md' : 'text-stone-400 hover:text-stone-200'
+                activeTab === 'ROBUSTNESS' ? 'bg-violet-600 text-white shadow-md' : 'text-stone-400 hover:text-stone-200'
               }`}
             >
-              <Compass className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Regimes</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">Robustness Lab</span>
             </button>
           </div>
 
@@ -2584,20 +2548,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1 bg-stone-900 p-0.5 rounded-lg border border-stone-800 text-[10px] font-mono">
-              {(['ALL', 'ACTIVE', 'PARTIAL', 'INACTIVE'] as const).map(st => (
-                <button
-                  key={st}
-                  onClick={() => setStateFilter(st)}
-                  className={`px-2 py-0.5 rounded transition-all cursor-pointer font-bold ${
-                    stateFilter === st ? 'bg-violet-600 text-white' : 'text-stone-400 hover:text-stone-200'
-                  }`}
-                >
-                  {st}
-                </button>
-              ))}
-            </div>
-
             <div className="relative">
               <input
                 type="text"
@@ -2613,7 +2563,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
       )}
 
       {/* ── Dynamic Strategy Keypad (20 strategies) ── */}
-      {filteredStrategies.length > 0 ? (
+      {filteredStrategies.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
           {filteredStrategies.map(strat => (
             <StrategyKeypadButton
@@ -2627,10 +2577,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
               }}
             />
           ))}
-        </div>
-      ) : (
-        <div className="p-4 text-center bg-[#12131b] border border-stone-800 rounded-xl text-stone-500 font-mono text-xs">
-          No strategies match the selected category or filter.
         </div>
       )}
 
@@ -2654,7 +2600,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
             </div>
 
             <div className="lg:col-span-4 space-y-3 flex flex-col">
-              {selectedStrategy ? (
+              {selectedStrategy && (
                 <>
                   <StrategyRuleInspector strategy={selectedStrategy} />
                   <div className="flex-1 min-h-[300px]">
@@ -2668,17 +2614,13 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
                     />
                   </div>
                 </>
-              ) : (
-                <div className="p-8 text-center bg-[#12131b] border border-stone-800 rounded-xl text-stone-500 font-mono text-xs">
-                  Select a strategy button above to inspect mathematical conditions and launch copilot.
-                </div>
               )}
             </div>
           </div>
         </>
       )}
 
-      {/* ── Tab View 2: HISTORICAL RESEARCH VIEW (Phase 4) ── */}
+      {/* ── Tab View 2: HISTORICAL RESEARCH VIEW ── */}
       {activeTab === 'RESEARCH' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
           <div className="lg:col-span-8 space-y-3">
@@ -2689,7 +2631,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
               allStrategies={observatoryData?.strategies || []}
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
-              highlightIndex={highlightCandleIdx}
             />
 
             <ResearchWorkstation
@@ -2697,27 +2638,12 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
               isLoading={isLoadingResearch}
               error={researchError}
               selectedObsId={selectedObsId}
-              onSelectObsId={(obsId, cIdx) => {
-                setSelectedObsId(obsId);
-                setHighlightCandleIdx(cIdx);
-              }}
+              onSelectObsId={setSelectedObsId}
               onRefresh={() => handleRunResearch(selectedStrategyId, symbol, timeframe)}
             />
           </div>
 
           <div className="lg:col-span-4 space-y-3 flex flex-col">
-            {selectedStrategy && (
-              <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-2 text-xs font-mono">
-                <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
-                  <span className="font-bold text-stone-200">{selectedStrategy.strategy_name}</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-900 border border-stone-800 text-stone-400">
-                    Direction: {selectedStrategy.direction || 'BULLISH'}
-                  </span>
-                </div>
-                <p className="text-[11px] text-stone-400 leading-relaxed font-sans">{selectedStrategy.description}</p>
-              </div>
-            )}
-
             <div className="flex-1 min-h-[380px]">
               <StrategyCopilotChat
                 symbol={symbol}
@@ -2733,7 +2659,7 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {/* ── Tab View 3: BACKTEST VIEW (Phase 5) ── */}
+      {/* ── Tab View 3: BACKTEST VIEW ── */}
       {activeTab === 'BACKTEST' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
           <div className="lg:col-span-8 space-y-3">
@@ -2746,18 +2672,6 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
           </div>
 
           <div className="lg:col-span-4 space-y-3 flex flex-col">
-            {selectedStrategy && (
-              <div className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3.5 space-y-2 text-xs font-mono">
-                <div className="flex items-center justify-between border-b border-stone-800/60 pb-2">
-                  <span className="font-bold text-stone-200">{selectedStrategy.strategy_name} (Hypothesis)</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-900 border border-stone-800 text-stone-400">
-                    v{selectedStrategy.version || '1.0.0'}
-                  </span>
-                </div>
-                <p className="text-[11px] text-stone-400 leading-relaxed font-sans">{selectedStrategy.description}</p>
-              </div>
-            )}
-
             <div className="flex-1 min-h-[380px]">
               <StrategyCopilotChat
                 symbol={symbol}
@@ -2773,9 +2687,19 @@ export const StrategyLabPage: React.FC<StrategyLabPageProps> = ({
         </div>
       )}
 
-      {/* ── Tab View 4: REGIME ANALYSIS & MATRIX VIEW (Phase 5) ── */}
-      {activeTab === 'REGIME' && (
-        <RegimeAnalysisWorkstation symbol={symbol} timeframe={timeframe} />
+      {/* ── Tab View 4: ROBUSTNESS & DISCOVERY WORKSTATION ── */}
+      {activeTab === 'ROBUSTNESS' && selectedStrategy && (
+        <RobustnessWorkstation
+          symbol={symbol}
+          strategyId={selectedStrategy.strategy_id}
+          timeframe={timeframe}
+          onSelectCandidate={params => {
+            // Callback to highlight candidate params
+          }}
+          onLaunchChallenge={backtestData => {
+            // Trigger Copilot Challenge Mode
+          }}
+        />
       )}
     </div>
   );

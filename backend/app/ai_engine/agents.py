@@ -239,6 +239,7 @@ class StrategyCopilotAgent:
 
     def _build_evidence_block(
         self,
+        symbol: Optional[str] = None,
         evaluation: Optional[Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
         research_summary: Optional[Dict[str, Any]] = None,
@@ -360,11 +361,16 @@ class StrategyCopilotAgent:
         research_summary: Optional[Dict[str, Any]] = None,
         backtest_result: Optional[Dict[str, Any]] = None,
         scorecard: Optional[Dict[str, Any]] = None,
+        robustness_summary: Optional[Dict[str, Any]] = None,
+        is_skeptic_mode: bool = False,
     ) -> Dict[str, Any]:
         """
-        Answer a user question about strategy evaluation, historical research, or backtests with full multi-turn context.
+        Interprets strategy state, research observations, backtest metrics, and robustness evidence.
+        In Skeptic Mode ('CHALLENGE THIS STRATEGY'), actively audits for overfitting, parameter sensitivity,
+        cost drag, and data mining risks.
         """
         evidence_block = self._build_evidence_block(
+            symbol=symbol,
             evaluation=evaluation,
             context=context,
             research_summary=research_summary,
@@ -372,7 +378,14 @@ class StrategyCopilotAgent:
             scorecard=scorecard,
         )
 
+        if robustness_summary:
+            evidence_block += f"\nROBUSTNESS & DISCOVERY EVIDENCE:\n{robustness_summary}\n"
+
         if not self.client:
+            # Deterministic fallback
+            if is_skeptic_mode:
+                return self._build_deterministic_skeptic_critique(symbol, backtest_result, scorecard, robustness_summary)
+
             if backtest_result:
                 s_name = backtest_result.get('strategy_id', 'Strategy')
                 tot_trades = backtest_result.get('total_trades', 0)
@@ -437,7 +450,16 @@ class StrategyCopilotAgent:
                 for h in chat_history[-6:]
             )
 
-        system_prompt = f"""You are the APEX Strategy Copilot — an expert quantitative strategy observatory and backtesting assistant.
+        skeptic_instructions = """
+SKEPTIC MODE ACTIVE ("CHALLENGE THIS STRATEGY"):
+- You must act as a ruthless quantitative peer reviewer.
+- Identify every potential flaw, risk, and vulnerability in this strategy.
+- Audit sample size (is N < 30?), Out-of-Sample decay, parameter cliffs/instability, regime dependency, symbol concentration, and transaction cost drag.
+- If many configurations were tested, warn about data snooping and multiple testing.
+- Do NOT cheerlead or validate poor research hypotheses.
+""" if is_skeptic_mode else ""
+
+        system_prompt = f"""You are the APEX Strategy Copilot — an expert quantitative strategy research, backtesting, and robustness testing assistant.
 
 STRICT INVARIANTS:
 1. Base EVERY statement directly on the VERIFIED EVIDENCE below. Cite exact numerical values.
@@ -446,6 +468,7 @@ STRICT INVARIANTS:
 4. If Data Freshness is STALE or market is CLOSED, frame the analysis as: "Based on the last available candle..." and explicitly state that it reflects historical data.
 5. If asked for trade recommendations or "Should I buy?", clarify that Strategy Lab provides deterministic rule verification and simulation for research, not financial advice.
 6. Distinguish between historical research forward observations (pre-friction) and backtested performance (post-friction).
+{skeptic_instructions}
 
 VERIFIED EVIDENCE FOR {symbol}:
 {evidence_block}
@@ -467,5 +490,35 @@ Answer concisely, citing exact evidence and numbers:"""
             logger.warning("StrategyCopilotAgent Gemini call failed: %s", exc)
             reply_text = "AI interpreter temporarily unavailable — please review the quantitative scorecard directly."
 
-        evidence_cited = ["Verified Backtest Evidence", "Quantitative Metrics"]
+        evidence_cited = ["Verified Robustness Evidence", "Quantitative Metrics"]
         return {"reply": reply_text, "evidence_cited": evidence_cited}
+
+    def _build_deterministic_skeptic_critique(
+        self,
+        symbol: str,
+        backtest_result: Optional[Dict[str, Any]],
+        scorecard: Optional[Dict[str, Any]],
+        robustness: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Deterministic skeptic critique when offline."""
+        critiques = []
+        if backtest_result:
+            trades = backtest_result.get("totalTrades", 0)
+            if trades < 15:
+                critiques.append(f"• **Low Sample Warning**: Only {trades} completed trades observed. Statistical significance cannot be established.")
+            wf = backtest_result.get("walk_forward", {})
+            if wf.get("out_of_sample_return_pct", 0) < 0:
+                critiques.append(f"• **Out-of-Sample Degradation**: OOS return collapsed to {wf.get('out_of_sample_return_pct')}%, suggesting in-sample curve fitting.")
+            cs = backtest_result.get("cost_sensitivity", {})
+            if cs.get("cost_drag_pct", 0) > 3.0:
+                critiques.append(f"• **Severe Cost Friction Drag**: Frictions consume {cs.get('cost_drag_pct')}% of gross returns.")
+
+        if not critiques:
+            critiques.append("• Audit parameter neighborhood for cliff drop-offs and test across multiple market regimes before considering validation.")
+
+        reply = (
+            f"**Quantitative Skeptic Critique for {symbol}:**\n\n"
+            + "\n".join(critiques)
+            + "\n\n*Note: High historical returns without parameter neighborhood stability and OOS robustness indicate high data-mining risk.*"
+        )
+        return {"reply": reply, "evidence_cited": ["Skeptic Audit", "Friction Drag", "Sample Size Validation"]}

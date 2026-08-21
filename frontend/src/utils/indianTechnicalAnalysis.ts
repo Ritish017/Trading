@@ -6,7 +6,9 @@ export interface IndianCandle {
   high: number;
   low: number;
   close: number;
-  volumeLakhs: number;
+  volume?: number;
+  volumeLakhs?: number;
+  vwap?: number;
 }
 
 export function generateInitialIndianCandles(
@@ -14,39 +16,57 @@ export function generateInitialIndianCandles(
   count: number = 60,
   intervalSeconds: number = 300
 ): IndianCandle[] {
-  const candles: IndianCandle[] = [];
   const now = Math.floor(Date.now() / 1000);
-  let basePrice = currentPrice * 0.98; // start slightly lower for realistic intraday trend
+  let walkPrice = currentPrice;
+  const rawCandles: IndianCandle[] = [];
 
-  for (let i = count; i >= 0; i--) {
+  for (let i = 0; i < count; i++) {
     const time = now - i * intervalSeconds;
-    const volatility = basePrice * 0.0025;
-    const open = basePrice + (Math.random() - 0.48) * volatility;
-    const close = open + (Math.random() - 0.47) * volatility;
-    const high = Math.max(open, close) + Math.random() * volatility * 0.8;
-    const low = Math.min(open, close) - Math.random() * volatility * 0.8;
-    const volumeLakhs = Number((Math.random() * 8.5 + 0.5).toFixed(2));
+    // Controlled ~0.10% to 0.15% candle volatility
+    const volatility = Math.max(walkPrice * 0.0015, 0.25);
+    
+    // Close of this candle is walkPrice
+    const close = walkPrice;
+    // Step backwards to open with slight drift
+    const openDrift = (Math.random() - 0.49) * volatility;
+    const open = Math.max(close - openDrift, 1.0);
+    
+    const wickHigh = Math.random() * volatility * 0.5;
+    const wickLow = Math.random() * volatility * 0.5;
+    const high = Math.max(open, close) + wickHigh;
+    const low = Math.max(Math.min(open, close) - wickLow, 0.5);
 
-    candles.push({
+    const volumeShares = Math.floor(Math.random() * 25000 + 4000);
+    const volumeLakhs = Number((volumeShares / 100000).toFixed(2));
+    const vwap = Number(((high + low + close) / 3).toFixed(2));
+
+    rawCandles.push({
       time,
       open: Number(open.toFixed(2)),
       high: Number(high.toFixed(2)),
       low: Number(low.toFixed(2)),
       close: Number(close.toFixed(2)),
+      volume: volumeShares,
       volumeLakhs,
+      vwap,
     });
 
-    basePrice = close;
+    // Next step backward
+    walkPrice = open;
   }
 
-  // Adjust last candle close to match current live price
-  if (candles.length > 0) {
-    candles[candles.length - 1].close = currentPrice;
-    candles[candles.length - 1].high = Math.max(candles[candles.length - 1].high, currentPrice);
-    candles[candles.length - 1].low = Math.min(candles[candles.length - 1].low, currentPrice);
+  // Reverse so chronological order (oldest to newest)
+  rawCandles.reverse();
+
+  // Ensure the latest candle close is exactly the current live price
+  if (rawCandles.length > 0) {
+    const last = rawCandles[rawCandles.length - 1];
+    last.close = currentPrice;
+    last.high = Math.max(last.high, currentPrice);
+    last.low = Math.min(last.low, currentPrice);
   }
 
-  return candles;
+  return rawCandles;
 }
 
 export function calculateEMA(prices: number[], period: number): number[] {

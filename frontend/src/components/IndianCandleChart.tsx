@@ -74,7 +74,10 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
   const maxPrice = Math.max(...candleList.map((c) => c.high)) * 1.001;
   const priceRange = maxPrice - minPrice || 1;
 
-  const maxVolume = Math.max(...candleList.map((c) => c.volume || 1000), 1000);
+  const maxVolume = Math.max(
+    ...candleList.map((c) => c.volume ?? (c.volumeLakhs ? c.volumeLakhs * 100000 : 5000)),
+    1000
+  );
 
   // Format Timestamps for X-Axis Labels and Crosshairs
   const formatTimeLabel = (timestamp: number | string, tf: string) => {
@@ -131,6 +134,11 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
     Math.floor((i * (candleList.length - 1)) / (numTimeLabels - 1 || 1))
   );
 
+  const activeVolNumber = activeCandle.volume ?? (activeCandle.volumeLakhs ? activeCandle.volumeLakhs * 100000 : 5000);
+  const activeVolFormatted = activeVolNumber >= 100000 
+    ? `${(activeVolNumber / 100000).toFixed(1)}L` 
+    : `${(activeVolNumber / 1000).toFixed(1)}k`;
+
   return (
     <div className="bg-[#181a20] border border-stone-800/90 rounded-2xl p-4 flex flex-col justify-between shadow-2xl select-none">
       {/* 1. Header: Stock Info, Price, OHLCV Inspector & Timeframe Selector */}
@@ -169,7 +177,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
           <span className="text-stone-400">H: <strong className="text-emerald-400">₹{activeCandle.high.toFixed(2)}</strong></span>
           <span className="text-stone-400">L: <strong className="text-rose-400">₹{activeCandle.low.toFixed(2)}</strong></span>
           <span className="text-stone-400">C: <strong className="text-stone-200">₹{activeCandle.close.toFixed(2)}</strong></span>
-          <span className="text-stone-400 hidden lg:inline">Vol: <strong className="text-amber-400">{(activeCandle.volume / 1000).toFixed(1)}k</strong></span>
+          <span className="text-stone-400 hidden lg:inline">Vol: <strong className="text-amber-400">{activeVolFormatted}</strong></span>
         </div>
 
         {/* Timeframe Selector & Chart Controls */}
@@ -279,7 +287,8 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
               const color = isGreen ? '#10b981' : '#f43f5e';
 
               // Volume Bar
-              const volRatio = (c.volume || 1000) / maxVolume;
+              const cVol = c.volume ?? (c.volumeLakhs ? c.volumeLakhs * 100000 : 5000);
+              const volRatio = cVol / maxVolume;
               const volBarHeight = Math.max(volRatio * volumeChartHeight, 2);
               const volY = totalHeight - 20 - volBarHeight;
 

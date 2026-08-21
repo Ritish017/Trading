@@ -89,7 +89,7 @@ function toMarketQuote(raw: any, isIndex = false): MarketQuote {
   };
 }
 
-const STORAGE_VERSION = 'v2.2_nse_real_data';
+const STORAGE_VERSION = 'v2.3_corporate_action_aligned';
 
 export default function App() {
   // 1. Core State with robust localStorage validation & cache busting
@@ -105,13 +105,7 @@ export default function App() {
       const saved = localStorage.getItem('apexnse_stocks');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0] && typeof parsed[0].symbol === 'string') {
-          // Validate that prices are realistic (e.g. HDFC Bank is not < 1000 from old legacy crypto state)
-          const hdfc = parsed.find((s: NSEStock) => s.symbol === 'HDFCBANK.NS');
-          if (hdfc && (hdfc.price < 1000 || hdfc.price > 3000)) {
-            localStorage.removeItem('apexnse_stocks');
-            return INITIAL_NSE_STOCKS;
-          }
+        if (Array.isArray(parsed) && parsed.length >= INITIAL_NSE_STOCKS.length && parsed[0] && typeof parsed[0].symbol === 'string' && typeof parsed[0].price === 'number') {
           return parsed;
         }
       }

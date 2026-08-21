@@ -6,13 +6,17 @@ from backend.app.broker_providers.base import MarketDataProvider, NormalizedTick
 from backend.app.broker_providers.upstox import UpstoxProvider
 from backend.app.broker_providers.dhan import DhanProvider
 from backend.app.broker_providers.dev_mock import DevMockProvider
+from backend.app.market_data.corporate_actions.models import PriceAdjustmentMode
+from backend.app.market_data.corporate_actions.adjuster import corporate_action_adjuster
+from backend.app.market_data.corporate_actions.integrity_guard import market_data_integrity_guard
 
 logger = logging.getLogger(__name__)
 
 class MarketDataService:
     """
     Provider-agnostic Market Data Hub & Orchestration Service.
-    Handles provider selection, fallback logic, quote caching, stale data detection, and health state reporting.
+    Handles provider selection, fallback logic, corporate-action-aware quote caching,
+    stale data detection, and mathematical health state reporting.
     """
 
     def __init__(self):
@@ -33,7 +37,9 @@ class MarketDataService:
         self.is_live: bool = False
         self.status_code: str = "INITIALIZING" # CONNECTED, DISCONNECTED, CONFIGURATION_ERROR, SIMULATED
         
+        # Composite isolated cache: key format '{symbol}:{timeframe}:{mode}:{provider}'
         self._quote_cache: Dict[str, Dict[str, Any]] = {}
+        self._candle_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._last_tick_time: Optional[float] = None
         self._ws_reconnect_count: int = 0
 
@@ -109,7 +115,8 @@ class MarketDataService:
     async def connect_websocket(self, tick_callback: Callable[[NormalizedTick], Awaitable[None]]) -> bool:
         async def _internal_cb(tick: NormalizedTick):
             self._last_tick_time = tick.timestamp
-            self._quote_cache[tick.symbol] = tick.dict()
+            cache_key = f"{tick.symbol}:QUOTE:{self.active_provider.provider_name}"
+            self._quote_cache[cache_key] = tick.dict()
             await tick_callback(tick)
 
         if hasattr(self.active_provider, "connect_websocket"):
@@ -122,32 +129,85 @@ class MarketDataService:
     async def unsubscribe(self, symbols: List[str]):
         await self.active_provider.unsubscribe(symbols)
 
+    def _enrich_quote_integrity(self, quote: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+        """Apply corporate action live quote semantics and integrity guard metadata."""
+        validated = corporate_action_adjuster.validate_live_quote(quote, symbol)
+        ts = float(validated.get("timestamp") or time.time())
+        ltp = float(validated.get("ltp") or 0.0)
+        p_close = float(validated.get("previous_close") or ltp) if validated.get("previous_close") else None
+
+        integrity_info = market_data_integrity_guard.validate_live_claim(
+            provider=self.active_provider.provider_name,
+            is_provider_authenticated=self.is_live,
+            is_provider_connected=self.status_code == "CONNECTED",
+            provider_timestamp=ts,
+            current_price=ltp,
+            previous_close=p_close,
+        )
+
+        validated["data_age_seconds"] = integrity_info["data_age_seconds"]
+        validated["provenance_status"] = integrity_info["provenance_status"]
+        validated["display_label"] = integrity_info["display_label"]
+        validated["is_live"] = integrity_info["can_claim_live"]
+        validated["anomaly_classification"] = integrity_info["anomaly_classification"]
+        validated["classification_reason"] = integrity_info["classification_reason"]
+        return validated
+
     async def get_quote(self, symbol: str) -> Dict[str, Any]:
+        cache_key = f"{symbol}:QUOTE:{self.active_provider.provider_name}"
         try:
-            quote = await self.active_provider.get_quote(symbol)
-            self._quote_cache[symbol] = quote
-            return quote
+            raw_quote = await self.active_provider.get_quote(symbol)
+            enriched = self._enrich_quote_integrity(raw_quote, symbol)
+            self._quote_cache[cache_key] = enriched
+            return enriched
         except Exception as e:
             logger.error(f"[MARKET DATA HUB] Failed to fetch quote for {symbol}: {str(e)}")
-            if self._quote_cache.get(symbol):
-                cached = self._quote_cache[symbol]
+            if self._quote_cache.get(cache_key):
+                cached = dict(self._quote_cache[cache_key])
                 cached["stale"] = True
+                cached["provenance_status"] = "STALE"
+                cached["is_live"] = False
                 return cached
             raise e
 
     async def get_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:
         try:
-            quotes = await self.active_provider.get_quotes(symbols)
-            for q in quotes:
+            raw_quotes = await self.active_provider.get_quotes(symbols)
+            results = []
+            for q in raw_quotes:
                 if q and q.get("symbol"):
-                    self._quote_cache[q["symbol"]] = q
-            return quotes
+                    sym = q["symbol"]
+                    cache_key = f"{sym}:QUOTE:{self.active_provider.provider_name}"
+                    enriched = self._enrich_quote_integrity(q, sym)
+                    self._quote_cache[cache_key] = enriched
+                    results.append(enriched)
+            return results
         except Exception as e:
             logger.error(f"[MARKET DATA HUB] Failed to fetch quotes: {str(e)}")
-            return [self._quote_cache.get(s, {"symbol": s, "stale": True}) for s in symbols]
+            fallback = []
+            for s in symbols:
+                ck = f"{s}:QUOTE:{self.active_provider.provider_name}"
+                if self._quote_cache.get(ck):
+                    c = dict(self._quote_cache[ck])
+                    c["stale"] = True
+                    c["is_live"] = False
+                    fallback.append(c)
+                else:
+                    fallback.append({"symbol": s, "stale": True, "is_live": False, "provenance_status": "DATA_INTEGRITY_ERROR"})
+            return fallback
 
-    async def get_candles(self, symbol: str, interval: str = "5m", count: int = 60) -> List[Dict[str, Any]]:
-        return await self.active_provider.get_historical_candles(symbol, interval, count=count)
+    async def get_candles(
+        self,
+        symbol: str,
+        interval: str = "5m",
+        count: int = 60,
+        mode: PriceAdjustmentMode = PriceAdjustmentMode.CORPORATE_ACTION_ADJUSTED_PRICE
+    ) -> List[Dict[str, Any]]:
+        cache_key = f"{symbol}:{interval}:{mode.value}:{self.active_provider.provider_name}"
+        raw_candles = await self.active_provider.get_historical_candles(symbol, interval, count=count)
+        adjusted_candles = corporate_action_adjuster.adjust_candle_series(raw_candles, symbol, mode=mode)
+        self._candle_cache[cache_key] = adjusted_candles
+        return adjusted_candles
 
     async def get_option_chain(self, symbol: str) -> Dict[str, Any]:
         return await self.active_provider.get_option_chain(symbol)

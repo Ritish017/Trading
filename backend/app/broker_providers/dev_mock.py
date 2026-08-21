@@ -8,11 +8,11 @@ from backend.app.broker_providers.base import MarketDataProvider, NormalizedTick
 logger = logging.getLogger(__name__)
 
 INITIAL_PRICES = {
-    "RELIANCE.NS": 2845.50,
-    "TCS.NS": 4120.80,
-    "HDFCBANK.NS": 1680.25,
-    "ICICIBANK.NS": 1150.40,
-    "INFY.NS": 1820.60,
+    "RELIANCE.NS": 3045.50,
+    "TCS.NS": 4280.10,
+    "HDFCBANK.NS": 725.50,
+    "ICICIBANK.NS": 1245.80,
+    "INFY.NS": 1862.40,
     "NIFTY 50": 24580.00,
     "BANKNIFTY": 52400.00,
     "INDIA VIX": 13.45,

@@ -135,14 +135,59 @@ async def get_market_quotes(symbols: str = Query(default="RELIANCE.NS,TCS.NS,HDF
     return await market_data_service.get_quotes(sym_list)
 
 @app.get("/api/market/candles/{symbol}")
-async def get_candles(symbol: str, interval: str = "5m", count: int = 60):
+async def get_candles(
+    symbol: str,
+    interval: str = "5m",
+    count: int = 60,
+    adjustment_mode: str = Query(default="ADJUSTED", regex="^(ADJUSTED|RAW)$")
+):
+    from backend.app.market_data.corporate_actions.models import PriceAdjustmentMode
+    mode = PriceAdjustmentMode.CORPORATE_ACTION_ADJUSTED_PRICE if adjustment_mode == "ADJUSTED" else PriceAdjustmentMode.RAW_EXCHANGE_PRICE
+    
     cached = candle_aggregator.get_history(symbol, interval, count)
     if cached and len(cached) >= count:
-        return {"symbol": symbol, "interval": interval, "candles": cached, "source": "AGGREGATOR"}
-    candles = await market_data_service.get_candles(symbol, interval, count)
+        from backend.app.market_data.corporate_actions.adjuster import corporate_action_adjuster
+        adj_cached = corporate_action_adjuster.adjust_candle_series(cached, symbol, mode=mode)
+        return {
+            "symbol": symbol,
+            "interval": interval,
+            "adjustment_mode": adjustment_mode,
+            "candles": adj_cached,
+            "source": "AGGREGATOR"
+        }
+
+    candles = await market_data_service.get_candles(symbol, interval, count, mode=mode)
     if candles:
         candle_aggregator.seed_historical_candles(symbol, interval, candles)
-    return {"symbol": symbol, "interval": interval, "candles": candles, "source": "PROVIDER"}
+    return {
+        "symbol": symbol,
+        "interval": interval,
+        "adjustment_mode": adjustment_mode,
+        "candles": candles,
+        "source": "PROVIDER"
+    }
+
+@app.get("/api/market/corporate-actions/{symbol}")
+async def get_corporate_actions(symbol: str):
+    from backend.app.market_data.corporate_actions.registry import corporate_action_registry
+    events = corporate_action_registry.get_actions(symbol)
+    return {
+        "symbol": symbol,
+        "corporate_actions_count": len(events),
+        "corporate_actions": [e.dict() for e in events]
+    }
+
+@app.get("/api/market/integrity/{symbol}")
+async def get_market_data_integrity(symbol: str):
+    from backend.app.market_data.corporate_actions.integrity_guard import market_data_integrity_guard
+    quote = await market_data_service.get_quote(symbol)
+    actions = corporate_action_registry.get_actions(symbol)
+    return {
+        "symbol": symbol,
+        "quote": quote,
+        "corporate_actions": [e.dict() for e in actions],
+        "integrity_verified": quote.get("provenance_status") in ("AUTHENTIC_LIVE", "DEV_MOCK")
+    }
 
 @app.get("/api/market/option-chain/{symbol}")
 async def get_option_chain(symbol: str):

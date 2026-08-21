@@ -1,7 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { NSEStock } from '../types/indianMarket';
-import { IndianCandle, calculateEMA, calculateVWAP, generateInitialIndianCandles } from '../utils/indianTechnicalAnalysis';
-import { Layers, TrendingUp, BarChart2, Activity, Eye, Zap } from 'lucide-react';
+import { IndianCandle, calculateEMA, calculateVWAP } from '../utils/indianTechnicalAnalysis';
+import { Layers, TrendingUp, BarChart2, Activity, Eye, Zap, ShieldCheck, AlertCircle } from 'lucide-react';
 
 interface IndianCandleChartProps {
   stock?: NSEStock;
@@ -13,6 +11,9 @@ interface IndianCandleChartProps {
   candles?: IndianCandle[];
   timeframe: '1m' | '5m' | '15m' | '1h' | '1D';
   onTimeframeChange: (tf: '1m' | '5m' | '15m' | '1h' | '1D') => void;
+  provenanceStatus?: string;
+  providerName?: string;
+  marketStatus?: string;
 }
 
 export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
@@ -25,6 +26,9 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
   candles = [],
   timeframe,
   onTimeframeChange,
+  provenanceStatus = 'DEV_MOCK',
+  providerName = 'UPSTOX',
+  marketStatus = 'LIVE',
 }) => {
   const [showEMA20, setShowEMA20] = useState(true);
   const [showEMA50, setShowEMA50] = useState(true);
@@ -36,7 +40,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
 
   const sym = symbol || stock?.symbol || 'RELIANCE.NS';
   const stName = name || stock?.name || 'Reliance Industries';
-  const currentPrice = price ?? stock?.price ?? 2845.5;
+  const currentPrice = price ?? stock?.price;
   const currentChange = change ?? stock?.change ?? 0;
   const currentChangePct = changePercent ?? stock?.changePercent ?? 0;
   const isPos = currentChange >= 0;
@@ -49,7 +53,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
     return c.high >= maxOC && c.low <= minOC;
   });
 
-  const candleList = validCandles.length >= 2 ? validCandles : generateInitialIndianCandles(currentPrice, 60, 300);
+  const candleList = validCandles.length > 0 ? validCandles : [];
 
   const closes = candleList.map((c) => c.close);
   const ema20Values = calculateEMA(closes, 20);
@@ -134,7 +138,11 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
     Math.floor((i * (candleList.length - 1)) / (numTimeLabels - 1 || 1))
   );
 
-  const activeVolNumber = activeCandle.volume ?? (activeCandle.volumeLakhs ? activeCandle.volumeLakhs * 100000 : 5000);
+  const isMarketClosed = marketStatus === 'MARKET_CLOSED';
+  const isSimulated = provenanceStatus === 'DEV_MOCK' || providerName === 'MOCK';
+  const isLiveAuthentic = provenanceStatus === 'AUTHENTIC_LIVE' && !isMarketClosed;
+
+  const activeVolNumber = activeCandle?.volume ?? (activeCandle?.volumeLakhs ? activeCandle.volumeLakhs * 100000 : 5000);
   const activeVolFormatted = activeVolNumber >= 100000 
     ? `${(activeVolNumber / 100000).toFixed(1)}L` 
     : `${(activeVolNumber / 1000).toFixed(1)}k`;
@@ -152,13 +160,21 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
             <div className="flex items-center space-x-2">
               <span className="font-black text-white text-base font-mono tracking-wide">{sym}</span>
               <span className="text-xs text-stone-400 font-medium hidden sm:inline">{stName}</span>
-              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                NSE LIVE
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${
+                isMarketClosed
+                  ? 'bg-stone-800 text-stone-400 border-stone-700'
+                  : isSimulated
+                  ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+                  : isLiveAuthentic
+                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+              }`}>
+                {isMarketClosed ? 'MARKET CLOSED' : (isSimulated ? 'SIMULATED • DEV MOCK' : (isLiveAuthentic ? 'NSE LIVE' : 'FEED: RECENT'))}
               </span>
             </div>
             <div className="flex items-center space-x-2 font-mono text-sm">
               <span className="font-extrabold text-white">
-                ₹{currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {currentPrice !== undefined ? `₹${currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---'}
               </span>
               <span className={`font-bold text-xs ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {isPos ? '+' : ''}{currentChange.toFixed(2)} ({isPos ? '+' : ''}{currentChangePct.toFixed(2)}%)
@@ -550,7 +566,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-indigo-400" />
-            <span>EMA 20 (₹{ema20Values[ema20Values.length - 1]?.toFixed(1) || currentPrice.toFixed(1)})</span>
+            <span>EMA 20 ({ema20Values.length > 0 ? `₹${ema20Values[ema20Values.length - 1]?.toFixed(1)}` : '---'})</span>
           </button>
 
           <button
@@ -560,7 +576,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-rose-400" />
-            <span>EMA 50 (₹{ema50Values[ema50Values.length - 1]?.toFixed(1) || currentPrice.toFixed(1)})</span>
+            <span>EMA 50 ({ema50Values.length > 0 ? `₹${ema50Values[ema50Values.length - 1]?.toFixed(1)}` : '---'})</span>
           </button>
 
           <button
@@ -570,7 +586,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-amber-400" />
-            <span>VWAP (₹{currentVWAP.toFixed(1)})</span>
+            <span>VWAP ({candleList.length > 0 ? `₹${currentVWAP.toFixed(1)}` : '---'})</span>
           </button>
         </div>
 
@@ -578,9 +594,17 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-stone-800/80 text-stone-300 border border-stone-700">
             {candleList.length} Candles
           </span>
-          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>PROVENANCE: {activeCandle.source || 'AUTHENTIC MARKET FEED'}</span>
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border flex items-center space-x-1 ${
+            isMarketClosed
+              ? 'bg-stone-800 text-stone-400 border-stone-700'
+              : isSimulated
+              ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+              : isLiveAuthentic
+              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+              : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isMarketClosed ? 'bg-stone-500' : (isLiveAuthentic ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400')}`} />
+            <span>PROVENANCE: {isMarketClosed ? 'MARKET CLOSED' : (isSimulated ? 'SIMULATED • DEV MOCK' : (isLiveAuthentic ? `${providerName.toUpperCase()} LIVE CANONICAL` : 'FEED: RECENT'))}</span>
           </span>
         </div>
       </div>

@@ -89,31 +89,10 @@ function toMarketQuote(raw: any, isIndex = false): MarketQuote {
   };
 }
 
-const STORAGE_VERSION = 'v2.3_corporate_action_aligned';
-
 export default function App() {
-  // 1. Core State with robust localStorage validation & cache busting
+  // 1. Core State — strictly initialized from canonical definitions without localStorage price contamination
   const [indices, setIndices] = useState<MarketIndex[]>(INITIAL_INDICES);
-  const [stocks, setStocks] = useState<NSEStock[]>(() => {
-    try {
-      const savedVersion = localStorage.getItem('apexnse_schema_version');
-      if (savedVersion !== STORAGE_VERSION) {
-        localStorage.setItem('apexnse_schema_version', STORAGE_VERSION);
-        localStorage.removeItem('apexnse_stocks');
-        return INITIAL_NSE_STOCKS;
-      }
-      const saved = localStorage.getItem('apexnse_stocks');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= INITIAL_NSE_STOCKS.length && parsed[0] && typeof parsed[0].symbol === 'string' && typeof parsed[0].price === 'number') {
-          return parsed;
-        }
-      }
-    } catch {
-      // fallback
-    }
-    return INITIAL_NSE_STOCKS;
-  });
+  const [stocks, setStocks] = useState<NSEStock[]>(INITIAL_NSE_STOCKS);
 
   const [selectedSymbol, setSelectedSymbol] = useState<string>('RELIANCE.NS');
   const selectedStock = (stocks && stocks.find((s) => s && s.symbol === selectedSymbol)) || (stocks && stocks[0]) || INITIAL_NSE_STOCKS[0];
@@ -130,14 +109,8 @@ export default function App() {
     is_live: false,
   });
 
-  // Chart Candle History
-  const [candles, setCandles] = useState<Record<string, IndianCandle[]>>(() => {
-    const initial: Record<string, IndianCandle[]> = {};
-    INITIAL_NSE_STOCKS.forEach((s) => {
-      initial[s.symbol] = generateInitialIndianCandles(s.price, 60, 300);
-    });
-    return initial;
-  });
+  // Chart Canonical Candle History (populated strictly from backend canonical endpoint)
+  const [candles, setCandles] = useState<Record<string, IndianCandle[]>>({});
 
   // Paper Trading Account State
   const [paperBalance, setPaperBalance] = useState<number>(() => {
@@ -178,13 +151,7 @@ export default function App() {
   const [isNarrativeLoading, setIsNarrativeLoading] = useState<boolean>(false);
   const [isSymbolIntelligenceLoading, setIsSymbolIntelligenceLoading] = useState<boolean>(false);
 
-  // Persistence Effects
-  useEffect(() => {
-    if (stocks && stocks.length > 0) {
-      localStorage.setItem('apexnse_stocks', JSON.stringify(stocks));
-    }
-  }, [stocks]);
-
+  // Persistence Effects (Only preferences & portfolio, NEVER live market prices)
   useEffect(() => {
     localStorage.setItem('apexnse_balance', paperBalance.toString());
   }, [paperBalance]);
@@ -252,6 +219,7 @@ export default function App() {
                   open: q.open || stock.open,
                   prevClose: prevClose,
                   vwap: q.vwap ?? stock.vwap ?? 0,
+                  source: q.source || q.provider || stock.source,
                 };
               })
             );
@@ -287,18 +255,20 @@ export default function App() {
   useEffect(() => {
     const fetchRealCandles = async () => {
       try {
-        const res = await fetch(`/api/market/candles/${encodeURIComponent(selectedSymbol)}?interval=${timeframe}&count=100`);
+        const res = await fetch(`/api/market/candles/${encodeURIComponent(selectedSymbol)}?interval=${timeframe}&count=100&adjustment_mode=ADJUSTED`);
         if (res.ok) {
           const data = await res.json();
           if (data && Array.isArray(data.candles) && data.candles.length > 0) {
             const formattedCandles: IndianCandle[] = data.candles.map((c: any) => ({
               time: typeof c.timestamp === 'number' ? c.timestamp : Math.floor(new Date(c.timestamp || c.time).getTime() / 1000),
-              open: c.open,
-              high: c.high,
-              low: c.low,
-              close: c.close,
-              volume: c.volume || 5000,
-              vwap: c.vwap || c.close,
+              open: Number(c.open),
+              high: Number(c.high),
+              low: Number(c.low),
+              close: Number(c.close),
+              volume: Number(c.volume || 5000),
+              volumeLakhs: c.volumeLakhs ?? Number(((c.volume || 5000) / 100000).toFixed(2)),
+              vwap: Number(c.vwap || c.close),
+              source: c.source || data.source || 'CANONICAL',
             }));
             setCandles((prev) => ({
               ...prev,
@@ -509,26 +479,17 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  // Sync Candlestick History and Positions PnL on Tick
+  // Sync Candlestick History and Positions PnL on Canonical Tick
   useEffect(() => {
     if (!selectedStock || !selectedStock.price) return;
     const currentPrice = selectedStock.price;
 
     setCandles((prev) => {
-      const currentCandles = prev[selectedSymbol] || [];
-      const lastCandle = currentCandles.length > 0 ? currentCandles[currentCandles.length - 1] : null;
+      const currentCandles = prev[selectedSymbol];
+      if (!currentCandles || currentCandles.length === 0) return prev;
 
-      // Discontinuity / Out-of-sync guard:
-      // If candle history is empty OR price discrepancy between last synthetic candle and live price is > 18%,
-      // smoothly re-seed the series to prevent chart compression / giant vertical distortion bars
-      if (!lastCandle || Math.abs(currentPrice - lastCandle.close) / Math.max(lastCandle.close, 1) > 0.18) {
-        return {
-          ...prev,
-          [selectedSymbol]: generateInitialIndianCandles(currentPrice, 60, 300),
-        };
-      }
-
-      const nowSec = Math.floor(Date.now() / 1000);
+      const lastCandle = currentCandles[currentCandles.length - 1];
+      const nowSec = Math.floor(lastTickTimeMs / 1000);
 
       if (nowSec - lastCandle.time >= 300) {
         const newCandle: IndianCandle = {
@@ -538,7 +499,9 @@ export default function App() {
           low: currentPrice,
           close: currentPrice,
           volume: 5000,
+          volumeLakhs: 0.05,
           vwap: currentPrice,
+          source: selectedStock.source || 'LIVE_TICK'
         };
         return {
           ...prev,
@@ -575,7 +538,7 @@ export default function App() {
         return pos;
       })
     );
-  }, [selectedStock?.price, selectedSymbol]);
+  }, [selectedStock?.price, selectedSymbol, lastTickTimeMs]);
 
   // Handlers for AI, Paper Trading & Command Palette
   const handleGenerateAIReport = async (symbol: string) => {
@@ -822,6 +785,9 @@ export default function App() {
           onTimeframeChange={setTimeframe}
           onQuickBuy={() => setIsPaperModalOpen(true)}
           onQuickSell={() => setIsPaperModalOpen(true)}
+          provenanceStatus={feedStatus?.status === 'CONNECTED' && feedStatus?.is_live ? 'AUTHENTIC_LIVE' : (feedStatus?.status === 'SIMULATED' ? 'DEV_MOCK' : 'STALE')}
+          providerName={feedStatus?.active_provider || 'UPSTOX'}
+          marketStatus={feedStatus?.mode || 'LIVE'}
         />
       )}
 

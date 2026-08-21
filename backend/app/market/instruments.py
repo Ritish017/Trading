@@ -141,6 +141,20 @@ INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
         "instrument_type": "EQUITY",
         "display_name": "State Bank of India"
     },
+    "TATAMOTORS.NS": {
+        "instrument_key": "NSE_EQ|INE155A01022",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Tata Motors Ltd"
+    },
+    "TATAMOTORS": {
+        "instrument_key": "NSE_EQ|INE155A01022",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Tata Motors Ltd"
+    },
     "MRF.NS": {
         "instrument_key": "NSE_EQ|INE883A01011",
         "exchange": "NSE",

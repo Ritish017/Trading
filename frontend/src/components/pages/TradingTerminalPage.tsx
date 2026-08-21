@@ -19,6 +19,9 @@ interface TradingTerminalPageProps {
   onTimeframeChange: (tf: string) => void;
   onQuickBuy?: (stock: NSEStock) => void;
   onQuickSell?: (stock: NSEStock) => void;
+  provenanceStatus?: string;
+  providerName?: string;
+  marketStatus?: string;
 }
 
 export const TradingTerminalPage: React.FC<TradingTerminalPageProps> = ({
@@ -36,6 +39,9 @@ export const TradingTerminalPage: React.FC<TradingTerminalPageProps> = ({
   onTimeframeChange,
   onQuickBuy,
   onQuickSell,
+  provenanceStatus,
+  providerName,
+  marketStatus,
 }) => {
   return (
     <div className="flex-1 p-3 grid grid-cols-1 md:grid-cols-12 gap-3 min-h-0">
@@ -57,14 +63,17 @@ export const TradingTerminalPage: React.FC<TradingTerminalPageProps> = ({
       <div className="md:col-span-9 flex flex-col space-y-3 h-[calc(100vh-175px)] overflow-y-auto custom-scrollbar pr-0.5">
         <div className="flex-1 min-h-[500px]">
           <IndianCandleChart
-            symbol={selectedStock?.symbol || 'RELIANCE.NS'}
-            name={selectedStock?.name || 'Reliance Industries'}
-            price={selectedStock?.price || 2845.5}
+            symbol={selectedStock?.symbol}
+            name={selectedStock?.name}
+            price={selectedStock?.price}
             change={selectedStock?.change || 0}
             changePercent={selectedStock?.changePercent || 0}
             candles={candles}
-            timeframe={timeframe}
-            onTimeframeChange={onTimeframeChange}
+            timeframe={timeframe as any}
+            onTimeframeChange={onTimeframeChange as any}
+            provenanceStatus={provenanceStatus}
+            providerName={providerName}
+            marketStatus={marketStatus}
           />
         </div>
 

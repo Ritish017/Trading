@@ -189,6 +189,50 @@ async def get_market_data_integrity(symbol: str):
         "integrity_verified": quote.get("provenance_status") in ("AUTHENTIC_LIVE", "DEV_MOCK")
     }
 
+@app.get("/api/market/diagnostic")
+async def get_market_data_diagnostic():
+    """Development Diagnostic & Market Data Provenance Audit Endpoint."""
+    from backend.app.market_data.session_engine import market_session_engine
+    from backend.app.market.instruments import get_instrument_key
+    
+    session_info = market_session_engine.get_session_info()
+    audit_symbols = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "TATAMOTORS.NS", "SBIN.NS"]
+    
+    quotes = await market_data_service.get_quotes(audit_symbols)
+    results = []
+    
+    for q in quotes:
+        sym = q.get("symbol")
+        inst_key = get_instrument_key(sym) or q.get("instrument_key", "UNKNOWN")
+        results.append({
+            "symbol": sym,
+            "provider": market_data_service.active_provider.provider_name,
+            "instrument_key": inst_key,
+            "ltp": q.get("ltp"),
+            "previous_close": q.get("previous_close"),
+            "open": q.get("open"),
+            "high": q.get("high"),
+            "low": q.get("low"),
+            "provider_timestamp": q.get("timestamp"),
+            "data_age_seconds": q.get("data_age_seconds"),
+            "market_status": session_info["session_state"],
+            "freshness": "FRESH" if (q.get("data_age_seconds", 999) <= 120) else "STALE",
+            "price_domain": q.get("price_domain", "CURRENT_EXCHANGE_PRICE"),
+            "is_mock": market_data_service.active_provider.provider_name in ("MOCK", "DEV_MOCK"),
+            "is_live": q.get("is_live", False),
+            "anomaly_classification": q.get("anomaly_classification", "NORMAL_MARKET_MOVE"),
+            "classification_reason": q.get("classification_reason", "")
+        })
+
+    return {
+        "diagnostic_timestamp": session_info["ist_time"],
+        "market_session": session_info,
+        "active_provider": market_data_service.active_provider.provider_name,
+        "is_live_provider": market_data_service.is_live,
+        "symbols_count": len(results),
+        "audit": results
+    }
+
 @app.get("/api/market/option-chain/{symbol}")
 async def get_option_chain(symbol: str):
     return await market_data_service.get_option_chain(symbol)

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { NSEStock } from '../types/indianMarket';
-import { IndianCandle, calculateEMA, calculateVWAP } from '../utils/indianTechnicalAnalysis';
+import { IndianCandle, calculateEMA, calculateVWAP, generateInitialIndianCandles } from '../utils/indianTechnicalAnalysis';
 import { Layers, TrendingUp, BarChart2, Activity, Eye, Zap } from 'lucide-react';
 
 interface IndianCandleChartProps {
@@ -49,17 +49,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
     return c.high >= maxOC && c.low <= minOC;
   });
 
-  const candleList = validCandles.length > 0 ? validCandles : [
-    {
-      time: Math.floor(Date.now() / 1000),
-      open: currentPrice,
-      high: currentPrice * 1.002,
-      low: currentPrice * 0.998,
-      close: currentPrice,
-      volume: 10000,
-      vwap: currentPrice
-    }
-  ];
+  const candleList = validCandles.length >= 2 ? validCandles : generateInitialIndianCandles(currentPrice, 60, 300);
 
   const closes = candleList.map((c) => c.close);
   const ema20Values = calculateEMA(closes, 20);

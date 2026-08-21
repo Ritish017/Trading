@@ -11,7 +11,8 @@ import {
   Zap,
   FlaskConical,
   Building2,
-  Cpu
+  Cpu,
+  Radio
 } from 'lucide-react';
 
 export type ActivePage = 
@@ -24,7 +25,8 @@ export type ActivePage =
   | 'learn'
   | 'strategylab'
   | 'fundamentals'
-  | 'researchfactory';
+  | 'researchfactory'
+  | 'commandcenter';
 
 interface NavigationTabsProps {
   activePage: ActivePage;
@@ -117,6 +119,14 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
       badge: 'PRO',
       badgeColor: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
       color: 'text-cyan-400',
+    },
+    {
+      id: 'commandcenter' as ActivePage,
+      label: 'Command Center',
+      icon: Radio,
+      badge: 'LIVE',
+      badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+      color: 'text-rose-400',
     },
   ];
 

@@ -15,8 +15,13 @@ from backend.app.research_factory.models import (
     HypothesisStatus,
     RejectionReason,
 )
+from backend.app.research_factory.audit_models import (
+    ResearchAuditReport,
+    CertificationStatus,
+)
 from backend.app.research_factory.generator import HypothesisGenerator
 from backend.app.research_factory.validator import validator
+from backend.app.research_factory.auditor import research_auditor
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,7 @@ class ResearchFactoryLedger:
     def __init__(self):
         self.hypotheses: Dict[str, ResearchHypothesis] = {}
         self.scorecards: Dict[str, ValidationScorecard] = {}
+        self.audit_reports: Dict[str, ResearchAuditReport] = {}
         self.experiment_history: List[Dict[str, Any]] = []
         self._seed_canonical_hypotheses()
 
@@ -39,6 +45,8 @@ class ResearchFactoryLedger:
             self.hypotheses[hyp.hypothesis_id] = hyp
             scorecard = validator.validate_hypothesis(hyp)
             self.scorecards[hyp.hypothesis_id] = scorecard
+            audit_rep = research_auditor.audit_hypothesis(hyp, scorecard)
+            self.audit_reports[hyp.hypothesis_id] = audit_rep
             self.experiment_history.append({
                 "experiment_id": f"EXP_{hyp.hypothesis_id}",
                 "hypothesis_id": hyp.hypothesis_id,
@@ -48,6 +56,7 @@ class ResearchFactoryLedger:
                 "oos_return_pct": scorecard.oos_result.oos_return_pct,
                 "k_tested": hyp.k_tested,
                 "recommendation": scorecard.overall_recommendation,
+                "certification": audit_rep.certification_status.value,
             })
 
     def list_hypotheses(self) -> List[ResearchHypothesis]:
@@ -58,6 +67,17 @@ class ResearchFactoryLedger:
 
     def get_scorecard(self, hypothesis_id: str) -> Optional[ValidationScorecard]:
         return self.scorecards.get(hypothesis_id)
+
+    def get_audit_report(self, hypothesis_id: str) -> Optional[ResearchAuditReport]:
+        return self.audit_reports.get(hypothesis_id)
+
+    def audit_and_record(self, hypothesis: ResearchHypothesis) -> ResearchAuditReport:
+        scorecard = self.scorecards.get(hypothesis.hypothesis_id)
+        if not scorecard:
+            scorecard = self.validate_and_record(hypothesis)
+        report = research_auditor.audit_hypothesis(hypothesis, scorecard)
+        self.audit_reports[hypothesis.hypothesis_id] = report
+        return report
 
     def validate_and_record(self, hypothesis: ResearchHypothesis) -> ValidationScorecard:
         scorecard = validator.validate_hypothesis(hypothesis)

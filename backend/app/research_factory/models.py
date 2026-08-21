@@ -65,11 +65,13 @@ class ResearchHypothesis:
     regime_filter: Optional[str] = None                                # e.g. "TRENDING_BULLISH"
     entry_conditions: List[str] = field(default_factory=list)
     exit_conditions: List[str] = field(default_factory=list)
+    holding_period: str = "SWING_MULTI_DAY"
     timeframe: str = "1D"
     universe: List[str] = field(default_factory=lambda: ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "TATAMOTORS.NS"])
     rebalance_frequency: str = "QUARTERLY"
     position_sizing: str = "EQUAL_WEIGHT"                             # EQUAL_WEIGHT | VOLATILITY_SCALED
     cost_model: str = "INDIAN_EQUITY_REALISTIC"
+    risk_model: str = "VOLATILITY_ADJUSTED_STOP"
     created_timestamp: int = 0
     status: HypothesisStatus = HypothesisStatus.DRAFT
     rejection_reasons: List[RejectionReason] = field(default_factory=list)

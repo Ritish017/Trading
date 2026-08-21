@@ -1544,6 +1544,255 @@ async def challenge_hypothesis_endpoint(hypothesis_id: str, req: ResearchCopilot
     return res
 
 
+# ---------------------------------------------------------------------------
+# Phase 10: Independent Quant Research Audit Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.research_factory.auditor import research_auditor
+
+
+class ResearchAuditRequest(BaseModel):
+    hypothesis_id: str
+    user_message: Optional[str] = "Audit this research result"
+    hypothesis: Optional[Dict[str, Any]] = None
+    scorecard: Optional[Dict[str, Any]] = None
+    audit_report: Optional[Dict[str, Any]] = None
+    chat_history: Optional[List[Dict[str, str]]] = None
+    is_skeptic_mode: Optional[bool] = False
+
+
+@app.post("/api/research-audit/audit/{hypothesis_id}")
+async def run_hypothesis_audit_endpoint(hypothesis_id: str):
+    """Executes full independent mathematical and empirical audit on a hypothesis."""
+    hyp = research_ledger.get_hypothesis(hypothesis_id)
+    if not hyp:
+        raise HTTPException(status_code=404, detail=f"Hypothesis {hypothesis_id} not found.")
+    scorecard = research_ledger.get_scorecard(hypothesis_id)
+    audit_report = research_auditor.audit_hypothesis(hyp, scorecard)
+    research_ledger.audit_reports[hypothesis_id] = audit_report
+    return {
+        "hypothesis": asdict(hyp),
+        "audit_report": asdict(audit_report),
+    }
+
+
+@app.get("/api/research-audit/report/{hypothesis_id}")
+async def get_hypothesis_audit_report(hypothesis_id: str):
+    """Returns the independent quantitative audit certificate and report."""
+    report = research_ledger.get_audit_report(hypothesis_id)
+    if not report:
+        hyp = research_ledger.get_hypothesis(hypothesis_id)
+        if not hyp:
+            raise HTTPException(status_code=404, detail=f"Hypothesis {hypothesis_id} not found.")
+        scorecard = research_ledger.get_scorecard(hypothesis_id)
+        report = research_auditor.audit_hypothesis(hyp, scorecard)
+        research_ledger.audit_reports[hypothesis_id] = report
+    return {"audit_report": asdict(report)}
+
+
+@app.post("/api/research-audit/copilot")
+async def research_audit_copilot_endpoint(req: ResearchAuditRequest):
+    """Evidence-grounded Independent Quant Audit Copilot."""
+    res = await research_factory_copilot.answer(
+        hypothesis_id=req.hypothesis_id,
+        user_message=req.user_message or "Audit this research result",
+        hypothesis=req.hypothesis,
+        scorecard=req.scorecard,
+        audit_report=req.audit_report,
+        chat_history=req.chat_history,
+        is_skeptic_mode=bool(req.is_skeptic_mode),
+    )
+    return res
+
+
+@app.post("/api/research-audit/challenge/{hypothesis_id}")
+async def challenge_audit_endpoint(hypothesis_id: str, req: ResearchAuditRequest):
+    """Skeptic Mode: 'TRY TO DISPROVE THIS RESULT' aggressively probes for statistical anomalies."""
+    res = await research_factory_copilot.answer(
+        hypothesis_id=hypothesis_id,
+        user_message="TRY TO DISPROVE THIS RESULT: Search for lookahead, survivorship bias, data snooping, and execution friction.",
+        hypothesis=req.hypothesis,
+        scorecard=req.scorecard,
+        audit_report=req.audit_report,
+        chat_history=req.chat_history,
+        is_skeptic_mode=True,
+    )
+    return res
+
+
+# ---------------------------------------------------------------------------
+# Phase 11: Production Forward Validation & Telemetry Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.paper_engine.forward_validator import forward_validation_engine
+
+
+@app.get("/api/forward-validation/report/{hypothesis_id}")
+async def get_forward_validation_report(hypothesis_id: str):
+    """Returns the comprehensive Phase 11 forward paper validation report with 7 gates."""
+    frozen_hyp = forward_validation_engine.get_frozen_hypothesis()
+    report = forward_validation_engine.run_forward_validation_audit(frozen_hyp)
+    return {"report": asdict(report)}
+
+
+@app.get("/api/forward-validation/frozen-hypothesis/{hypothesis_id}")
+async def get_frozen_hypothesis_contract(hypothesis_id: str):
+    """Returns the immutable frozen research hypothesis contract."""
+    frozen_hyp = forward_validation_engine.get_frozen_hypothesis()
+    return {"frozen_hypothesis": asdict(frozen_hyp)}
+
+
+@app.get("/api/forward-validation/market-data-quality/{symbol}")
+async def get_market_data_quality(symbol: str):
+    """Returns real-time data feed quality and REST <-> WebSocket reconciliation report."""
+    now = int(time.time())
+    dummy_candles = [
+        {"timestamp": now - ((5 - i) * 86400), "open": 2400.0, "high": 2450.0, "low": 2390.0, "close": 2440.0, "volume": 150000}
+        for i in range(5)
+    ]
+    report = forward_validation_engine.audit_market_data_quality(symbol, dummy_candles)
+    return {"data_quality": asdict(report)}
+
+
+class ForwardCopilotRequest(BaseModel):
+    hypothesis_id: str
+    user_message: str
+    forward_report: Optional[Dict[str, Any]] = None
+    chat_history: Optional[List[Dict[str, str]]] = None
+    is_skeptic_mode: Optional[bool] = False
+
+
+@app.post("/api/forward-validation/copilot")
+async def forward_validation_copilot(req: ForwardCopilotRequest):
+    """Evidence-grounded Forward Validation & Telemetry Copilot."""
+    res = await research_factory_copilot.answer(
+        hypothesis_id=req.hypothesis_id,
+        user_message=req.user_message,
+        audit_report=req.forward_report,
+        chat_history=req.chat_history,
+        is_skeptic_mode=bool(req.is_skeptic_mode),
+    )
+    return res
+
+
+@app.post("/api/forward-validation/challenge/{hypothesis_id}")
+async def challenge_forward_validation(hypothesis_id: str, req: ForwardCopilotRequest):
+    """Skeptic Mode: 'CHALLENGE THIS PAPER VALIDATION' probing for drift, data gaps, and regime fragility."""
+    res = await research_factory_copilot.answer(
+        hypothesis_id=hypothesis_id,
+        user_message="CHALLENGE THIS PAPER VALIDATION: Probe for execution drift, slippage underestimation, and regime fragility.",
+        audit_report=req.forward_report,
+        chat_history=req.chat_history,
+        is_skeptic_mode=True,
+    )
+    return res
+
+
+# ---------------------------------------------------------------------------
+# Phase 12: Continuous Paper Validation & Research Decision Engine Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.paper_engine.decision_engine import continuous_decision_engine
+
+
+@app.get("/api/research-decision/report/{hypothesis_id}")
+async def get_research_decision_report(hypothesis_id: str):
+    """Returns the comprehensive Phase 12 Research Decision Report for the frozen hypothesis."""
+    report = continuous_decision_engine.evaluate_decision()
+    return {"decision_report": asdict(report)}
+
+
+@app.get("/api/research-decision/fingerprint/{hypothesis_id}")
+async def get_research_hypothesis_fingerprint(hypothesis_id: str):
+    """Returns the cryptographic SHA-256 fingerprint of the frozen hypothesis."""
+    return {"fingerprint": asdict(continuous_decision_engine.fingerprint)}
+
+
+@app.get("/api/research-decision/signals/{hypothesis_id}")
+async def get_research_signal_ledger(hypothesis_id: str):
+    """Returns the persistent signal ledger including executed, skipped, and invalidated audits."""
+    return {"signals": [asdict(s) for s in continuous_decision_engine.paper_signals]}
+
+
+@app.post("/api/research-decision/challenge/{hypothesis_id}")
+async def challenge_research_decision(hypothesis_id: str, req: ForwardCopilotRequest):
+    """Skeptic Mode: 'CHALLENGE CURRENT VALIDATION' probing for sample size, survivorship bias, and regime coverage."""
+    report = continuous_decision_engine.evaluate_decision()
+    res = await research_factory_copilot.answer(
+        hypothesis_id=hypothesis_id,
+        user_message="CHALLENGE CURRENT VALIDATION: Probe sample size, survivorship bias, and unobserved high volatility regime.",
+        audit_report=asdict(report),
+        chat_history=req.chat_history,
+        is_skeptic_mode=True,
+    )
+    return res
+
+
+# ---------------------------------------------------------------------------
+# Phase 13: Live Quant Research Command Center Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.command_center.orchestrator import research_command_center
+
+
+@app.get("/api/research-command-center/{symbol}")
+async def get_command_center_snapshot(symbol: str, timeframe: str = "1D"):
+    """Returns the consolidated multi-engine Research Command Center snapshot for a symbol."""
+    snapshot = research_command_center.get_snapshot(symbol=symbol, timeframe=timeframe)
+    return {"snapshot": asdict(snapshot)}
+
+
+from backend.app.command_center.provenance import provenance_auditor, EvidenceProvenance
+
+
+@app.get("/api/research-command-center/audit-report")
+async def get_command_center_audit_report(symbol: str = "RELIANCE.NS"):
+    """Performs a zero-trust forensic audit of all active metrics in the Command Center."""
+    snapshot = research_command_center.get_snapshot(symbol=symbol)
+    prov_dict = {k: EvidenceProvenance(**v) for k, v in snapshot.provenance.items()} if snapshot.provenance else {}
+    report = provenance_auditor.audit_snapshot_provenance(prov_dict)
+    return {"audit_report": asdict(report)}
+
+
+@app.get("/api/research-command-center/provenance/{symbol}")
+async def get_command_center_metric_provenance(symbol: str):
+    """Returns granular metric-by-metric evidence provenance metadata."""
+    snapshot = research_command_center.get_snapshot(symbol=symbol)
+    return {"symbol": symbol, "provenance": snapshot.provenance}
+
+
+class CommandCenterCopilotRequest(BaseModel):
+    symbol: str
+    user_message: str
+    snapshot: Optional[Dict[str, Any]] = None
+    chat_history: Optional[List[Dict[str, str]]] = None
+    is_skeptic_mode: Optional[bool] = False
+
+
+@app.post("/api/research-command-center/copilot")
+async def command_center_copilot(req: CommandCenterCopilotRequest):
+    """Evidence-grounded Command Center Copilot."""
+    snap = req.snapshot or asdict(research_command_center.get_snapshot(symbol=req.symbol))
+    res = await research_factory_copilot.answer(
+        hypothesis_id="HYP_QUALITY_TREND_01",
+        user_message=req.user_message,
+        audit_report=snap,
+        chat_history=req.chat_history,
+        is_skeptic_mode=bool(req.is_skeptic_mode),
+    )
+    return res
+
+
+@app.post("/api/research-command-center/challenge/{symbol}")
+async def challenge_stock_command_center(symbol: str, req: CommandCenterCopilotRequest):
+    """Skeptic Mode: 'CHALLENGE THIS STOCK' probing for contradictions, regime mismatch, and factor weaknesses."""
+    snap = req.snapshot or asdict(research_command_center.get_snapshot(symbol=symbol))
+    res = await research_factory_copilot.answer(
+        hypothesis_id="HYP_QUALITY_TREND_01",
+        user_message=f"CHALLENGE THIS STOCK ({symbol}): Search for technical/fundamental contradictions, historical weakness, and execution risks.",
+        audit_report=snap,
+        chat_history=req.chat_history,
+        is_skeptic_mode=True,
+    )
+    return res
+
+
 @app.websocket("/ws/ticks")
 async def websocket_ticks(websocket: WebSocket):
     await websocket.accept()

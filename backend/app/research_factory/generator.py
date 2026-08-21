@@ -13,6 +13,7 @@ from backend.app.research_factory.models import (
     HypothesisCategory,
     HypothesisStatus,
     ResearchHypothesis,
+    RejectionReason,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,30 @@ class HypothesisGenerator:
                 created_timestamp=now,
                 status=HypothesisStatus.RESEARCH_CANDIDATE,
                 k_tested=1,
+            ),
+            ResearchHypothesis(
+                hypothesis_id="HYP_OVERFIT_MOMENTUM_99",
+                name="High-Frequency Mean Reversion Scalper (K=45 Sweep)",
+                version="1.0.0",
+                description="Overfit RSI scalper generated via 45-parameter sweep without OOS holdout.",
+                category=HypothesisCategory.TECHNICAL,
+                technical_dependencies=["RSI_MEAN_REVERSION"],
+                fundamental_dependencies=[],
+                regime_filter="RANGE_BOUND",
+                entry_conditions=["RSI_7 < 20 on 5m candles"],
+                exit_conditions=["RSI_7 > 50 or Stop Hit"],
+                universe=["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "TATAMOTORS.NS"],
+                created_timestamp=now,
+                status=HypothesisStatus.REJECTED,
+                rejection_reasons=[
+                    RejectionReason.OOS_FAILURE,
+                    RejectionReason.HIGH_COST_DRAG,
+                    RejectionReason.MULTIPLE_TESTING_RISK,
+                    RejectionReason.ISOLATED_PEAK,
+                    RejectionReason.SYMBOL_DEPENDENT,
+                ],
+                rejection_notes="Severe OOS collapse (-2.4% vs 38.2% IS), 78.8% cost drag, and K=45 p-hacking.",
+                k_tested=45,
             ),
         ]
 

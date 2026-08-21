@@ -26,6 +26,7 @@ import { QuantLearnPage } from './components/pages/QuantLearnPage';
 import { StrategyLabPage } from './components/pages/StrategyLabPage';
 import { FundamentalResearchPage } from './components/pages/FundamentalResearchPage';
 import { ResearchFactoryPage } from './components/pages/ResearchFactoryPage';
+import { CommandCenterPage } from './components/pages/CommandCenterPage';
 
 import { MarketNarrativeBanner } from './components/intelligence/MarketNarrativeBanner';
 import { IntelligenceTimeline } from './components/intelligence/IntelligenceTimeline';
@@ -88,15 +89,29 @@ function toMarketQuote(raw: any, isIndex = false): MarketQuote {
   };
 }
 
+const STORAGE_VERSION = 'v2.2_nse_real_data';
+
 export default function App() {
-  // 1. Core State with robust localStorage validation
+  // 1. Core State with robust localStorage validation & cache busting
   const [indices, setIndices] = useState<MarketIndex[]>(INITIAL_INDICES);
   const [stocks, setStocks] = useState<NSEStock[]>(() => {
     try {
+      const savedVersion = localStorage.getItem('apexnse_schema_version');
+      if (savedVersion !== STORAGE_VERSION) {
+        localStorage.setItem('apexnse_schema_version', STORAGE_VERSION);
+        localStorage.removeItem('apexnse_stocks');
+        return INITIAL_NSE_STOCKS;
+      }
       const saved = localStorage.getItem('apexnse_stocks');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0 && parsed[0] && typeof parsed[0].symbol === 'string') {
+          // Validate that prices are realistic (e.g. HDFC Bank is not < 1000 from old legacy crypto state)
+          const hdfc = parsed.find((s: NSEStock) => s.symbol === 'HDFCBANK.NS');
+          if (hdfc && (hdfc.price < 1000 || hdfc.price > 3000)) {
+            localStorage.removeItem('apexnse_stocks');
+            return INITIAL_NSE_STOCKS;
+          }
           return parsed;
         }
       }
@@ -507,9 +522,18 @@ export default function App() {
 
     setCandles((prev) => {
       const currentCandles = prev[selectedSymbol] || [];
-      if (currentCandles.length === 0) return prev;
+      const lastCandle = currentCandles.length > 0 ? currentCandles[currentCandles.length - 1] : null;
 
-      const lastCandle = currentCandles[currentCandles.length - 1];
+      // Discontinuity / Out-of-sync guard:
+      // If candle history is empty OR price discrepancy between last synthetic candle and live price is > 18%,
+      // smoothly re-seed the series to prevent chart compression / giant vertical distortion bars
+      if (!lastCandle || Math.abs(currentPrice - lastCandle.close) / Math.max(lastCandle.close, 1) > 0.18) {
+        return {
+          ...prev,
+          [selectedSymbol]: generateInitialIndianCandles(currentPrice, 60, 300),
+        };
+      }
+
       const nowSec = Math.floor(Date.now() / 1000);
 
       if (nowSec - lastCandle.time >= 300) {
@@ -887,6 +911,14 @@ export default function App() {
 
       {activePage === 'researchfactory' && (
         <ResearchFactoryPage
+          stocks={stocks}
+          selectedSymbol={selectedSymbol}
+          onSelectSymbol={(sym) => setSelectedSymbol(sym)}
+        />
+      )}
+
+      {activePage === 'commandcenter' && (
+        <CommandCenterPage
           stocks={stocks}
           selectedSymbol={selectedSymbol}
           onSelectSymbol={(sym) => setSelectedSymbol(sym)}

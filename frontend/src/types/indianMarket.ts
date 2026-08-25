@@ -8,42 +8,57 @@ export type SectorCategory =
   | 'Pharmaceuticals'
   | 'Infrastructure & Capital Goods';
 
-export interface NSEStock {
+export interface NSEStockMetadata {
   symbol: string;               // e.g. 'RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS'
   bseCode: string;              // e.g. '500325', '532540'
   name: string;                 // e.g. 'Reliance Industries Ltd'
   sector: SectorCategory;
-  price: number;                // Current price in ₹ INR
-  change: number;               // Absolute change in ₹
-  changePercent: number;        // Percentage change %
-  open: number;
-  high: number;
-  low: number;
-  prevClose: number;
-  volumeLakhs: number;          // Trading volume in Lakhs (1 Lakh = 100,000)
-  turnoverCr: number;           // Total Turnover in ₹ Crores (1 Crore = 10,000,000)
-  marketCapCr: number;          // Market Capitalization in ₹ Crores
-  peRatio: number;              // Price to Earnings ratio
-  pbRatio: number;              // Price to Book ratio
-  week52High: number;           // 52-Week High in ₹
-  week52Low: number;            // 52-Week Low in ₹
-  vwap: number;                 // Volume Weighted Average Price in ₹
-  upperCircuit: number;         // NSE Upper Price Band (10% or 20%)
-  lowerCircuit: number;         // NSE Lower Price Band
+  marketCapCr?: number;         // Market Capitalization in ₹ Crores (Quarterly/Annual)
+  peRatio?: number;             // Price to Earnings ratio (Fundamental)
+  pbRatio?: number;             // Price to Book ratio (Fundamental)
+  week52High?: number;          // 52-Week High in ₹ (Statistical)
+  week52Low?: number;           // 52-Week Low in ₹ (Statistical)
   isNifty50: boolean;
   isFavorite?: boolean;
-  sparkline: number[];
 }
 
-export interface MarketIndex {
+export interface NSEStock extends NSEStockMetadata {
+  // Live market price fields (Populated ONLY by provider; null/undefined on init)
+  price?: number | null;        // Current LTP in ₹ INR
+  change?: number | null;       // Absolute change in ₹
+  changePercent?: number | null;// Percentage change %
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  prevClose?: number | null;
+  volumeLakhs?: number | null;  // Trading volume in Lakhs
+  turnoverCr?: number | null;   // Total Turnover in ₹ Crores
+  vwap?: number | null;         // Volume Weighted Average Price in ₹
+  upperCircuit?: number | null;
+  lowerCircuit?: number | null;
+  sparkline?: number[];
+  source?: string;
+  providerTimestamp?: number;
+  dataAgeSeconds?: number;
+  marketStatus?: string;
+  isLive?: boolean;
+}
+
+export interface MarketIndexMetadata {
   symbol: string;               // 'NIFTY 50', 'SENSEX', 'BANKNIFTY', 'NIFTY IT', 'INDIA VIX'
   name: string;
-  value: number;                // Index level
-  change: number;
-  changePercent: number;
-  high: number;
-  low: number;
-  sparkline: number[];
+}
+
+export interface MarketIndex extends MarketIndexMetadata {
+  // Live index levels (Populated ONLY by provider; null/undefined on init)
+  value?: number | null;        // Index level
+  change?: number | null;
+  changePercent?: number | null;
+  high?: number | null;
+  low?: number | null;
+  sparkline?: number[];
+  providerTimestamp?: number;
+  isLive?: boolean;
 }
 
 export interface FIIDIINetFlow {
@@ -68,14 +83,14 @@ export interface MarketBreadth {
 
 export interface OptionChainSummary {
   symbol: 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY';
-  spotPrice: number;
-  atmStrike: number;
-  pcr: number;                  // Put-Call Ratio (Put OI / Call OI)
-  maxPainStrike: number;        // Strike price with maximum pain for option buyers
-  totalCallOI: number;          // In Lakhs
-  totalPutOI: number;           // In Lakhs
-  impliedVolatility: number;    // % IV
-  expiryDate: string;
+  spotPrice?: number | null;
+  atmStrike?: number | null;
+  pcr?: number | null;          // Put-Call Ratio
+  maxPainStrike?: number | null;// Strike price with maximum pain
+  totalCallOI?: number | null;  // In Lakhs
+  totalPutOI?: number | null;   // In Lakhs
+  impliedVolatility?: number | null;
+  expiryDate?: string;
 }
 
 export interface SEBIAnnouncement {

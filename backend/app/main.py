@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 from typing import Dict, Any, List, Optional, Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
@@ -85,22 +86,48 @@ async def on_normalized_tick_received(tick: NormalizedTick):
 
     active_ws_connections.difference_update(disconnected)
 
+_initialized = False
+
+async def ensure_initialized():
+    global _initialized
+    if not _initialized:
+        try:
+            await init_db()
+        except Exception as e:
+            logger.warning(f"init_db non-fatal error: {e}")
+        try:
+            await market_data_service.initialize()
+        except Exception as e:
+            logger.warning(f"market_data_service.initialize non-fatal error: {e}")
+        _initialized = True
+
 @app.on_event("startup")
 async def startup_event():
     logger.info(f"Starting APEX Quant Lab Backend in {settings.environment} mode.")
-    await init_db()
-    # Initialize Market Data Hub
-    await market_data_service.initialize()
-    # Connect WebSocket feed to internal broadcast
-    default_symbols = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "NIFTY 50", "BANKNIFTY", "INDIA VIX"]
-    await market_data_service.subscribe(default_symbols)
-    await market_data_service.connect_websocket(on_normalized_tick_received)
+    await ensure_initialized()
+    try:
+        default_symbols = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "NIFTY 50", "BANKNIFTY", "INDIA VIX"]
+        await market_data_service.subscribe(default_symbols)
+        # Avoid hanging on websockets in short-lived serverless invocations
+        if not os.environ.get("VERCEL"):
+            await market_data_service.connect_websocket(on_normalized_tick_received)
+    except Exception as e:
+        logger.warning(f"WebSocket background feed non-fatal warning: {e}")
+
+@app.middleware("http")
+async def ensure_init_middleware(request, call_next):
+    if not _initialized and not request.url.path.startswith("/assets"):
+        await ensure_initialized()
+    return await call_next(request)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down APEX Quant Lab Backend...")
     if hasattr(market_data_service.active_provider, "disconnect"):
-        await market_data_service.active_provider.disconnect()
+        try:
+            await market_data_service.active_provider.disconnect()
+        except Exception:
+            pass
 
 # --- Health Check Endpoints ---
 @app.get("/health")
@@ -139,7 +166,7 @@ async def get_candles(
     symbol: str,
     interval: str = "5m",
     count: int = 60,
-    adjustment_mode: str = Query(default="ADJUSTED", regex="^(ADJUSTED|RAW)$")
+    adjustment_mode: str = Query(default="ADJUSTED", pattern="^(ADJUSTED|RAW)$")
 ):
     from backend.app.market_data.corporate_actions.models import PriceAdjustmentMode
     mode = PriceAdjustmentMode.CORPORATE_ACTION_ADJUSTED_PRICE if adjustment_mode == "ADJUSTED" else PriceAdjustmentMode.RAW_EXCHANGE_PRICE
@@ -189,45 +216,85 @@ async def get_market_data_integrity(symbol: str):
         "integrity_verified": quote.get("provenance_status") in ("AUTHENTIC_LIVE", "DEV_MOCK")
     }
 
+@app.get("/api/market/canonical/{symbol}")
+async def get_canonical_quote(symbol: str):
+    """Retrieve the single authoritative canonical quote with full provenance trace."""
+    canonical = market_data_service.get_canonical_quote(symbol)
+    if canonical is None:
+        # Fetch fresh if not yet in store
+        try:
+            await market_data_service.get_quote(symbol)
+            canonical = market_data_service.get_canonical_quote(symbol)
+        except Exception:
+            pass
+    if canonical is None:
+        return {
+            "symbol": symbol,
+            "ltp": None,
+            "provider": market_data_service.active_provider.provider_name,
+            "provider_mode": getattr(market_data_service, "provider_mode", "UNAVAILABLE"),
+            "data_available": False,
+            "market_data_status": "UNAVAILABLE",
+            "is_live": False
+        }
+    return canonical.to_api_dict()
+
+@app.get("/api/market/diagnostic/{symbol}")
+async def get_symbol_market_data_diagnostic(symbol: str):
+    """Diagnostic price trace for a single symbol comparing REST, WS, Canonical and Provider."""
+    diag = market_data_service.get_diagnostic(symbol)
+    if not diag.get("data_available"):
+        try:
+            await market_data_service.get_quote(symbol)
+            diag = market_data_service.get_diagnostic(symbol)
+        except Exception:
+            pass
+    return diag
+
 @app.get("/api/market/diagnostic")
 async def get_market_data_diagnostic():
-    """Development Diagnostic & Market Data Provenance Audit Endpoint."""
+    """Development Diagnostic & Market Data Provenance Audit Endpoint for standard basket."""
     from backend.app.market_data.session_engine import market_session_engine
     from backend.app.market.instruments import get_instrument_key
     
     session_info = market_session_engine.get_session_info()
     audit_symbols = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "TATAMOTORS.NS", "SBIN.NS"]
     
-    quotes = await market_data_service.get_quotes(audit_symbols)
+    # Ensure quotes are updated in canonical store
+    try:
+        await market_data_service.get_quotes(audit_symbols)
+    except Exception:
+        pass
+
     results = []
-    
-    for q in quotes:
-        sym = q.get("symbol")
-        inst_key = get_instrument_key(sym) or q.get("instrument_key", "UNKNOWN")
+    for sym in audit_symbols:
+        diag = market_data_service.get_diagnostic(sym)
+        inst_key = get_instrument_key(sym) or sym
         results.append({
             "symbol": sym,
-            "provider": market_data_service.active_provider.provider_name,
+            "provider": diag.get("provider", market_data_service.active_provider.provider_name),
+            "provider_mode": diag.get("provider_mode", getattr(market_data_service, "provider_mode", "UNAVAILABLE")),
             "instrument_key": inst_key,
-            "ltp": q.get("ltp"),
-            "previous_close": q.get("previous_close"),
-            "open": q.get("open"),
-            "high": q.get("high"),
-            "low": q.get("low"),
-            "provider_timestamp": q.get("timestamp"),
-            "data_age_seconds": q.get("data_age_seconds"),
+            "raw_ltp": diag.get("raw_ltp"),
+            "provider_timestamp": diag.get("provider_timestamp"),
+            "received_timestamp": diag.get("received_timestamp"),
+            "data_age_seconds": diag.get("data_age_seconds"),
             "market_status": session_info["session_state"],
-            "freshness": "FRESH" if (q.get("data_age_seconds", 999) <= 120) else "STALE",
-            "price_domain": q.get("price_domain", "CURRENT_EXCHANGE_PRICE"),
-            "is_mock": market_data_service.active_provider.provider_name in ("MOCK", "DEV_MOCK"),
-            "is_live": q.get("is_live", False),
-            "anomaly_classification": q.get("anomaly_classification", "NORMAL_MARKET_MOVE"),
-            "classification_reason": q.get("classification_reason", "")
+            "market_data_status": diag.get("market_data_status", "UNAVAILABLE"),
+            "canonical_source": diag.get("canonical_source"),
+            "quote_sequence_id": diag.get("quote_sequence_id"),
+            "rest_ltp": diag.get("rest_ltp"),
+            "ws_ltp": diag.get("ws_ltp"),
+            "is_mock": diag.get("provider") in ("MOCK", "DEV_MOCK") or diag.get("provider_mode") == "SIMULATED",
+            "is_live": diag.get("is_live", False),
+            "integrity": diag.get("integrity", "NO_DATA")
         })
 
     return {
         "diagnostic_timestamp": session_info["ist_time"],
         "market_session": session_info,
         "active_provider": market_data_service.active_provider.provider_name,
+        "provider_mode": getattr(market_data_service, "provider_mode", "UNAVAILABLE"),
         "is_live_provider": market_data_service.is_live,
         "symbols_count": len(results),
         "audit": results

@@ -9,64 +9,7 @@ export interface IndianCandle {
   volume?: number;
   volumeLakhs?: number;
   vwap?: number;
-}
-
-export function generateInitialIndianCandles(
-  currentPrice: number,
-  count: number = 60,
-  intervalSeconds: number = 300
-): IndianCandle[] {
-  const now = Math.floor(Date.now() / 1000);
-  let walkPrice = currentPrice;
-  const rawCandles: IndianCandle[] = [];
-
-  for (let i = 0; i < count; i++) {
-    const time = now - i * intervalSeconds;
-    // Controlled ~0.10% to 0.15% candle volatility
-    const volatility = Math.max(walkPrice * 0.0015, 0.25);
-    
-    // Close of this candle is walkPrice
-    const close = walkPrice;
-    // Step backwards to open with slight drift
-    const openDrift = (Math.random() - 0.49) * volatility;
-    const open = Math.max(close - openDrift, 1.0);
-    
-    const wickHigh = Math.random() * volatility * 0.5;
-    const wickLow = Math.random() * volatility * 0.5;
-    const high = Math.max(open, close) + wickHigh;
-    const low = Math.max(Math.min(open, close) - wickLow, 0.5);
-
-    const volumeShares = Math.floor(Math.random() * 25000 + 4000);
-    const volumeLakhs = Number((volumeShares / 100000).toFixed(2));
-    const vwap = Number(((high + low + close) / 3).toFixed(2));
-
-    rawCandles.push({
-      time,
-      open: Number(open.toFixed(2)),
-      high: Number(high.toFixed(2)),
-      low: Number(low.toFixed(2)),
-      close: Number(close.toFixed(2)),
-      volume: volumeShares,
-      volumeLakhs,
-      vwap,
-    });
-
-    // Next step backward
-    walkPrice = open;
-  }
-
-  // Reverse so chronological order (oldest to newest)
-  rawCandles.reverse();
-
-  // Ensure the latest candle close is exactly the current live price
-  if (rawCandles.length > 0) {
-    const last = rawCandles[rawCandles.length - 1];
-    last.close = currentPrice;
-    last.high = Math.max(last.high, currentPrice);
-    last.low = Math.min(last.low, currentPrice);
-  }
-
-  return rawCandles;
+  source?: string;
 }
 
 export function calculateEMA(prices: number[], period: number): number[] {
@@ -126,42 +69,20 @@ export function calculateVWAP(candles: IndianCandle[]): number {
 
   for (const c of candles) {
     const typicalPrice = (c.high + c.low + c.close) / 3;
-    totalPV += typicalPrice * c.volumeLakhs;
-    totalVolume += c.volumeLakhs;
+    const vol = c.volumeLakhs || (c.volume ? c.volume / 100000 : 0);
+    totalPV += typicalPrice * vol;
+    totalVolume += vol;
   }
 
   return totalVolume > 0 ? Number((totalPV / totalVolume).toFixed(2)) : 0;
 }
 
-export function generateIndianMarketDepth(currentPrice: number, precision: number = 2) {
-  const bids: { price: number; quantityLakhs: number; orders: number }[] = [];
-  const asks: { price: number; quantityLakhs: number; orders: number }[] = [];
-
-  for (let i = 1; i <= 5; i++) {
-    const bidPrice = Number((currentPrice - i * (currentPrice * 0.0006)).toFixed(precision));
-    const askPrice = Number((currentPrice + i * (currentPrice * 0.0006)).toFixed(precision));
-
-    bids.push({
-      price: bidPrice,
-      quantityLakhs: Number((Math.random() * 2.2 + 0.3).toFixed(2)),
-      orders: Math.floor(Math.random() * 85 + 15),
-    });
-
-    asks.push({
-      price: askPrice,
-      quantityLakhs: Number((Math.random() * 2.2 + 0.3).toFixed(2)),
-      orders: Math.floor(Math.random() * 85 + 15),
-    });
-  }
-
-  return { bids, asks };
-}
-
 export function generateLocalIndianAIReport(stock: NSEStock): IndianMarketAIReport {
   const p = stock.price;
-  const hasVWAP = stock.vwap && stock.vwap > 0;
-  const stance = (p > 0 && hasVWAP) ? (p >= stock.vwap ? 'Bullish Accumulation' : 'Distribution Pressure') : 'Consolidation Range';
-  const conf = (p > 0 && hasVWAP) ? 50 : 25;
+  const hasPrice = p !== null && p !== undefined && p > 0;
+  const hasVWAP = stock.vwap !== null && stock.vwap !== undefined && stock.vwap > 0;
+  const stance = (hasPrice && hasVWAP) ? (p >= stock.vwap! ? 'Bullish Accumulation' : 'Distribution Pressure') : 'Neutral Consolidation';
+  const conf = (hasPrice && hasVWAP) ? 50 : 20;
 
   return {
     symbol: stock.symbol,
@@ -171,14 +92,16 @@ export function generateLocalIndianAIReport(stock: NSEStock): IndianMarketAIRepo
     confidence: conf,
     niftyCorrel: 'Market Beta',
     fiiDiiSentiment: 'Settlement Neutral',
-    executiveSummary: `Price action for ${stock.name} is trading at ₹${p.toLocaleString()} with active session benchmark at ₹${stock.vwap?.toLocaleString() || 'N/A'}.`,
+    executiveSummary: hasPrice 
+      ? `Price action for ${stock.name} is currently at ₹${p.toLocaleString()} with reference VWAP at ₹${stock.vwap?.toLocaleString() || 'N/A'}.`
+      : `Instrument ${stock.name} (${stock.symbol}) awaiting provider live price synchronization.`,
     supportLevels: [],
     resistanceLevels: [],
     technicalMetrics: {
-      rsi14: undefined,
-      ema20: undefined,
-      ema50: undefined,
-      vwap: stock.vwap || undefined,
+      rsi14: 50,
+      ema20: 0,
+      ema50: 0,
+      vwap: stock.vwap || 0,
       pcrSignal: 'Unavailable',
     },
     catalysts: [
@@ -186,7 +109,7 @@ export function generateLocalIndianAIReport(stock: NSEStock): IndianMarketAIRepo
     ],
     tacticalTradeSetup: {
       action: 'MONITOR',
-      entryZone: p > 0 ? `₹${p.toFixed(2)}` : undefined,
+      entryZone: hasPrice ? `₹${p.toFixed(2)}` : 'Awaiting Quote',
       target1: undefined,
       target2: undefined,
       stopLoss: undefined,

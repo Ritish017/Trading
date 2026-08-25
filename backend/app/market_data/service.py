@@ -9,6 +9,7 @@ from backend.app.broker_providers.dev_mock import DevMockProvider
 from backend.app.market_data.corporate_actions.models import PriceAdjustmentMode
 from backend.app.market_data.corporate_actions.adjuster import corporate_action_adjuster
 from backend.app.market_data.corporate_actions.integrity_guard import market_data_integrity_guard
+from backend.app.market_data.canonical_store import canonical_store, CanonicalQuote
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,10 @@ class MarketDataService:
 
         self.active_provider: MarketDataProvider = self.mock_provider
         self.is_live: bool = False
-        self.status_code: str = "INITIALIZING" # CONNECTED, DISCONNECTED, CONFIGURATION_ERROR, SIMULATED
-        
-        # Composite isolated cache: key format '{symbol}:{timeframe}:{mode}:{provider}'
-        self._quote_cache: Dict[str, Dict[str, Any]] = {}
+        self.status_code: str = "INITIALIZING"
+        self.provider_mode: str = "UNAVAILABLE"  # AUTHENTIC_LIVE | SIMULATED | UNAVAILABLE
+
+        # Lightweight per-provider cache (keyed by symbol) — canonical truth is in canonical_store
         self._candle_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._last_tick_time: Optional[float] = None
         self._ws_reconnect_count: int = 0
@@ -56,18 +57,21 @@ class MarketDataService:
                     await self.mock_provider.connect()
                     self.is_live = False
                     self.status_code = "SIMULATED"
+                    self.provider_mode = "SIMULATED"
                     return True
                 else:
                     self.active_provider = self.upstox_provider
                     self.is_live = False
                     self.status_code = "CONFIGURATION_ERROR"
+                    self.provider_mode = "UNAVAILABLE"
                     return False
-            
+
             connected = await self.upstox_provider.connect()
             if connected:
                 self.active_provider = self.upstox_provider
                 self.is_live = True
                 self.status_code = "CONNECTED"
+                self.provider_mode = "AUTHENTIC_LIVE"
                 logger.info("[MARKET DATA HUB] Successfully activated LIVE Upstox Provider.")
                 return True
             else:
@@ -77,12 +81,14 @@ class MarketDataService:
                     await self.mock_provider.connect()
                     self.is_live = False
                     self.status_code = "SIMULATED"
+                    self.provider_mode = "SIMULATED"
                     return True
                 else:
                     self.active_provider = self.upstox_provider
                     self.is_live = False
                     self.status_code = "DISCONNECTED"
-                    logger.error("[MARKET DATA HUB] Upstox connection failed and ALLOW_MOCK_FALLBACK=false. Setting status to DISCONNECTED.")
+                    self.provider_mode = "UNAVAILABLE"
+                    logger.error("[MARKET DATA HUB] Upstox connection failed and ALLOW_MOCK_FALLBACK=false.")
                     return False
 
         elif self.primary_provider_name == "DHAN":
@@ -91,17 +97,20 @@ class MarketDataService:
                 self.active_provider = self.dhan_provider
                 self.is_live = True
                 self.status_code = "CONNECTED"
+                self.provider_mode = "AUTHENTIC_LIVE"
                 return True
             elif self.allow_mock_fallback:
                 self.active_provider = self.mock_provider
                 await self.mock_provider.connect()
                 self.is_live = False
                 self.status_code = "SIMULATED"
+                self.provider_mode = "SIMULATED"
                 return True
             else:
                 self.active_provider = self.dhan_provider
                 self.is_live = False
                 self.status_code = "DISCONNECTED"
+                self.provider_mode = "UNAVAILABLE"
                 return False
 
         # Default MOCK mode
@@ -109,14 +118,33 @@ class MarketDataService:
         await self.mock_provider.connect()
         self.is_live = False
         self.status_code = "SIMULATED"
+        self.provider_mode = "SIMULATED"
         logger.info("[MARKET DATA HUB] Operating in SIMULATED mode using DevMockProvider.")
         return True
 
     async def connect_websocket(self, tick_callback: Callable[[NormalizedTick], Awaitable[None]]) -> bool:
         async def _internal_cb(tick: NormalizedTick):
             self._last_tick_time = tick.timestamp
-            cache_key = f"{tick.symbol}:QUOTE:{self.active_provider.provider_name}"
-            self._quote_cache[cache_key] = tick.dict()
+            # Push into canonical store as WS source
+            ws_raw = {
+                "symbol": tick.symbol,
+                "instrument_key": getattr(tick, "instrument_key", tick.symbol),
+                "exchange": tick.exchange,
+                "ltp": tick.ltp,
+                "previous_close": tick.previous_close,
+                "open": tick.open,
+                "high": tick.high,
+                "low": tick.low,
+                "volume": tick.volume,
+                "bid": tick.bid,
+                "ask": tick.ask,
+                "provider": tick.provider or self.active_provider.provider_name,
+                "provider_mode": self.provider_mode,
+                "provider_timestamp": tick.timestamp,
+                "received_timestamp": time.time(),
+                "source": tick.provider or self.active_provider.provider_name,
+            }
+            canonical_store.update_from_ws(ws_raw)
             await tick_callback(tick)
 
         if hasattr(self.active_provider, "connect_websocket"):
@@ -129,10 +157,11 @@ class MarketDataService:
     async def unsubscribe(self, symbols: List[str]):
         await self.active_provider.unsubscribe(symbols)
 
-    def _enrich_quote_integrity(self, quote: Dict[str, Any], symbol: str) -> Dict[str, Any]:
-        """Apply corporate action live quote semantics and integrity guard metadata."""
-        validated = corporate_action_adjuster.validate_live_quote(quote, symbol)
-        ts = float(validated.get("timestamp") or time.time())
+    def _enrich_and_canonicalize(self, raw_quote: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+        """Apply corporate-action live-quote validation, then push to canonical store."""
+        # Corporate action guard — ONLY validates, never modifies live LTP
+        validated = corporate_action_adjuster.validate_live_quote(raw_quote, symbol)
+        ts = float(validated.get("provider_timestamp") or validated.get("timestamp") or time.time())
         ltp = float(validated.get("ltp") or 0.0)
         p_close = float(validated.get("previous_close") or ltp) if validated.get("previous_close") else None
 
@@ -144,30 +173,39 @@ class MarketDataService:
             current_price=ltp,
             previous_close=p_close,
         )
-
         validated["data_age_seconds"] = integrity_info["data_age_seconds"]
         validated["provenance_status"] = integrity_info["provenance_status"]
         validated["display_label"] = integrity_info["display_label"]
         validated["is_live"] = integrity_info["can_claim_live"]
         validated["anomaly_classification"] = integrity_info["anomaly_classification"]
         validated["classification_reason"] = integrity_info["classification_reason"]
+        validated["provider_mode"] = self.provider_mode
+        validated["provider_timestamp"] = ts
+        validated["received_timestamp"] = time.time()
+
+        # Push to canonical store as REST source
+        canonical_store.update_from_rest(validated)
         return validated
 
     async def get_quote(self, symbol: str) -> Dict[str, Any]:
-        cache_key = f"{symbol}:QUOTE:{self.active_provider.provider_name}"
         try:
             raw_quote = await self.active_provider.get_quote(symbol)
-            enriched = self._enrich_quote_integrity(raw_quote, symbol)
-            self._quote_cache[cache_key] = enriched
-            return enriched
+            return self._enrich_and_canonicalize(raw_quote, symbol)
         except Exception as e:
             logger.error(f"[MARKET DATA HUB] Failed to fetch quote for {symbol}: {str(e)}")
-            if self._quote_cache.get(cache_key):
-                cached = dict(self._quote_cache[cache_key])
-                cached["stale"] = True
-                cached["provenance_status"] = "STALE"
-                cached["is_live"] = False
-                return cached
+            # Check canonical store for a recent quote rather than silently serving stale data
+            canonical = canonical_store.get_canonical_quote(symbol)
+            if canonical and not canonical.is_stale:
+                result = canonical.to_api_dict()
+                result["stale"] = False
+                return result
+            elif canonical:
+                result = canonical.to_api_dict()
+                result["stale"] = True
+                result["provenance_status"] = "STALE"
+                result["is_live"] = False
+                return result
+            # No data at all — raise, never fabricate
             raise e
 
     async def get_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:
@@ -177,23 +215,23 @@ class MarketDataService:
             for q in raw_quotes:
                 if q and q.get("symbol"):
                     sym = q["symbol"]
-                    cache_key = f"{sym}:QUOTE:{self.active_provider.provider_name}"
-                    enriched = self._enrich_quote_integrity(q, sym)
-                    self._quote_cache[cache_key] = enriched
+                    enriched = self._enrich_and_canonicalize(q, sym)
                     results.append(enriched)
             return results
         except Exception as e:
             logger.error(f"[MARKET DATA HUB] Failed to fetch quotes: {str(e)}")
+            # Return canonical store data (marked stale) rather than fabricating
             fallback = []
             for s in symbols:
-                ck = f"{s}:QUOTE:{self.active_provider.provider_name}"
-                if self._quote_cache.get(ck):
-                    c = dict(self._quote_cache[ck])
-                    c["stale"] = True
-                    c["is_live"] = False
-                    fallback.append(c)
+                canonical = canonical_store.get_canonical_quote(s)
+                if canonical:
+                    result = canonical.to_api_dict()
+                    result["stale"] = True
+                    result["is_live"] = False
+                    result["provenance_status"] = "STALE"
+                    fallback.append(result)
                 else:
-                    fallback.append({"symbol": s, "stale": True, "is_live": False, "provenance_status": "DATA_INTEGRITY_ERROR"})
+                    fallback.append({"symbol": s, "ltp": None, "is_live": False, "provenance_status": "UNAVAILABLE", "provider_mode": "UNAVAILABLE"})
             return fallback
 
     async def get_candles(
@@ -253,6 +291,18 @@ class MarketDataService:
             "source": chain.get("source", self.active_provider.provider_name)
         }
 
+    def get_canonical_quote(self, symbol: str):
+        """Return the canonical quote for a symbol, or None if no data."""
+        return canonical_store.get_canonical_quote(symbol)
+
+    def get_diagnostic(self, symbol: str) -> Dict[str, Any]:
+        """Full provenance diagnostic for a symbol."""
+        return canonical_store.get_diagnostic(
+            symbol=symbol,
+            authenticated=self.is_live,
+            connected=self.status_code == "CONNECTED"
+        )
+
     def get_health_status(self) -> Dict[str, Any]:
         ws_conn = False
         reconnects = 0
@@ -271,12 +321,14 @@ class MarketDataService:
         return {
             "active_provider": self.active_provider.provider_name,
             "configured_primary": self.primary_provider_name,
+            "provider_mode": self.provider_mode,
             "status": self.status_code,
             "mode": mode_str,
             "is_live": self.is_live and self.status_code == "CONNECTED",
             "last_tick_timestamp": self._last_tick_time,
             "latency_ms": latency_ms,
             "subscribed_count": len(getattr(self.active_provider, "subscribed_symbols", [])),
+            "canonical_symbols_tracked": len(canonical_store.get_all_canonical()),
             "allow_mock_fallback": self.allow_mock_fallback,
             "websocket": {
                 "connected": ws_conn,

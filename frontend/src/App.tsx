@@ -32,6 +32,8 @@ import { MarketNarrativeBanner } from './components/intelligence/MarketNarrative
 import { IntelligenceTimeline } from './components/intelligence/IntelligenceTimeline';
 import { SecurityIntelligencePanel } from './components/intelligence/SecurityIntelligencePanel';
 import { AICommentary, MarketEvent, MarketNarrative } from './types/intelligence';
+import { PriceTracePanel } from './components/PriceTracePanel';
+import { canonicalQuoteStore } from './stores/canonicalQuoteStore';
 import { 
   NSEStock, 
   MarketIndex, 
@@ -55,16 +57,20 @@ import {
 } from './data/indianMarketData';
 
 import { 
-  generateInitialIndianCandles, 
   IndianCandle, 
   generateLocalIndianAIReport 
 } from './utils/indianTechnicalAnalysis';
 
 function toMarketQuote(raw: any, isIndex = false): MarketQuote {
-  const ltp = raw.price ?? raw.value ?? raw.ltp ?? 0;
-  const prevClose = raw.prevClose ?? raw.previousClose ?? raw.previous_close ?? ltp;
-  const change = raw.change ?? Number((ltp - prevClose).toFixed(2));
-  const changePercent = raw.changePercent ?? raw.change_percent ?? (prevClose > 0 ? Number((((ltp - prevClose) / prevClose) * 100).toFixed(2)) : 0);
+  const ltp = raw.price ?? raw.value ?? raw.ltp ?? null;
+  const prevClose = raw.prevClose ?? raw.previousClose ?? raw.previous_close ?? null;
+  const change = (ltp !== null && prevClose !== null) ? Number((ltp - prevClose).toFixed(2)) : (raw.change ?? null);
+  const changePercent = (ltp !== null && prevClose !== null && prevClose > 0)
+    ? Number((((ltp - prevClose) / prevClose) * 100).toFixed(2))
+    : (raw.changePercent ?? raw.change_percent ?? null);
+
+  const providerTs = raw.provider_timestamp ?? raw.timestamp ?? 0;
+  const receivedAt = raw.receivedAt || Date.now();
 
   return {
     symbol: raw.symbol,
@@ -74,18 +80,18 @@ function toMarketQuote(raw: any, isIndex = false): MarketQuote {
     instrumentType: isIndex ? 'INDEX' : 'EQUITY',
     ltp: ltp,
     previousClose: prevClose,
-    open: raw.open || ltp,
-    high: raw.high || ltp,
-    low: raw.low || ltp,
+    open: raw.open ?? ltp,
+    high: raw.high ?? ltp,
+    low: raw.low ?? ltp,
     close: ltp,
     change: change,
     changePercent: changePercent,
     volume: raw.volume || 0,
-    timestamp: Math.floor(Date.now() / 1000),
-    receivedAt: raw.receivedAt || Date.now(),
-    dataAgeMs: raw.receivedAt ? Math.max(0, Date.now() - raw.receivedAt) : 0,
-    source: (raw.source as MarketProvenance) || 'UPSTOX',
-    marketStatus: raw.marketStatus || 'LIVE'
+    timestamp: providerTs > 0 ? Math.floor(providerTs) : 0,
+    receivedAt: receivedAt,
+    dataAgeMs: providerTs > 0 ? Math.max(0, Date.now() - (providerTs * 1000)) : 0,
+    source: (raw.source as MarketProvenance) || (raw.provider as MarketProvenance) || 'UPSTOX',
+    marketStatus: raw.market_data_status || raw.provenance_status || raw.marketStatus || (raw.is_live ? 'LIVE' : 'UNAVAILABLE')
   };
 }
 
@@ -140,6 +146,7 @@ export default function App() {
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
   const [isLearnOpen, setIsLearnOpen] = useState<boolean>(false);
   const [isReplayOpen, setIsReplayOpen] = useState<boolean>(false);
+  const [isPriceTraceOpen, setIsPriceTraceOpen] = useState<boolean>(false);
 
   // Active Page Workspace State
   const [activePage, setActivePage] = useState<ActivePage>('terminal');
@@ -202,39 +209,52 @@ export default function App() {
             const now = Date.now();
             setLastTickTimeMs(now);
 
+            // 1. Ingest into client-side canonical store
+            quotes.forEach((q) => {
+              if (q && q.symbol) {
+                canonicalQuoteStore.updateFromREST(q);
+              }
+            });
+
+            // 2. Update stock state from canonical store
             setStocks((prev) =>
               (prev || []).map((stock) => {
-                const q = quotes.find((item) => item && (item.symbol === stock.symbol || item.instrument_key === stock.symbol));
-                if (!q || !q.ltp) return stock;
-                const newPrice = q.ltp;
-                const prevClose = q.previous_close || stock.prevClose || newPrice;
-                const priceDiff = newPrice - prevClose;
+                const canonical = canonicalQuoteStore.getQuote(stock.symbol);
+                if (!canonical || canonical.ltp === null || canonical.ltp <= 0) return stock;
+                const newPrice = canonical.ltp;
+                const prevClose = canonical.previous_close || stock.prevClose || newPrice;
                 return {
                   ...stock,
                   price: newPrice,
-                  change: q.change ?? Number((newPrice - prevClose).toFixed(2)),
-                  changePercent: q.change_percent ?? Number(((priceDiff / prevClose) * 100).toFixed(2)),
-                  high: q.high ? Math.max(q.high, newPrice) : stock.high,
-                  low: q.low ? Math.min(q.low, newPrice) : stock.low,
-                  open: q.open || stock.open,
+                  change: canonical.change ?? (prevClose > 0 ? Number((newPrice - prevClose).toFixed(2)) : 0),
+                  changePercent: canonical.change_percent ?? (prevClose > 0 ? Number((((newPrice - prevClose) / prevClose) * 100).toFixed(2)) : 0),
+                  high: canonical.high ?? stock.high ?? newPrice,
+                  low: canonical.low ?? stock.low ?? newPrice,
+                  open: canonical.open ?? stock.open ?? newPrice,
                   prevClose: prevClose,
-                  vwap: q.vwap ?? stock.vwap ?? 0,
-                  source: q.source || q.provider || stock.source,
+                  source: canonical.provider,
+                  isLive: canonical.is_live,
+                  providerTimestamp: canonical.provider_timestamp,
+                  dataAgeSeconds: canonical.data_age_seconds,
+                  marketStatus: canonical.market_data_status,
                 };
               })
             );
 
+            // 3. Update index state from canonical store
             setIndices((prev) =>
               (prev || []).map((idx) => {
-                const q = quotes.find((item) => item && (item.symbol === idx.symbol || item.instrument_key === idx.symbol));
-                if (!q || !q.ltp) return idx;
-                const newLtp = q.ltp;
-                const pClose = q.previous_close || idx.value || newLtp;
+                const canonical = canonicalQuoteStore.getQuote(idx.symbol);
+                if (!canonical || canonical.ltp === null || canonical.ltp <= 0) return idx;
+                const newLtp = canonical.ltp;
+                const pClose = canonical.previous_close || idx.value || newLtp;
                 return {
                   ...idx,
                   value: newLtp,
-                  change: q.change ?? Number((newLtp - pClose).toFixed(2)),
-                  changePercent: q.change_percent ?? Number((((newLtp - pClose) / pClose) * 100).toFixed(2)),
+                  change: canonical.change ?? (pClose > 0 ? Number((newLtp - pClose).toFixed(2)) : 0),
+                  changePercent: canonical.change_percent ?? (pClose > 0 ? Number((((newLtp - pClose) / pClose) * 100).toFixed(2)) : 0),
+                  isLive: canonical.is_live,
+                  providerTimestamp: canonical.provider_timestamp,
                 };
               })
             );
@@ -247,7 +267,7 @@ export default function App() {
       }
     };
     fetchRealQuotes();
-    const interval = setInterval(fetchRealQuotes, 6000);
+    const interval = setInterval(fetchRealQuotes, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -424,26 +444,36 @@ export default function App() {
             const tick = payload.data;
             setLastTickTimeMs(Date.now());
 
-            setStocks((prev) =>
-              (prev || []).map((s) => {
-                if (!s || !s.symbol) return s;
-                if (s.symbol === tick.symbol || s.symbol === tick.instrument_key) {
-                  const newPrice = tick.ltp;
-                  const prevClose = tick.previous_close || s.prevClose || newPrice;
-                  const priceDiff = newPrice - prevClose;
-                  return {
-                    ...s,
-                    price: newPrice,
-                    change: Number((newPrice - prevClose).toFixed(2)),
-                    changePercent: Number(((priceDiff / prevClose) * 100).toFixed(2)),
-                    high: Math.max(s.high, newPrice),
-                    low: Math.min(s.low, newPrice),
-                    vwap: tick.vwap || s.vwap || newPrice,
-                  };
-                }
-                return s;
-              })
-            );
+            // 1. Ingest tick into client-side canonical store
+            const canonical = canonicalQuoteStore.updateFromWS(tick);
+
+            // 2. Update stock state if matched
+            if (canonical && canonical.ltp !== null && canonical.ltp > 0) {
+              const newPrice = canonical.ltp;
+              setStocks((prev) =>
+                (prev || []).map((s) => {
+                  if (!s || !s.symbol) return s;
+                  if (s.symbol === tick.symbol || s.symbol === tick.instrument_key) {
+                    const prevClose = canonical.previous_close || s.prevClose || newPrice;
+                    return {
+                      ...s,
+                      price: newPrice,
+                      change: canonical.change ?? (prevClose > 0 ? Number((newPrice - prevClose).toFixed(2)) : 0),
+                      changePercent: canonical.change_percent ?? (prevClose > 0 ? Number((((newPrice - prevClose) / prevClose) * 100).toFixed(2)) : 0),
+                      high: canonical.high ?? s.high ?? newPrice,
+                      low: canonical.low ?? s.low ?? newPrice,
+                      open: canonical.open ?? s.open ?? newPrice,
+                      prevClose: prevClose,
+                      source: canonical.provider,
+                      isLive: canonical.is_live,
+                      providerTimestamp: canonical.provider_timestamp,
+                      marketStatus: canonical.market_data_status,
+                    };
+                  }
+                  return s;
+                })
+              );
+            }
           }
         } catch {
           // ignore parse errors
@@ -745,6 +775,7 @@ export default function App() {
         indices={indexQuotes}
         feedStatus={feedStatus}
         onSelectIndex={() => {}}
+        onOpenAudit={() => setIsPriceTraceOpen(true)}
       />
 
       {/* 2. Main Terminal Header */}
@@ -938,6 +969,12 @@ export default function App() {
       <MarketReplayModal
         isOpen={isReplayOpen}
         onClose={() => setIsReplayOpen(false)}
+        symbol={selectedSymbol}
+      />
+
+      <PriceTracePanel
+        isOpen={isPriceTraceOpen}
+        onClose={() => setIsPriceTraceOpen(false)}
         symbol={selectedSymbol}
       />
     </div>

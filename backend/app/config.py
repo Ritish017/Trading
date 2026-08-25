@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     # Broker Configuration & Upstox Market Data Settings
     active_broker_provider: str = "UPSTOX" # UPSTOX, FYERS, DHAN, MOCK
-    allow_mock_fallback: bool = False
+    allow_mock_fallback: bool = True
     
     # Upstox Analytics Token Integration
     upstox_enabled: bool = True

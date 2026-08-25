@@ -1,3 +1,5 @@
+import React, { useState, useRef } from 'react';
+import { NSEStock } from '../types/indianMarket';
 import { IndianCandle, calculateEMA, calculateVWAP } from '../utils/indianTechnicalAnalysis';
 import { Layers, TrendingUp, BarChart2, Activity, Eye, Zap, ShieldCheck, AlertCircle } from 'lucide-react';
 
@@ -412,8 +414,9 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
           )}
 
           {/* Current Live Price Tag on Right Y-Axis */}
-          {(() => {
+          {currentPrice && currentPrice > 0 && minPrice > 0 && priceRange > 0 && (() => {
             const currentY = priceChartHeight - ((currentPrice - minPrice) / priceRange) * priceChartHeight;
+            if (isNaN(currentY)) return null;
             return (
               <g>
                 <line
@@ -554,6 +557,14 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
             </g>
           )}
         </svg>
+
+        {candleList.length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#14151b]/85 backdrop-blur-xs text-stone-400 font-mono text-xs space-y-2 select-none">
+            <AlertCircle className="w-8 h-8 text-amber-400 opacity-60 animate-pulse" />
+            <span className="font-bold text-stone-200 text-sm">NO MARKET CANDLE DATA</span>
+            <span className="text-[11px] text-stone-500">Awaiting canonical exchange candle feed for {sym} ({timeframe})</span>
+          </div>
+        )}
       </div>
 
       {/* 3. Bottom Indicator Toggles & Provenance Status */}

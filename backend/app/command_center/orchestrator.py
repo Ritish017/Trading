@@ -25,7 +25,8 @@ from backend.app.strategy_engine.registry import STRATEGY_REGISTRY
 from backend.app.strategy_engine.research_engine import HistoricalResearchEngine
 from backend.app.quant_engine.regime import classify_market_regime
 from backend.app.paper_engine.decision_engine import continuous_decision_engine
-from backend.app.broker_providers.dev_mock import INITIAL_PRICES
+from backend.app.broker_providers.dev_mock import _symbol_basis
+from backend.app.market_data.canonical_store import canonical_store
 from backend.app.command_center.models import (
     ResearchWorkflowStatus,
     MarketSnapshot,
@@ -58,7 +59,7 @@ TOP_WATCHLIST_SYMBOLS = [
 
 def generate_canonical_candles(symbol: str, count: int = 120, base_price: Optional[float] = None) -> List[Dict[str, Any]]:
     """Generates canonical historical candle sequence obeying financial invariants."""
-    p0 = base_price or INITIAL_PRICES.get(symbol, 2500.0)
+    p0 = base_price or (canonical_store.get_canonical_quote(symbol).ltp if canonical_store.get_canonical_quote(symbol) else _symbol_basis(symbol))
     now = int(time.time())
     candles: List[Dict[str, Any]] = []
 
@@ -582,10 +583,12 @@ class ResearchCommandCenterOrchestrator:
         watchlist: List[WatchlistItem] = []
         for sym in TOP_WATCHLIST_SYMBOLS:
             is_active_sym = (sym == symbol)
+            cq = canonical_store.get_canonical_quote(sym)
+            sym_price = curr_price if is_active_sym else (cq.ltp if cq and cq.ltp else _symbol_basis(sym))
             watchlist.append(WatchlistItem(
                 symbol=sym,
                 company_name=sym.replace(".NS", ""),
-                price=curr_price if is_active_sym else INITIAL_PRICES.get(sym, 2500.0),
+                price=sym_price,
                 change_pct=change_pct if is_active_sym else 0.85,
                 regime=regime if is_active_sym else "TRENDING_BULLISH",
                 active_strategies_count=active_cnt if is_active_sym else 8,
@@ -600,9 +603,11 @@ class ResearchCommandCenterOrchestrator:
         cross_stock: List[CrossStockComparisonRow] = []
         for sym in TOP_WATCHLIST_SYMBOLS[:5]:
             is_curr = (sym == symbol)
+            cq = canonical_store.get_canonical_quote(sym)
+            row_price = curr_price if is_curr else (cq.ltp if cq and cq.ltp else _symbol_basis(sym))
             cross_stock.append(CrossStockComparisonRow(
                 symbol=sym,
-                price=curr_price if is_curr else INITIAL_PRICES.get(sym, 2400.0),
+                price=row_price,
                 regime=regime if is_curr else "TRENDING_BULLISH",
                 active_strategies=active_cnt if is_curr else 7,
                 rule_coverage_pct=alignment_score.rule_coverage_pct if is_curr else 62.5,

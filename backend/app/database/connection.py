@@ -7,11 +7,15 @@ from backend.app.config import settings
 
 logger = logging.getLogger(__name__)
 
+import os
+
 # Base declarative class
 Base = declarative_base()
 
 # Async Engine Creation (supports PostgreSQL + asyncpg or SQLite for dev)
-database_url = getattr(settings, "database_url", None) or "sqlite+aiosqlite:///./apex_quant.db"
+is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+default_db_path = "/tmp/apex_quant.db" if is_vercel else "./apex_quant.db"
+database_url = getattr(settings, "database_url", None) or f"sqlite+aiosqlite:///{default_db_path}"
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
 

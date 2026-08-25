@@ -11,7 +11,7 @@ CRITICAL INVARIANTS:
 
 import time
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from backend.app.paper_engine.models import (
     ResearchLifecycleState,
@@ -77,7 +77,7 @@ class ResearchLifecycleManager:
         candidate_id: str,
         new_state: ResearchLifecycleState,
         reason: str = "",
-    ) -> Tuple_Validation:
+    ) -> Tuple[bool, str]:
         cand = self.candidates.get(candidate_id)
         if not cand:
             return False, f"Candidate {candidate_id} not found."

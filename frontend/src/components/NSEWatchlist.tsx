@@ -222,12 +222,16 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
                   <div className="flex items-center space-x-1.5 shrink-0 text-right">
                     <div className="flex flex-col items-end">
                       <span className="font-black font-mono text-xs text-stone-100 whitespace-nowrap">
-                        ₹{priceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {priceVal > 0 ? `₹${priceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-stone-600 animate-pulse">—</span>}
                       </span>
-                      <div className={`flex items-center space-x-0.5 text-[10px] font-mono font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isPos ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                        <span>{isPos ? '+' : ''}{changePct.toFixed(2)}%</span>
-                      </div>
+                      {priceVal > 0 && stock.changePercent !== undefined && stock.changePercent !== null ? (
+                        <div className={`flex items-center space-x-0.5 text-[10px] font-mono font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {isPos ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                          <span>{isPos ? '+' : ''}{changePct.toFixed(2)}%</span>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] font-mono text-stone-600">—</span>
+                      )}
                     </div>
 
                     <button
@@ -296,14 +300,18 @@ export const NSEWatchlist: React.FC<NSEWatchlistProps> = ({
                       </td>
 
                       <td className="py-2 font-mono font-black text-stone-100 text-xs whitespace-nowrap">
-                        ₹{priceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {priceVal > 0 ? `₹${priceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-stone-600 animate-pulse">—</span>}
                       </td>
 
                       <td className="py-2 font-mono whitespace-nowrap">
-                        <div className={`flex items-center space-x-1 text-xs font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {isPos ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                          <span>{isPos ? '+' : ''}{changePct.toFixed(2)}%</span>
-                        </div>
+                        {priceVal > 0 && stock.changePercent !== undefined && stock.changePercent !== null ? (
+                          <div className={`flex items-center space-x-1 text-xs font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {isPos ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                            <span>{isPos ? '+' : ''}{changePct.toFixed(2)}%</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs font-mono text-stone-600">—</span>
+                        )}
                       </td>
 
                       <td className="py-2 pr-2">

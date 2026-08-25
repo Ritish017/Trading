@@ -4,7 +4,7 @@ import uuid
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from google import genai
+from backend.app.ai_engine.gemini_client import genai
 
 from backend.app.config import settings
 from backend.app.ai_engine.contracts import (

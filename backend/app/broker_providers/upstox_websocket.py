@@ -3,8 +3,11 @@ import asyncio
 import json
 import time
 import struct
-from typing import Callable, Awaitable, List, Optional, Set
-import websockets
+from typing import Callable, Awaitable, List, Optional, Set, Any
+try:
+    import websockets
+except ImportError:
+    websockets = None
 from backend.app.broker_providers.base import NormalizedTick
 from backend.app.market.instruments import get_instrument_key, get_symbol_from_key
 
@@ -19,7 +22,7 @@ class UpstoxWebSocketClient:
     def __init__(self, token: str, get_ws_url_fn: Callable[[], Awaitable[str]]):
         self.token = token
         self.get_ws_url_fn = get_ws_url_fn
-        self.ws: Optional[websockets.WebSocketClientProtocol] = None
+        self.ws: Optional[Any] = None
         self.subscribed_keys: Set[str] = set()
         self.callback: Optional[Callable[[NormalizedTick], Awaitable[None]]] = None
         self.is_connected: bool = False
@@ -29,6 +32,9 @@ class UpstoxWebSocketClient:
         self.last_tick_time: Optional[float] = None
 
     async def start(self, callback: Callable[[NormalizedTick], Awaitable[None]]) -> bool:
+        if websockets is None:
+            logger.info("[UPSTOX WS] websockets library not available; websocket streaming disabled.")
+            return False
         self.callback = callback
         self._running = True
         self._loop_task = asyncio.create_task(self._connect_and_listen())

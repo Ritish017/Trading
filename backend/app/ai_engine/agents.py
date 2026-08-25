@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional, List
-from google import genai
+from backend.app.ai_engine.gemini_client import genai
 from backend.app.config import settings
 
 logger = logging.getLogger(__name__)

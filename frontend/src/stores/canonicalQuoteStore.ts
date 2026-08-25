@@ -11,7 +11,17 @@ class ClientCanonicalQuoteStore {
   private listeners: Set<() => void> = new Set();
 
   public getQuote(symbol: string): CanonicalQuote | undefined {
-    return this.quotes.get(symbol);
+    if (!symbol) return undefined;
+    const direct = this.quotes.get(symbol);
+    if (direct) return direct;
+    
+    // Alias lookups
+    const stripped = symbol.replace('.NS', '').replace('.BO', '');
+    return (
+      this.quotes.get(stripped) ||
+      this.quotes.get(`${stripped}.NS`) ||
+      this.quotes.get(`${stripped}.BO`)
+    );
   }
 
   public getAllQuotes(): Record<string, CanonicalQuote> {
@@ -28,7 +38,7 @@ class ClientCanonicalQuoteStore {
     if (ltp === null || ltp === undefined || ltp <= 0) return null;
 
     const symbol = rawQuote.symbol;
-    const existing = this.quotes.get(symbol);
+    const existing = this.getQuote(symbol);
     const incomingTs = Number(rawQuote.provider_timestamp || rawQuote.timestamp || 0);
 
     // If existing quote has a newer provider timestamp, do not downgrade
@@ -71,6 +81,9 @@ class ClientCanonicalQuoteStore {
     };
 
     this.quotes.set(symbol, canonical);
+    const stripped = symbol.replace('.NS', '').replace('.BO', '');
+    this.quotes.set(stripped, canonical);
+    this.quotes.set(`${stripped}.NS`, canonical);
     this.notify();
     return canonical;
   }

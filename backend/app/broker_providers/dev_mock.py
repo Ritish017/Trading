@@ -179,7 +179,18 @@ class DevMockProvider(MarketDataProvider):
     async def get_market_information(self, info_type: str, symbol: Optional[str] = None) -> Dict[str, Any]:
         base = {"source": "MOCK", "provider_mode": PROVIDER_MODE, "is_live": False, "market_status": "SIMULATED"}
         if info_type == "fii-dii":
-            return {**base, "fiiCashNetCr": 0, "diiCashNetCr": 0, "timestamp": time.time()}
+            import datetime
+            return {
+                **base,
+                "date": datetime.datetime.now().strftime("%d %b %Y"),
+                "fiiCashNetCr": -1245.8,
+                "diiCashNetCr": 2830.4,
+                "fiiIndexFuturesCr": 380.5,
+                "fiiIndexOptionsCr": 1420.0,
+                "fiiStockFuturesCr": -210.0,
+                "timestamp": time.time(),
+                "status": "AVAILABLE"
+            }
         if info_type == "pcr":
             return {**base, "symbol": symbol or "NIFTY", "pcr": None}
         if info_type == "max-pain":

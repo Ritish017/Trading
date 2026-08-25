@@ -252,14 +252,11 @@ class MarketDataService:
 
     async def get_fii_dii(self) -> Dict[str, Any]:
         if hasattr(self.active_provider, "get_market_information"):
-            return await self.active_provider.get_market_information("fii-dii")
-        return {
-            "status": "UNAVAILABLE",
-            "fiiCashNetCr": None,
-            "diiCashNetCr": None,
-            "source": self.active_provider.provider_name,
-            "is_live": False
-        }
+            data = await self.active_provider.get_market_information("fii-dii")
+            if data and data.get("fiiCashNetCr") is not None:
+                return data
+        from backend.app.market_data.institutional_feed import get_fii_dii_flow
+        return await get_fii_dii_flow()
 
     async def get_open_interest(self, symbol: str) -> Dict[str, Any]:
         if hasattr(self.active_provider, "get_market_information"):

@@ -116,6 +116,10 @@ class UpstoxProvider(MarketDataProvider):
         if info_type == "option-chain":
             return await self.get_option_chain(symbol or "NIFTY")
         
+        if info_type == "fii-dii":
+            from backend.app.market_data.institutional_feed import get_fii_dii_flow
+            return await get_fii_dii_flow()
+        
         # Market info structure
         quote = await self.get_quote(symbol or "NIFTY 50")
         return {

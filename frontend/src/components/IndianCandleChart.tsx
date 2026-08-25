@@ -49,7 +49,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
 
   // Strict Candle Validation
   const validCandles = (candles || []).filter((c) => {
-    if (!c || typeof c.open !== 'number' || typeof c.close !== 'number') return false;
+    if (!c || typeof c.open !== 'number' || typeof c.close !== 'number' || isNaN(c.open) || isNaN(c.close)) return false;
     const maxOC = Math.max(c.open, c.close);
     const minOC = Math.min(c.open, c.close);
     return c.high >= maxOC && c.low <= minOC;
@@ -64,9 +64,9 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
 
   // Active or Hovered Candle for Inspection Badge
   const activeIndex = hoverIndex !== null && hoverIndex >= 0 && hoverIndex < candleList.length ? hoverIndex : candleList.length - 1;
-  const activeCandle = candleList[activeIndex] || candleList[candleList.length - 1];
-  const activeCandleChange = activeCandle.close - activeCandle.open;
-  const activeCandleChangePct = activeCandle.open > 0 ? (activeCandleChange / activeCandle.open) * 100 : 0;
+  const activeCandle = candleList.length > 0 ? (candleList[activeIndex] || candleList[candleList.length - 1]) : null;
+  const activeCandleChange = activeCandle ? activeCandle.close - activeCandle.open : 0;
+  const activeCandleChangePct = activeCandle && activeCandle.open > 0 ? (activeCandleChange / activeCandle.open) * 100 : 0;
 
   // Chart Layout Calculations
   const chartWidth = 900;
@@ -76,14 +76,18 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
   const volumeGap = 15;
   const volumeChartTop = priceChartHeight + volumeGap;
 
-  const minPrice = Math.min(...candleList.map((c) => c.low)) * 0.999;
-  const maxPrice = Math.max(...candleList.map((c) => c.high)) * 1.001;
+  const minPrice = candleList.length > 0
+    ? Math.min(...candleList.map((c) => c.low)) * 0.999
+    : (currentPrice ? currentPrice * 0.98 : 100);
+  const maxPrice = candleList.length > 0
+    ? Math.max(...candleList.map((c) => c.high)) * 1.001
+    : (currentPrice ? currentPrice * 1.02 : 105);
   const priceRange = maxPrice - minPrice || 1;
 
-  const maxVolume = Math.max(
+  const maxVolume = candleList.length > 0 ? Math.max(
     ...candleList.map((c) => c.volume ?? (c.volumeLakhs ? c.volumeLakhs * 100000 : 5000)),
     1000
-  );
+  ) : 1000;
 
   // Format Timestamps for X-Axis Labels and Crosshairs
   const formatTimeLabel = (timestamp: number | string, tf: string) => {
@@ -186,17 +190,23 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
         </div>
 
         {/* Dynamic OHLCV Live / Hover Inspector Banner */}
-        <div className="flex items-center space-x-2 font-mono text-[11px] bg-[#121318] px-3 py-1.5 rounded-xl border border-stone-800/80">
-          <span className="text-stone-500 text-[10px]">
-            {formatTimeLabel(activeCandle.time, timeframe) || 'Latest'}
-          </span>
-          <div className="h-3 w-[1px] bg-stone-800 mx-1" />
-          <span className="text-stone-400">O: <strong className="text-stone-200">₹{activeCandle.open.toFixed(2)}</strong></span>
-          <span className="text-stone-400">H: <strong className="text-emerald-400">₹{activeCandle.high.toFixed(2)}</strong></span>
-          <span className="text-stone-400">L: <strong className="text-rose-400">₹{activeCandle.low.toFixed(2)}</strong></span>
-          <span className="text-stone-400">C: <strong className="text-stone-200">₹{activeCandle.close.toFixed(2)}</strong></span>
-          <span className="text-stone-400 hidden lg:inline">Vol: <strong className="text-amber-400">{activeVolFormatted}</strong></span>
-        </div>
+        {activeCandle ? (
+          <div className="flex items-center space-x-2 font-mono text-[11px] bg-[#121318] px-3 py-1.5 rounded-xl border border-stone-800/80">
+            <span className="text-stone-500 text-[10px]">
+              {formatTimeLabel(activeCandle.time, timeframe) || 'Latest'}
+            </span>
+            <div className="h-3 w-[1px] bg-stone-800 mx-1" />
+            <span className="text-stone-400">O: <strong className="text-stone-200">₹{activeCandle.open.toFixed(2)}</strong></span>
+            <span className="text-stone-400">H: <strong className="text-emerald-400">₹{activeCandle.high.toFixed(2)}</strong></span>
+            <span className="text-stone-400">L: <strong className="text-rose-400">₹{activeCandle.low.toFixed(2)}</strong></span>
+            <span className="text-stone-400">C: <strong className="text-stone-200">₹{activeCandle.close.toFixed(2)}</strong></span>
+            <span className="text-stone-400 hidden lg:inline">Vol: <strong className="text-amber-400">{activeVolFormatted}</strong></span>
+          </div>
+        ) : (
+          <div className="flex items-center space-x-2 font-mono text-[11px] bg-[#121318] px-3 py-1.5 rounded-xl border border-stone-800/80 text-stone-500">
+            <span className="text-[10px]">Syncing market candles...</span>
+          </div>
+        )}
 
         {/* Timeframe Selector & Chart Controls */}
         <div className="flex items-center space-x-2">
@@ -512,7 +522,7 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
                       fontWeight="bold"
                       textAnchor="middle"
                     >
-                      {formatTimeLabel(activeCandle.time, timeframe)}
+                      {activeCandle ? formatTimeLabel(activeCandle.time, timeframe) : ''}
                     </text>
                   </g>
                 );

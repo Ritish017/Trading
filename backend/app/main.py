@@ -33,6 +33,7 @@ from backend.app.ai_engine.contracts import (
 from backend.app.strategy_engine.registry import STRATEGY_REGISTRY
 from backend.app.strategy_engine.evaluator import evaluate_all_strategies, evaluate_strategies_observatory
 from backend.app.ai_engine.agents import MarketResearchAgent, PersonalTradingCoach, StrategyResearchAgent, StrategyCopilotAgent
+from backend.app.security.auth import verify_api_key, verify_api_key_optional, authorize_account_access, AccountContext
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
@@ -43,9 +44,14 @@ app = FastAPI(
     description="Production-grade personal quantitative research & trading engine API for Indian Equities (NSE/BSE)."
 )
 
+# Configure explicit CORS origins adhering to W3C credentialed CORS specifications
+allowed_origins = [o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()]
+if not allowed_origins:
+    allowed_origins = ["http://localhost:5173", "http://localhost:3000", "https://apex-trading-lab.vercel.app"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,6 +99,7 @@ async def ensure_initialized():
     if not _initialized:
         try:
             await init_db()
+            await paper_engine.load_from_db()
         except Exception as e:
             logger.warning(f"init_db non-fatal error: {e}")
         try:
@@ -326,66 +333,19 @@ async def get_max_pain(symbol: str):
 
 @app.get("/api/market/announcements")
 async def get_sebi_announcements():
-    return [
-        {
-            "id": "ANN-RELIANCE-01",
-            "companySymbol": "RELIANCE.NS",
-            "companyName": "Reliance Industries Ltd",
-            "headline": "Jio Platforms enters strategic 5G enterprise infrastructure expansion partnership",
-            "category": "Corporate Action",
-            "timestamp": "Today, 14:15 IST",
-            "impact": "Positive",
-            "details": "RIL digital services vertical accelerates commercial deployment across tier-2 enterprise corridors.",
-            "sourceUrl": "https://www.bseindia.com"
-        },
-        {
-            "id": "ANN-TCS-02",
-            "companySymbol": "TCS.NS",
-            "companyName": "Tata Consultancy Services",
-            "headline": "TCS signs multi-year digital transformation & cloud modernization mandate with European Bank",
-            "category": "Corporate Action",
-            "timestamp": "Today, 11:30 IST",
-            "impact": "Positive",
-            "details": "Contract valued over $450M across 5-year execution lifecycle with high margin recurring revenue.",
-            "sourceUrl": "https://www.nseindia.com"
-        },
-        {
-            "id": "ANN-HDFC-03",
-            "companySymbol": "HDFCBANK.NS",
-            "companyName": "HDFC Bank Ltd",
-            "headline": "RBI approves appointment of Executive Director; capital adequacy ratio maintained at 19.3%",
-            "category": "SEBI Disclosure",
-            "timestamp": "Today, 09:45 IST",
-            "impact": "Positive",
-            "details": "Tier-1 capital buffer remains resilient with low gross NPA trajectory post-merger stabilization.",
-            "sourceUrl": "https://www.nseindia.com"
-        },
-        {
-            "id": "ANN-INFY-04",
-            "companySymbol": "INFY.NS",
-            "companyName": "Infosys Ltd",
-            "headline": "Infosys expands generative AI suite Topaz integration with Global Retail Conglomerate",
-            "category": "Corporate Action",
-            "timestamp": "Yesterday, 16:20 IST",
-            "impact": "Positive",
-            "details": "Deployment of agentic AI workflows expected to enhance operating margins across cloud consulting.",
-            "sourceUrl": "https://www.nseindia.com"
-        },
-        {
-            "id": "ANN-TATAMOTORS-05",
-            "companySymbol": "TATAMOTORS.NS",
-            "companyName": "Tata Motors Ltd",
-            "headline": "Commercial Vehicle business demerger scheme filed with NCLT and stock exchanges",
-            "category": "Board Meeting",
-            "timestamp": "Yesterday, 15:10 IST",
-            "impact": "Positive",
-            "details": "Pure-play separation into Passenger Vehicles (inc. EV/JLR) and Commercial Vehicles advancing on schedule.",
-            "sourceUrl": "https://www.nseindia.com"
-        }
-    ]
+    """
+    Returns authentic corporate announcements and regulatory disclosures.
+    When a verified live disclosure stream is unavailable, truthfully returns an empty list
+    rather than fabricating synthetic announcements with dynamic timestamps.
+    """
+    return []
 
 @app.get("/api/market/breadth")
 async def get_market_breadth():
+    """
+    Computes market breadth dynamically from tracked liquid basket.
+    Never fabricates synthetic advances/declines or circuits.
+    """
     tracked_syms = [
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
         "SBIN.NS", "TATAMOTORS.NS", "BHARTIARTL.NS", "ITC.NS", "KOTAKBANK.NS",
@@ -395,11 +355,29 @@ async def get_market_breadth():
         quotes = await market_data_service.get_quotes(tracked_syms)
     except Exception:
         quotes = []
-        
+
+    valid_quotes = [q for q in quotes if q and q.get("ltp") is not None]
+    if not valid_quotes:
+        return {
+            "universe": "NSE Liquid Basket",
+            "advances": 0,
+            "declines": 0,
+            "unchanged": 0,
+            "ratio": 1.0,
+            "new52WeekHighs": None,
+            "new52WeekLows": None,
+            "upperCircuits": None,
+            "lowerCircuits": None,
+            "source": market_data_service.active_provider.provider_name,
+            "status": "UNAVAILABLE",
+            "is_live": False,
+            "error": "Verified market quotes unavailable for breadth calculation",
+        }
+
     advances = 0
     declines = 0
     unchanged = 0
-    for q in quotes:
+    for q in valid_quotes:
         chg = q.get("change")
         if chg is None and q.get("ltp") and q.get("previous_close"):
             chg = q.get("ltp") - q.get("previous_close")
@@ -411,22 +389,23 @@ async def get_market_breadth():
             else:
                 unchanged += 1
 
-    if advances == 0 and declines == 0:
-        advances, declines, unchanged = 28, 22, 0
+    ratio = round(advances / declines, 2) if declines > 0 else (float(advances) if advances > 0 else 1.0)
+    is_live = market_data_service.is_live
+    status = "LIVE" if is_live else ("SIMULATED" if market_data_service.provider_mode == "SIMULATED" else "HISTORICAL")
 
-    ratio = round(advances / declines, 2) if declines > 0 else (advances if advances > 0 else 1.0)
     return {
-        "universe": "NSE NIFTY 50 Liquid Basket",
+        "universe": f"NSE Liquid Basket ({len(valid_quotes)} tracked)",
         "advances": advances,
         "declines": declines,
         "unchanged": unchanged,
         "ratio": ratio,
-        "new52WeekHighs": 34,
-        "new52WeekLows": 2,
-        "upperCircuits": 14,
-        "lowerCircuits": 3,
+        "new52WeekHighs": None,
+        "new52WeekLows": None,
+        "upperCircuits": None,
+        "lowerCircuits": None,
         "source": market_data_service.active_provider.provider_name,
-        "status": "LIVE" if market_data_service.is_live else "SIMULATED"
+        "status": status,
+        "is_live": is_live,
     }
 
 # --- Quantitative Analysis API ---
@@ -674,7 +653,7 @@ async def run_ai_market_analysis(req: AIAnalysisRequest):
     return await get_symbol_intelligence(req.symbol)
 
 @app.post("/api/ai/trading-coach")
-async def run_trading_coach(trades: List[Dict[str, Any]]):
+async def run_trading_coach(trades: List[Dict[str, Any]], auth: AccountContext = Depends(verify_api_key)):
     result = await trading_coach_agent.analyze_trader_journal(trades)
     return result
 
@@ -686,26 +665,68 @@ async def generate_strategy_hypothesis(payload: Dict[str, str]):
 
 # --- Paper Trading API ---
 @app.post("/api/paper/order")
-async def place_paper_order(order: PaperOrderRequest):
+async def place_paper_order(order: PaperOrderRequest, auth: AccountContext = Depends(verify_api_key)):
+    authorize_account_access(auth, order.account_id)
+    target_account = order.account_id or auth.account_id
     res = paper_engine.execute_order(order)
-    trader_profile_mgr.record_trade(order.dict())
+    if res.get("status") == "FILLED":
+        await paper_engine.sync_order_to_db(order.model_dump(), res["position"], target_account)
+    trader_profile_mgr.record_trade(order.model_dump())
     return res
 
 @app.get("/api/paper/positions")
-async def get_paper_positions():
-    return paper_engine.get_portfolio_summary()
+async def get_paper_positions(account_id: Optional[str] = None, auth: Optional[AccountContext] = Depends(verify_api_key_optional)):
+    """Returns the canonical unified paper trading portfolio."""
+    if account_id and auth:
+        authorize_account_access(auth, account_id)
+    summary = paper_engine.get_portfolio_summary()
+    if not summary.get("performance", {}).get("total_trades"):
+        summary["performance"] = paper_bridge.get_performance_summary()
+    return summary
 
 @app.post("/api/paper/close/{pos_id}")
-async def close_paper_position(pos_id: str, payload: Dict[str, float]):
+async def close_paper_position(pos_id: str, payload: Dict[str, Any], auth: AccountContext = Depends(verify_api_key)):
+    target_account = payload.get("account_id")
+    authorize_account_access(auth, target_account)
     close_price = payload.get("close_price")
     res = paper_engine.close_position(pos_id, close_price)
+    if res.get("status") == "CLOSED" and paper_engine.closed_trades:
+        await paper_engine.sync_close_to_db(pos_id, paper_engine.closed_trades[-1], target_account or auth.account_id)
     return res
 
 @app.post("/api/paper/reset")
-async def reset_paper_portfolio(payload: Optional[Dict[str, float]] = None):
+async def reset_paper_portfolio(payload: Optional[Dict[str, Any]] = None, auth: AccountContext = Depends(verify_api_key)):
+    target_account = payload.get("account_id") if payload else None
+    authorize_account_access(auth, target_account)
     init_cap = (payload.get("initialCapital") if payload else None) or settings.default_paper_capital
+    logger.warning(
+        "[AUDIT] PAPER PORTFOLIO RESET TRIGGERED | Account: %s | Requested Capital: ₹%.2f | Prior Capital: ₹%.2f | Open Positions: %d",
+        target_account or auth.account_id, init_cap, paper_engine.capital, len(paper_engine.positions)
+    )
     paper_engine.reset_portfolio(init_cap)
+    await paper_engine.sync_reset_to_db(target_account or auth.account_id)
     return paper_engine.get_portfolio_summary()
+
+class PaperCapitalRequest(BaseModel):
+    capital: float
+    account_id: Optional[str] = None
+
+@app.post("/api/paper/capital")
+async def update_paper_capital(req: PaperCapitalRequest, auth: AccountContext = Depends(verify_api_key)):
+    authorize_account_access(auth, req.account_id)
+    target_account = req.account_id or auth.account_id
+    if req.capital <= 0:
+        raise HTTPException(status_code=400, detail="Capital must be strictly positive.")
+    paper_engine.capital = req.capital
+    try:
+        from backend.app.database.connection import AsyncSessionLocal
+        from backend.app.database.repositories.paper_repository import PaperRepository
+        async with AsyncSessionLocal() as s:
+            repo = PaperRepository(s)
+            await repo.update_account_capital(target_account, req.capital)
+    except Exception as e:
+        logger.warning(f"[DB PAPER] Failed to persist capital update: {e}")
+    return {"success": True, "capital": paper_engine.capital, "available_capital": paper_engine.available_capital}
 
 # --- Journal Analytics API ---
 @app.post("/api/journal/analytics")
@@ -1320,7 +1341,7 @@ class RecordExperimentRequest(BaseModel):
 
 
 @app.post("/api/strategies/research/experiments")
-async def record_experiment(req: RecordExperimentRequest):
+async def record_experiment(req: RecordExperimentRequest, auth: AccountContext = Depends(verify_api_key)):
     """Records an immutable research experiment item in the ledger."""
     record = robustness_engine.record_experiment(
         strategy_id=req.strategy_id,
@@ -1521,13 +1542,6 @@ from backend.app.data_engine.health_monitor import data_health_monitor
 from backend.app.ai_engine.agents import paper_copilot_agent
 
 
-@app.get("/api/paper/positions")
-async def get_paper_positions():
-    """Returns all active and historical paper trading positions."""
-    return {
-        "positions": [asdict(p) for p in paper_bridge.positions.values()],
-        "performance": paper_bridge.get_performance_summary(),
-    }
 
 
 @app.get("/api/paper/performance")
@@ -1549,7 +1563,7 @@ class PaperTransitionRequest(BaseModel):
 
 
 @app.post("/api/paper/lifecycle/transition")
-async def transition_candidate_lifecycle(req: PaperTransitionRequest):
+async def transition_candidate_lifecycle(req: PaperTransitionRequest, auth: AccountContext = Depends(verify_api_key)):
     """Executes validated research lifecycle progression."""
     try:
         target_state = ResearchLifecycleState(req.new_state)
@@ -1661,7 +1675,7 @@ class GenerateHypothesisRequest(BaseModel):
 
 
 @app.post("/api/research-factory/generate")
-async def generate_custom_hypothesis(req: GenerateHypothesisRequest):
+async def generate_custom_hypothesis(req: GenerateHypothesisRequest, auth: AccountContext = Depends(verify_api_key)):
     """Generates a bounded quantitative hypothesis contract."""
     hyp = HypothesisGenerator.generate_custom_hypothesis(
         name=req.name,
@@ -1680,7 +1694,7 @@ async def generate_custom_hypothesis(req: GenerateHypothesisRequest):
 
 
 @app.post("/api/research-factory/validate/{hypothesis_id}")
-async def validate_research_hypothesis(hypothesis_id: str):
+async def validate_research_hypothesis(hypothesis_id: str, auth: AccountContext = Depends(verify_api_key)):
     """Runs empirical multi-dimensional survival validation on a hypothesis."""
     hyp = research_ledger.get_hypothesis(hypothesis_id)
     if not hyp:
@@ -1702,7 +1716,7 @@ async def get_hypothesis_scorecard(hypothesis_id: str):
 
 
 @app.post("/api/research-factory/promote/{hypothesis_id}")
-async def promote_hypothesis_to_paper(hypothesis_id: str):
+async def promote_hypothesis_to_paper(hypothesis_id: str, auth: AccountContext = Depends(verify_api_key)):
     """Applies promotion gates to advance a validated hypothesis to PAPER_TESTING."""
     ok, msg = research_ledger.promote_to_paper(hypothesis_id)
     if not ok:
@@ -1716,7 +1730,7 @@ class RejectHypothesisRequest(BaseModel):
 
 
 @app.post("/api/research-factory/reject/{hypothesis_id}")
-async def reject_hypothesis_with_reasons(hypothesis_id: str, req: RejectHypothesisRequest):
+async def reject_hypothesis_with_reasons(hypothesis_id: str, req: RejectHypothesisRequest, auth: AccountContext = Depends(verify_api_key)):
     """Records hypothesis rejection with explicit failure catalog entries."""
     parsed_reasons = []
     for r in req.reasons:
@@ -1800,7 +1814,7 @@ class ResearchAuditRequest(BaseModel):
 
 
 @app.post("/api/research-audit/audit/{hypothesis_id}")
-async def run_hypothesis_audit_endpoint(hypothesis_id: str):
+async def run_hypothesis_audit_endpoint(hypothesis_id: str, auth: AccountContext = Depends(verify_api_key)):
     """Executes full independent mathematical and empirical audit on a hypothesis."""
     hyp = research_ledger.get_hypothesis(hypothesis_id)
     if not hyp:

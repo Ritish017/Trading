@@ -19,7 +19,7 @@ class UpstoxWebSocketClient:
     Connects to authorized WS endpoint, subscribes to instruments, decodes ticks, and manages reconnects.
     """
 
-    def __init__(self, token: str, get_ws_url_fn: Callable[[], Awaitable[str]]):
+    def __init__(self, token: str = "", get_ws_url_fn: Optional[Callable[[], Awaitable[str]]] = None):
         self.token = token
         self.get_ws_url_fn = get_ws_url_fn
         self.ws: Optional[Any] = None
@@ -175,10 +175,22 @@ class UpstoxWebSocketClient:
             except (UnicodeDecodeError, json.JSONDecodeError):
                 pass
 
-            # Binary Protobuf stream without compiled proto file in repo
+            # Authentic Protobuf Feed V3 decoding
+            try:
+                from backend.app.broker_providers.upstox_proto import decode_upstox_protobuf_frame
+                decoded_data = decode_upstox_protobuf_frame(message)
+                if decoded_data and "feeds" in decoded_data:
+                    for inst_key, feed in decoded_data["feeds"].items():
+                        tick = self._parse_feed_dict(inst_key, feed)
+                        if tick:
+                            ticks.append(tick)
+                    if ticks:
+                        return ticks
+            except Exception as e:
+                logger.debug(f"[UPSTOX WS PROTOBUF] Error decoding binary frame: {e}")
+
             logger.warning(
-                "[UPSTOX WS DEGRADED] Received binary protobuf feed (%d bytes). "
-                "Protobuf schema compilation file is not packaged in repository; binary stream cannot be decoded without schema.",
+                "[UPSTOX WS DEGRADED] Received binary protobuf feed (%d bytes) that could not be decoded.",
                 len(message)
             )
 

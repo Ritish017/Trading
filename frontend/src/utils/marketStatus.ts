@@ -75,7 +75,7 @@ export function getISTMarketSessionInfo(lastReceivedMs?: number, isSimulatedMode
     status = 'STALE';
   }
 
-  switch (status) {
+  switch (status as MarketStatusCode) {
     case 'LIVE':
       return {
         status: 'LIVE',

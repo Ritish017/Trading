@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     real_trading_enabled: bool = False
     default_paper_capital: float = 1000000.0
 
+    # Database Configuration
+    database_url: Optional[str] = None
+
+    # Security & Access Control
+    api_auth_token: Optional[str] = None
+    cors_allowed_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000,https://apex-trading-lab.vercel.app"
+
     @property
     def get_upstox_token(self) -> Optional[str]:
         return self.upstox_analytics_token or self.upstox_access_token

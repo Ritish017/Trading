@@ -7,6 +7,15 @@ from backend.app.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+async def _call_gemini_async(client: Any, model: str, contents: str) -> Any:
+    """Non-blocking async call to Gemini models with fallback."""
+    if client and hasattr(client, "models"):
+        if hasattr(client.models, "generate_content_async"):
+            return await client.models.generate_content_async(model=model, contents=contents)
+        return client.models.generate_content(model=model, contents=contents)
+    return None
+
 class MarketResearchAgent:
     """
     Multi-Agent Research Specialist for Indian Stock Markets.
@@ -81,7 +90,8 @@ Return ONLY valid JSON matching this schema:
 }}
 """
         try:
-            response = self.client.models.generate_content(
+            response = await _call_gemini_async(
+                self.client,
                 model="gemini-2.5-flash",
                 contents=prompt
             )
@@ -479,7 +489,8 @@ User Question: {user_message}
 Answer concisely, citing exact evidence and numbers:"""
 
         try:
-            response = self.client.models.generate_content(
+            response = await _call_gemini_async(
+                self.client,
                 model="gemini-2.0-flash",
                 contents=system_prompt,
             )
@@ -585,7 +596,8 @@ User Question: {user_message}
 Answer concisely, citing exact evidence and numbers:"""
 
         try:
-            response = self.client.models.generate_content(
+            response = await _call_gemini_async(
+                self.client,
                 model="gemini-2.0-flash",
                 contents=system_prompt,
             )
@@ -757,7 +769,8 @@ User Question: {user_message}
 Answer concisely, citing exact evidence and numbers:"""
 
         try:
-            response = self.client.models.generate_content(
+            response = await _call_gemini_async(
+                self.client,
                 model="gemini-2.0-flash",
                 contents=system_prompt,
             )
@@ -920,7 +933,8 @@ User Question: {user_message}
 Answer concisely, citing exact independent audit numbers:"""
 
         try:
-            response = self.client.models.generate_content(
+            response = await _call_gemini_async(
+                self.client,
                 model="gemini-2.0-flash",
                 contents=system_prompt,
             )

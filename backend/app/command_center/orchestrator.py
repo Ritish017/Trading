@@ -89,16 +89,21 @@ class ResearchCommandCenterOrchestrator:
     """
 
     @classmethod
-    def get_snapshot(cls, symbol: str = "RELIANCE.NS", timeframe: str = "1D") -> CommandCenterSnapshot:
+    def get_snapshot(cls, symbol: str = "RELIANCE.NS", timeframe: str = "1D", input_candles: Optional[List[Dict[str, Any]]] = None) -> CommandCenterSnapshot:
         """
         Gathers and structures evidence from all underlying engines with zero-trust provenance.
         """
         now = int(time.time())
-        candles = generate_canonical_candles(symbol, count=120)
+        candles = input_candles if input_candles else generate_canonical_candles(symbol, count=120)
         prov_map: Dict[str, EvidenceProvenance] = {}
 
+        # Zero-trust verification against canonical quote store
+        canonical_quote = canonical_store.get_canonical_quote(symbol)
+        is_authentic_live = bool(canonical_quote and canonical_quote.is_live)
+        provider_name = canonical_quote.provider if canonical_quote else "UPSTOX"
+
         # 1. Evaluate all 20 strategies dynamically from STRATEGY_REGISTRY
-        strat_results = evaluate_all_strategies(candles, is_live_feed=True)
+        strat_results = evaluate_all_strategies(candles, is_live_feed=is_authentic_live)
 
         # 2. Market Snapshot & Regime
         df = pd.DataFrame(candles)
@@ -108,21 +113,33 @@ class ResearchCommandCenterOrchestrator:
 
         last_c = candles[-1]
         prev_c = candles[-2]
-        curr_price = float(last_c.get("close", 2500.0))
-        prev_close = float(prev_c.get("close", curr_price))
+        curr_price = float(canonical_quote.ltp) if (canonical_quote and canonical_quote.ltp) else float(last_c.get("close", 2500.0))
+        prev_close = float(canonical_quote.previous_close) if (canonical_quote and canonical_quote.previous_close) else float(prev_c.get("close", curr_price))
         change_pct = round(((curr_price - prev_close) / max(0.01, prev_close)) * 100.0, 2)
-        candle_ts = last_c.get("timestamp", now)
+        candle_ts = int(canonical_quote.provider_timestamp) if (canonical_quote and canonical_quote.provider_timestamp) else last_c.get("timestamp", now)
 
         # Compute data age & freshness strictly from source timestamp
         data_age_sec = max(0, now - candle_ts)
-        if data_age_sec <= 60:
+        if is_authentic_live:
             freshness = "LIVE"
+            classification = EvidenceClassification.RAW_AUTHENTIC_DATA
+            confidence_basis = "Direct verified market feed observation"
+            data_status = ProvenanceDataStatus.AVAILABLE
         elif data_age_sec <= 300:
             freshness = "RECENT"
+            classification = EvidenceClassification.HISTORICAL_RESEARCH_RESULT
+            confidence_basis = "Recent market observation"
+            data_status = ProvenanceDataStatus.AVAILABLE
         elif data_age_sec <= 86400:
             freshness = "RECENT_HISTORICAL"
+            classification = EvidenceClassification.HISTORICAL_RESEARCH_RESULT
+            confidence_basis = "Historical session observation"
+            data_status = ProvenanceDataStatus.AVAILABLE
         else:
             freshness = "HISTORICAL"
+            classification = EvidenceClassification.HISTORICAL_RESEARCH_RESULT
+            confidence_basis = "Historical dataset sequence"
+            data_status = ProvenanceDataStatus.AVAILABLE
 
         market_snap = MarketSnapshot(
             symbol=symbol,
@@ -135,9 +152,9 @@ class ResearchCommandCenterOrchestrator:
             volume_state="NORMAL_VOLUME",
             technical_freshness=freshness,
             fundamental_freshness="PIT_PUBLISHED",
-            provider="UPSTOX",
+            provider=provider_name,
             timestamp=candle_ts,
-            market_status="OPEN",
+            market_status="OPEN" if (canonical_quote and canonical_quote.market_session_open) else "CLOSED",
         )
 
         prov_map["current_price"] = EvidenceProvenance(
@@ -145,18 +162,18 @@ class ResearchCommandCenterOrchestrator:
             value=curr_price,
             unit="INR",
             classification=EvidenceClassification.RAW_AUTHENTIC_DATA,
-            source="UPSTOX_TICK_STREAM",
-            provider="UPSTOX",
+            source="UPSTOX_TICK_STREAM" if is_authentic_live else "CANONICAL_STORE",
+            provider=provider_name,
             source_timestamp=candle_ts,
             calculation_timestamp=now,
             market_timestamp=candle_ts,
-            data_status=ProvenanceDataStatus.AVAILABLE,
+            data_status=data_status,
             freshness=freshness,
             calculation_method="LTP_FROM_EXCHANGE",
             dependencies=["EXCHANGE_LTP_FEED"],
             is_derived=False,
             is_point_in_time_valid=True,
-            confidence_basis="Direct verified market feed observation",
+            confidence_basis="Direct verified market feed observation" if is_authentic_live else "Canonical exchange store observation",
         )
 
         prov_map["market_regime"] = EvidenceProvenance(

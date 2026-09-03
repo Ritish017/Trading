@@ -23,7 +23,7 @@ export const DataHealthBar: React.FC<DataHealthBarProps> = ({
   const session = getISTMarketSessionInfo(lastTickTimeMs, provider === 'DEV_MOCK');
   const dataAgeMs = lastTickTimeMs ? Math.max(0, Date.now() - lastTickTimeMs) : 0;
   const dataAgeStr = formatDataAge(dataAgeMs);
-  const provBadge = getProvenanceBadge(provider);
+  const provBadge = getProvenanceBadge(provider as MarketProvenance);
 
   return (
     <footer className="bg-[#0b0c10] border-t border-stone-800/80 px-4 py-1.5 flex flex-wrap items-center justify-between text-[11px] font-mono text-stone-400 select-none">

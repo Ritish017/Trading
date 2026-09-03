@@ -572,6 +572,7 @@ function StrategyKeypadButton({
   strategy: StrategyResult;
   isSelected: boolean;
   onClick: () => void;
+  key?: any;
 }) {
   const displayName = strategy.short_name || strategy.strategy_name;
 
@@ -1628,7 +1629,7 @@ function RobustnessWorkstation({
           </div>
 
           <div className="space-y-1.5 pt-2">
-            {Object.entries(multiSymbolData.symbol_breakdown).map(([sym, item]) => (
+            {Object.entries(multiSymbolData.symbol_breakdown).map(([sym, item]: [string, any]) => (
               <div key={sym} className="p-2 rounded bg-stone-900/40 border border-stone-800/60 flex items-center justify-between text-xs">
                 <span className="font-bold text-stone-200">{sym}</span>
                 <div className="flex items-center gap-4">

@@ -81,7 +81,7 @@ export function generateLocalIndianAIReport(stock: NSEStock): IndianMarketAIRepo
   const p = stock.price;
   const hasPrice = p !== null && p !== undefined && p > 0;
   const hasVWAP = stock.vwap !== null && stock.vwap !== undefined && stock.vwap > 0;
-  const stance = (hasPrice && hasVWAP) ? (p >= stock.vwap! ? 'Bullish Accumulation' : 'Distribution Pressure') : 'Neutral Consolidation';
+  const stance = (hasPrice && hasVWAP) ? (p >= stock.vwap! ? 'Bullish Accumulation' : 'Bearish Distribution') : 'Neutral Consolidation';
   const conf = (hasPrice && hasVWAP) ? 50 : 20;
 
   return {

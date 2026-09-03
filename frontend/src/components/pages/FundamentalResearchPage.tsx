@@ -371,7 +371,7 @@ export const FundamentalResearchPage: React.FC<FundamentalResearchPageProps> = (
           <div className="lg:col-span-8 space-y-3">
             {/* Category KPI Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {Object.entries(scorecard.category_summaries).map(([cat, c]) => (
+              {Object.entries(scorecard.category_summaries).map(([cat, c]: [string, any]) => (
                 <div key={cat} className="bg-[#12131b] border border-stone-800/80 rounded-xl p-3 space-y-1">
                   <div className="text-[10px] text-stone-500 uppercase font-bold">{cat}</div>
                   <div className="text-xl font-black text-white">{c.average_percentile}%</div>

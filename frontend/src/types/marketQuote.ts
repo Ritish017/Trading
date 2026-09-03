@@ -17,6 +17,7 @@ export type ProviderMode =
 export type MarketProvenance = 
   | 'UPSTOX'
   | 'DHAN'
+  | 'FYERS'
   | 'MOCK'
   | 'DEV_MOCK'
   | 'DERIVED'

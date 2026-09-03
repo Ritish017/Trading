@@ -64,7 +64,8 @@ class ModelDriftDetector:
         paper_win_rate = (len(wins) / n_trades) * 100.0
         paper_avg_slippage = float(np.mean([t.slippage_paid for t in paper_trades]))
         paper_returns = [t.return_pct for t in paper_trades]
-        paper_sharpe = float((np.mean(paper_returns) / (np.std(paper_returns) + 1e-6)) * np.sqrt(252))
+        ret_std = float(np.std(paper_returns, ddof=1)) if len(paper_returns) > 1 else 0.0
+        paper_sharpe = float((np.mean(paper_returns) / ret_std) * np.sqrt(252)) if ret_std > 1e-7 else 0.0
 
         # Expected from Backtest
         exp_win_rate = backtest_metrics.get("win_rate_pct", 50.0)

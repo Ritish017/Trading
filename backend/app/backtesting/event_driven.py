@@ -72,6 +72,33 @@ class BacktestTradeEvidence:
     exit_rule_evidence: List[Dict[str, Any]] = field(default_factory=list)
     is_in_sample: bool = True
 
+def get_bars_per_year_for_timeframe(tf: str) -> float:
+    """
+    Computes bars per trading year for Indian equities (252 trading days, 375 min session: 09:15 to 15:30 IST).
+    """
+    tf_clean = str(tf).strip().lower()
+    if tf_clean in ["1m", "1min"]:
+        bars_per_session = 375.0
+    elif tf_clean in ["3m", "3min"]:
+        bars_per_session = 125.0
+    elif tf_clean in ["5m", "5min"]:
+        bars_per_session = 75.0
+    elif tf_clean in ["15m", "15min"]:
+        bars_per_session = 25.0
+    elif tf_clean in ["30m", "30min"]:
+        bars_per_session = 12.5
+    elif tf_clean in ["1h", "60m", "60min"]:
+        bars_per_session = 6.25
+    elif tf_clean in ["1d", "d", "daily"]:
+        bars_per_session = 1.0
+    elif tf_clean in ["1w", "w", "weekly"]:
+        return 52.0
+    elif tf_clean in ["1mo", "1mth", "monthly"]:
+        return 12.0
+    else:
+        bars_per_session = 75.0 if "m" in tf_clean else 1.0
+    return 252.0 * bars_per_session
+
 
 class EventDrivenBacktester:
     """
@@ -356,9 +383,19 @@ class EventDrivenBacktester:
         max_drawdown = round(abs(float(drawdown_series.min())), 2) if not drawdown_series.empty else 0.0
         drawdown_curve = [round(float(d), 2) for d in drawdown_series.tolist()]
 
-        # Sharpe & CAGR
+        # Sharpe & CAGR (Timeframe-aware annualization & zero-volatility guards)
         returns = eq_series.pct_change().dropna()
-        sharpe = round(float(np.sqrt(252) * (returns.mean() / (returns.std() + 1e-9))), 2) if len(returns) > 1 else 0.0
+        annual_bars = get_bars_per_year_for_timeframe(tf)
+        bars_per_session = annual_bars / 252.0
+
+        if len(returns) <= 1:
+            sharpe = 0.0
+        else:
+            returns_std = float(returns.std(ddof=1))
+            if np.isnan(returns_std) or returns_std <= 1e-7:
+                sharpe = 0.0
+            else:
+                sharpe = round(float(np.sqrt(annual_bars) * (returns.mean() / returns_std)), 2)
 
         start_ts = df.iloc[0].get('timestamp') or df.iloc[0].get('time')
         end_ts = df.iloc[-1].get('timestamp') or df.iloc[-1].get('time')
@@ -367,9 +404,9 @@ class EventDrivenBacktester:
             end_val = float(end_ts)
             elapsed_seconds = max(0.0, end_val - start_val)
             seconds_per_year = 365.25 * 86400.0
-            elapsed_years = max(elapsed_seconds / seconds_per_year, 0.01) if elapsed_seconds > 0 else max(len(df) / (75.0 * 252.0), 0.01)
+            elapsed_years = max(elapsed_seconds / seconds_per_year, 0.01) if elapsed_seconds > 0 else max(len(df) / (bars_per_session * 252.0), 0.01)
         except (ValueError, TypeError):
-            elapsed_years = max(len(df) / (75.0 * 252.0), 0.01)
+            elapsed_years = max(len(df) / (bars_per_session * 252.0), 0.01)
 
         if capital > 0 and cap > 0:
             cagr = round((((capital / cap) ** (1.0 / elapsed_years)) - 1.0) * 100.0, 2)

@@ -114,10 +114,6 @@ class UpstoxRESTClient:
                     v_sym = str(val.get("symbol") or val.get("trading_symbol") or "").upper().replace(".NS", "").replace(".BO", "")
                     if v_sym and v_sym == clean_sym:
                         return val
-        if len(raw_data) == 1:
-            only_key, only_value = next(iter(raw_data.items()))
-            if isinstance(only_value, dict):
-                return only_value
         return None
 
     @staticmethod

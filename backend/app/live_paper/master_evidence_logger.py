@@ -183,6 +183,7 @@ class MasterEvidenceLogger:
         self._sequence_number = 0
         self._first_event_id: Optional[str] = None
         self._last_event_id: Optional[str] = None
+        self._last_event_type: Optional[str] = None
 
         # Counters for integrity verification
         self._counts: Dict[str, int] = {
@@ -258,6 +259,10 @@ class MasterEvidenceLogger:
     def counts(self) -> Dict[str, int]:
         return dict(self._counts)
 
+    @property
+    def last_event_type(self) -> Optional[str]:
+        return self._last_event_type
+
     async def log_event(
         self,
         event_type: str,
@@ -300,6 +305,7 @@ class MasterEvidenceLogger:
             if self._first_event_id is None:
                 self._first_event_id = eid
             self._last_event_id = eid
+            self._last_event_type = event_type
 
             if "ERROR" in event_type:
                 self._counts["error_count"] += 1

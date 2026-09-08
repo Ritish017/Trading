@@ -747,7 +747,7 @@ class LivePaperSessionRunner:
                             paper_mode=True,
                             live_trading=False,
                             last_tick=max(self.last_tick_timestamps.values()) if self.last_tick_timestamps else None,
-                            last_event=self.evidence_logger.last_event_type,
+                            last_event=getattr(self.evidence_logger, "last_event_type", "SESSION_HEARTBEAT") or "SESSION_HEARTBEAT",
                             last_market_event="TICK" if self.session_stats["ticks_received"] > 0 else None,
                             last_signal_event="SIGNAL" if self.session_stats["signals_qualified"] > 0 else None,
                             last_paper_event="ORDER" if self.session_stats["paper_orders_placed"] > 0 else None,

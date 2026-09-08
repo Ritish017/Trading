@@ -169,6 +169,20 @@ async def worker_health():
     async with AsyncSessionLocal() as s:
         repo = WorkerRepository(s)
         st = await repo.get_worker_status("apex-market-worker")
+        
+        # If database has no heartbeat or is stale, attempt fallback read from live Render worker probe
+        if st.get("worker_status") in ("NOT_STARTED", "UNKNOWN") or st.get("is_stale", True):
+            render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
+            if render_worker_url:
+                try:
+                    import httpx
+                    async with httpx.AsyncClient(timeout=3.0) as client:
+                        resp = await client.get(f"{render_worker_url.rstrip('/')}/health/worker")
+                        if resp.status_code == 200:
+                            return resp.json()
+                except Exception:
+                    pass
+
         db_health = await check_db_health()
         return {
             "worker_status": st.get("worker_status", "UNKNOWN"),
@@ -193,7 +207,22 @@ async def get_worker_status():
     from backend.app.database.repositories.worker_repository import WorkerRepository
     async with AsyncSessionLocal() as s:
         repo = WorkerRepository(s)
-        return await repo.get_worker_status("apex-market-worker")
+        st = await repo.get_worker_status("apex-market-worker")
+        
+        # If database has no heartbeat or is stale, attempt fallback read from live Render worker probe
+        if st.get("worker_status") in ("NOT_STARTED", "UNKNOWN") or st.get("is_stale", True):
+            render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
+            if render_worker_url:
+                try:
+                    import httpx
+                    async with httpx.AsyncClient(timeout=3.0) as client:
+                        resp = await client.get(f"{render_worker_url.rstrip('/')}/api/worker/status")
+                        if resp.status_code == 200:
+                            return resp.json()
+                except Exception:
+                    pass
+
+        return st
 
 
 # --- Market Data API ---

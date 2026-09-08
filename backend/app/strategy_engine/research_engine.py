@@ -273,7 +273,28 @@ class HistoricalResearchEngine:
         # 3. Point-in-time rolling state evaluation for each strategy
         # Map: strategy_id -> List of states for all bars 0..n-1
         states_matrix: Dict[str, List[StrategyState]] = {sid: [] for sid in target_strategies}
+        directional_states_matrix: Dict[str, List[str]] = {sid: [] for sid in target_strategies}
         rule_evals_matrix: Dict[str, List[List[Dict[str, Any]]]] = {sid: [] for sid in target_strategies}
+
+        def _state_for(
+            entry_evals: List[Dict[str, Any]], exit_evals: List[Dict[str, Any]]
+        ) -> StrategyState:
+            """Match the live evaluator's state semantics for one direction."""
+            if not entry_evals:
+                return StrategyState.UNAVAILABLE
+            passing = sum(1 for e in entry_evals if e["outcome"] == RuleOutcome.PASS)
+            unavailable = sum(1 for e in entry_evals if e["outcome"] == RuleOutcome.UNAVAILABLE)
+            if unavailable > len(entry_evals) / 2.0:
+                return StrategyState.UNAVAILABLE
+            if passing == len(entry_evals):
+                return (
+                    StrategyState.CONFLICTED
+                    if any(e["outcome"] == RuleOutcome.PASS for e in exit_evals)
+                    else StrategyState.ACTIVE
+                )
+            if passing >= math.ceil(len(entry_evals) / 2.0):
+                return StrategyState.PARTIAL
+            return StrategyState.INACTIVE
 
         for i in range(n):
             # Construct feature vector at bar i
@@ -285,6 +306,7 @@ class HistoricalResearchEngine:
             for sid, strat in target_strategies.items():
                 if i + 1 < strat.min_candles:
                     states_matrix[sid].append(StrategyState.UNAVAILABLE)
+                    directional_states_matrix[sid].append("NEUTRAL")
                     rule_evals_matrix[sid].append([])
                     continue
 
@@ -301,36 +323,48 @@ class HistoricalResearchEngine:
                     outcome = RuleOutcome.PASS if res is True else (RuleOutcome.FAIL if res is False else RuleOutcome.UNAVAILABLE)
                     exit_evals.append({"rule_id": r.rule_id, "label": r.label, "outcome": outcome, "is_entry": False})
 
-                # Determine state
-                pass_count = sum(1 for e in entry_evals if e["outcome"] == RuleOutcome.PASS)
-                unavail_count = sum(1 for e in entry_evals if e["outcome"] == RuleOutcome.UNAVAILABLE)
-                total_entry = len(entry_evals)
-                exit_triggered = any(e["outcome"] == RuleOutcome.PASS for e in exit_evals)
+                short_entry_evals = []
+                for r in getattr(strat, "short_entry_rules", []):
+                    res = r.condition_fn(bar_fv)
+                    outcome = RuleOutcome.PASS if res is True else (RuleOutcome.FAIL if res is False else RuleOutcome.UNAVAILABLE)
+                    short_entry_evals.append({"rule_id": r.rule_id, "label": r.label, "outcome": outcome, "is_entry": True})
 
-                if total_entry == 0:
-                    state = StrategyState.UNAVAILABLE
-                elif unavail_count > (total_entry / 2.0):
-                    state = StrategyState.UNAVAILABLE
-                elif pass_count == total_entry:
-                    state = StrategyState.CONFLICTED if exit_triggered else StrategyState.ACTIVE
-                elif pass_count >= math.ceil(total_entry / 2.0):
-                    state = StrategyState.PARTIAL
+                short_exit_evals = []
+                for r in getattr(strat, "short_exit_rules", []):
+                    res = r.condition_fn(bar_fv)
+                    outcome = RuleOutcome.PASS if res is True else (RuleOutcome.FAIL if res is False else RuleOutcome.UNAVAILABLE)
+                    short_exit_evals.append({"rule_id": r.rule_id, "label": r.label, "outcome": outcome, "is_entry": False})
+
+                long_state = _state_for(entry_evals, exit_evals)
+                if not short_entry_evals:
+                    state = long_state
+                    directional_state = "LONG" if long_state == StrategyState.ACTIVE else "NEUTRAL"
                 else:
-                    state = StrategyState.INACTIVE
+                    short_state = _state_for(short_entry_evals, short_exit_evals)
+                    if long_state == StrategyState.ACTIVE and short_state == StrategyState.ACTIVE:
+                        state, directional_state = StrategyState.CONFLICTED, "CONFLICTED"
+                    elif long_state == StrategyState.ACTIVE:
+                        state, directional_state = StrategyState.ACTIVE, "LONG"
+                    elif short_state == StrategyState.ACTIVE:
+                        state, directional_state = StrategyState.ACTIVE, "SHORT"
+                    elif long_state == StrategyState.UNAVAILABLE and short_state == StrategyState.UNAVAILABLE:
+                        state, directional_state = StrategyState.UNAVAILABLE, "NEUTRAL"
+                    elif long_state == StrategyState.CONFLICTED or short_state == StrategyState.CONFLICTED:
+                        state, directional_state = StrategyState.CONFLICTED, "CONFLICTED"
+                    elif long_state == StrategyState.PARTIAL or short_state == StrategyState.PARTIAL:
+                        state, directional_state = StrategyState.PARTIAL, "NEUTRAL"
+                    else:
+                        state, directional_state = StrategyState.INACTIVE, "NEUTRAL"
 
                 states_matrix[sid].append(state)
-                rule_evals_matrix[sid].append(entry_evals + exit_evals)
+                directional_states_matrix[sid].append(directional_state)
+                rule_evals_matrix[sid].append(entry_evals + exit_evals + short_entry_evals + short_exit_evals)
 
         # 4. Extract continuous activation episodes and build observations per strategy
         summaries: Dict[str, StrategyResearchSummary] = {}
 
         for sid, strat in target_strategies.items():
             states = states_matrix[sid]
-            strat_direction = (
-                strat.direction.value if isinstance(strat.direction, StrategyDirection)
-                else str(strat.direction)
-            ).upper()
-
             observations: List[StrategyResearchObservation] = []
             episodes_durations: List[int] = []
 
@@ -342,13 +376,36 @@ class HistoricalResearchEngine:
 
             for i in range(n):
                 st = states[i]
-                prev_st = states[i - 1] if i > 0 else None
+                directional_state = directional_states_matrix[sid][i]
+                observation_direction = "BULLISH" if directional_state == "LONG" else "BEARISH"
+                is_active = st == StrategyState.ACTIVE and directional_state in {"LONG", "SHORT"}
 
-                if st == StrategyState.ACTIVE:
+                if is_active:
                     total_active_bars += 1
 
-                # State Transition: Start of a new activation episode
-                if st == StrategyState.ACTIVE and prev_st != StrategyState.ACTIVE:
+                # A direction flip closes the old episode and opens a new,
+                # independently measured one at the same decision boundary.
+                if in_active_episode and (
+                    not is_active
+                    or (current_obs is not None and current_obs.direction != observation_direction)
+                ):
+                    in_active_episode = False
+                    duration = i - current_episode_start
+                    episodes_durations.append(duration)
+                    invalidation_events_count += 1
+
+                    if current_obs:
+                        current_obs.invalidation_index = i
+                        current_obs.invalidation_timestamp = ts_arr[i]
+                        current_obs.invalidation_price = float(close_arr[i])
+                        current_obs.candles_to_invalidation = duration
+                        current_obs.time_to_invalidation_seconds = float(ts_arr[i] - current_obs.activation_timestamp)
+                        current_obs.observation_status = ObservationStatus.INVALIDATED_EARLY
+                        observations.append(current_obs)
+                        current_obs = None
+
+                # State Transition: Start of a new directional activation episode
+                if is_active and not in_active_episode:
                     in_active_episode = True
                     current_episode_start = i
 
@@ -382,7 +439,7 @@ class HistoricalResearchEngine:
                         strategy_version=strat.version,
                         symbol=symbol,
                         timeframe=timeframe,
-                        direction=strat_direction,
+                        direction=observation_direction,
                         activation_index=i,
                         activation_timestamp=ts_arr[i],
                         activation_price=float(close_arr[i]),
@@ -394,23 +451,6 @@ class HistoricalResearchEngine:
                         rule_snapshot=rule_evals_matrix[sid][i],
                         indicator_snapshot=fv_snap,
                     )
-
-                # State Transition: Invalidation of an active episode
-                elif in_active_episode and st != StrategyState.ACTIVE:
-                    in_active_episode = False
-                    duration = i - current_episode_start
-                    episodes_durations.append(duration)
-                    invalidation_events_count += 1
-
-                    if current_obs:
-                        current_obs.invalidation_index = i
-                        current_obs.invalidation_timestamp = ts_arr[i]
-                        current_obs.invalidation_price = float(close_arr[i])
-                        current_obs.candles_to_invalidation = duration
-                        current_obs.time_to_invalidation_seconds = float(ts_arr[i] - current_obs.activation_timestamp)
-                        current_obs.observation_status = ObservationStatus.INVALIDATED_EARLY
-                        observations.append(current_obs)
-                        current_obs = None
 
             # If an episode is still active at the end of the dataset
             if in_active_episode and current_obs:
@@ -442,7 +482,7 @@ class HistoricalResearchEngine:
                     raw_ret = ((pt - p0) / p0) * 100.0 if p0 > 0 else 0.0
 
                     # Direction adjustment
-                    dir_ret = raw_ret if strat_direction == "BULLISH" else -raw_ret
+                    dir_ret = raw_ret if obs.direction == "BULLISH" else -raw_ret
 
                     # Future price excursions over the window [act_idx + 1 .. target_idx]
                     future_highs = high_arr[act_idx + 1 : target_idx + 1]
@@ -451,7 +491,7 @@ class HistoricalResearchEngine:
                     min_p = float(np.min(future_lows)) if len(future_lows) > 0 else pt
                     max_p = float(np.max(future_highs)) if len(future_highs) > 0 else pt
 
-                    if strat_direction == "BULLISH":
+                    if obs.direction == "BULLISH":
                         mae = ((min_p - p0) / p0) * 100.0 if p0 > 0 else 0.0  # Typically negative or 0
                         mfe = ((max_p - p0) / p0) * 100.0 if p0 > 0 else 0.0  # Typically positive or 0
                     else:  # BEARISH

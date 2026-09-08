@@ -346,6 +346,13 @@ INDICATOR_SPECS: Dict[str, IndicatorSpec] = {
         min_history=21,
         description="Prior 20-period highest closing price"
     ),
+    "lowest_low_20": IndicatorSpec(
+        canonical_key="lowest_low_20",
+        name="Lowest Close (20)",
+        category="breakout",
+        min_history=21,
+        description="Prior 20-period lowest closing price"
+    ),
     "rvol": IndicatorSpec(
         canonical_key="rvol",
         name="Relative Volume (20)",
@@ -613,12 +620,18 @@ class DependencyEngine:
             _record("donchian_mid", dc_m, 21)
             _record("donchian_low", dc_l, 21)
 
-        # 11. Highest High (20) of close
+        # 11. Highest High (20) and Lowest Low (20) of close
         if "highest_high_20" in keys_to_compute:
             hh20_s = None
             if n >= 21:
                 hh20_s = close.shift(1).rolling(window=20).max()
             _record("highest_high_20", hh20_s, 21)
+
+        if "lowest_low_20" in keys_to_compute:
+            ll20_s = None
+            if n >= 21:
+                ll20_s = close.shift(1).rolling(window=20).min()
+            _record("lowest_low_20", ll20_s, 21)
 
         # 12. Relative Volume (20)
         if "rvol" in keys_to_compute:

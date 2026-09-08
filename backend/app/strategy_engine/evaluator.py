@@ -88,6 +88,12 @@ class StrategyEvaluationResult:
     tags: List[str] = field(default_factory=list)
     historical_states: List[Dict[str, Any]] = field(default_factory=list)
     activation_events: List[ActivationEvent] = field(default_factory=list)
+    directional_state: str = "NEUTRAL"    # LONG | SHORT | NEUTRAL | CONFLICTED
+    short_rules_total: int = 0
+    short_rules_passing: int = 0
+    short_rules_unavailable: int = 0
+    short_exit_rules_total: int = 0
+    short_exit_rules_triggered: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +323,47 @@ def _determine_state(
     return StrategyState.INACTIVE
 
 
+def _determine_dual_state(
+    long_entry_evals: List[RuleEvaluation],
+    long_exit_evals: List[RuleEvaluation],
+    short_entry_evals: Optional[List[RuleEvaluation]] = None,
+    short_exit_evals: Optional[List[RuleEvaluation]] = None,
+) -> tuple[StrategyState, str]:
+    """
+    Evaluates both LONG rules and SHORT rules independently to derive:
+    1. Overall StrategyState (ACTIVE, PARTIAL, INACTIVE, CONFLICTED, UNAVAILABLE)
+    2. Directional State ("LONG", "SHORT", "NEUTRAL", "CONFLICTED")
+    """
+    long_state = _determine_state(long_entry_evals, long_exit_evals)
+
+    if not short_entry_evals:
+        dir_state = "LONG" if long_state == StrategyState.ACTIVE else "NEUTRAL"
+        return long_state, dir_state
+
+    short_exit_evals = short_exit_evals or []
+    short_state = _determine_state(short_entry_evals, short_exit_evals)
+
+    if long_state == StrategyState.UNAVAILABLE and short_state == StrategyState.UNAVAILABLE:
+        return StrategyState.UNAVAILABLE, "NEUTRAL"
+
+    if long_state == StrategyState.ACTIVE and short_state == StrategyState.ACTIVE:
+        return StrategyState.CONFLICTED, "CONFLICTED"
+
+    if long_state == StrategyState.ACTIVE:
+        return StrategyState.ACTIVE, "LONG"
+
+    if short_state == StrategyState.ACTIVE:
+        return StrategyState.ACTIVE, "SHORT"
+
+    if long_state == StrategyState.CONFLICTED or short_state == StrategyState.CONFLICTED:
+        return StrategyState.CONFLICTED, "CONFLICTED"
+
+    if long_state == StrategyState.PARTIAL or short_state == StrategyState.PARTIAL:
+        return StrategyState.PARTIAL, "NEUTRAL"
+
+    return StrategyState.INACTIVE, "NEUTRAL"
+
+
 # ---------------------------------------------------------------------------
 # Strategy Confluence & Alignment
 # ---------------------------------------------------------------------------
@@ -495,6 +542,28 @@ def evaluate_all_strategies(
                     is_entry_rule=False,
                 )
                 for r in strat.exit_rules
+            ] + [
+                RuleEvaluation(
+                    rule_id=r.rule_id,
+                    label=r.label,
+                    dependency_keys=r.dependency_keys,
+                    outcome=RuleOutcome.UNAVAILABLE,
+                    actual_value=None,
+                    actual_value_label="UNAVAILABLE",
+                    is_entry_rule=True,
+                )
+                for r in getattr(strat, "short_entry_rules", [])
+            ] + [
+                RuleEvaluation(
+                    rule_id=r.rule_id,
+                    label=r.label,
+                    dependency_keys=r.dependency_keys,
+                    outcome=RuleOutcome.UNAVAILABLE,
+                    actual_value=None,
+                    actual_value_label="UNAVAILABLE",
+                    is_entry_rule=False,
+                )
+                for r in getattr(strat, "short_exit_rules", [])
             ]
             results.append(StrategyEvaluationResult(
                 strategy_id=sid,
@@ -516,18 +585,34 @@ def evaluate_all_strategies(
                 tags=strat.tags,
                 historical_states=[],
                 activation_events=[],
+                directional_state="NEUTRAL",
+                short_rules_total=len(getattr(strat, "short_entry_rules", [])),
+                short_rules_passing=0,
+                short_rules_unavailable=len(getattr(strat, "short_entry_rules", [])),
+                short_exit_rules_total=len(getattr(strat, "short_exit_rules", [])),
+                short_exit_rules_triggered=0,
             ))
             continue
 
-        # Evaluate entry & exit rules
+        # Evaluate long & short rules
         entry_evals = [_evaluate_rule(r, fv, is_entry=True) for r in strat.entry_rules]
         exit_evals = [_evaluate_rule(r, fv, is_entry=False) for r in strat.exit_rules]
+        short_entry_rules = getattr(strat, "short_entry_rules", [])
+        short_exit_rules = getattr(strat, "short_exit_rules", [])
+        short_entry_evals = [_evaluate_rule(r, fv, is_entry=True) for r in short_entry_rules]
+        short_exit_evals = [_evaluate_rule(r, fv, is_entry=False) for r in short_exit_rules]
 
-        state = _determine_state(entry_evals, exit_evals)
+        state, directional_state = _determine_dual_state(
+            entry_evals, exit_evals, short_entry_evals, short_exit_evals
+        )
 
         n_pass = sum(1 for r in entry_evals if r.outcome == RuleOutcome.PASS)
         n_unavail = sum(1 for r in entry_evals if r.outcome == RuleOutcome.UNAVAILABLE)
         n_exit = sum(1 for r in exit_evals if r.outcome == RuleOutcome.PASS)
+
+        s_pass = sum(1 for r in short_entry_evals if r.outcome == RuleOutcome.PASS)
+        s_unavail = sum(1 for r in short_entry_evals if r.outcome == RuleOutcome.UNAVAILABLE)
+        s_exit = sum(1 for r in short_exit_evals if r.outcome == RuleOutcome.PASS)
 
         # Historical rolling evaluation & event extraction
         hist_states, act_events = _evaluate_historical_activations(strat, candles)
@@ -545,7 +630,7 @@ def evaluate_all_strategies(
             entry_rules_unavailable=n_unavail,
             exit_rules_triggered=n_exit,
             exit_rules_total=len(exit_evals),
-            rule_evaluations=entry_evals + exit_evals,
+            rule_evaluations=entry_evals + exit_evals + short_entry_evals + short_exit_evals,
             feature_vector=clean_fv,
             data_freshness=freshness,
             data_age_seconds=data_age,
@@ -554,6 +639,12 @@ def evaluate_all_strategies(
             tags=strat.tags,
             historical_states=hist_states,
             activation_events=act_events,
+            directional_state=directional_state,
+            short_rules_total=len(short_entry_evals),
+            short_rules_passing=s_pass,
+            short_rules_unavailable=s_unavail,
+            short_exit_rules_total=len(short_exit_evals),
+            short_exit_rules_triggered=s_exit,
         ))
 
     return results
@@ -641,9 +732,13 @@ def evaluate_strategies_observatory(
             "enabled": enabled,
             "experimental": experimental,
             "state": r.state.value,
+            "directional_state": getattr(r, "directional_state", "NEUTRAL"),
             "entry_rules_total": r.entry_rules_total,
             "entry_rules_passing": r.entry_rules_passing,
             "entry_rules_unavailable": r.entry_rules_unavailable,
+            "short_rules_total": getattr(r, "short_rules_total", 0),
+            "short_rules_passing": getattr(r, "short_rules_passing", 0),
+            "short_rules_unavailable": getattr(r, "short_rules_unavailable", 0),
             "exit_rules_triggered": r.exit_rules_triggered,
             "exit_rules_total": r.exit_rules_total,
             "rule_evaluations": [

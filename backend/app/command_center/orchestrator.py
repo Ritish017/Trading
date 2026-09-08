@@ -100,7 +100,12 @@ class ResearchCommandCenterOrchestrator:
         # Zero-trust verification against canonical quote store
         canonical_quote = canonical_store.get_canonical_quote(symbol)
         is_authentic_live = bool(canonical_quote and canonical_quote.is_live)
-        provider_name = canonical_quote.provider if canonical_quote else "UPSTOX"
+        raw_provider_name = canonical_quote.provider if canonical_quote else "UPSTOX"
+        # A market snapshot identifies the broker/data provider, not the
+        # transport used to receive a quote.  Transport-specific provenance
+        # remains on CanonicalQuote; exposing it here made one broker appear as
+        # several providers (for example, UPSTOX vs UPSTOX_WS_PROTOBUF).
+        provider_name = "UPSTOX" if raw_provider_name.startswith("UPSTOX_") else raw_provider_name
 
         # 1. Evaluate all 20 strategies dynamically from STRATEGY_REGISTRY
         strat_results = evaluate_all_strategies(candles, is_live_feed=is_authentic_live)
@@ -120,24 +125,21 @@ class ResearchCommandCenterOrchestrator:
 
         # Compute data age & freshness strictly from source timestamp
         data_age_sec = max(0, now - candle_ts)
+        classification = EvidenceClassification.RAW_AUTHENTIC_DATA
         if is_authentic_live:
             freshness = "LIVE"
-            classification = EvidenceClassification.RAW_AUTHENTIC_DATA
             confidence_basis = "Direct verified market feed observation"
             data_status = ProvenanceDataStatus.AVAILABLE
         elif data_age_sec <= 300:
             freshness = "RECENT"
-            classification = EvidenceClassification.HISTORICAL_RESEARCH_RESULT
             confidence_basis = "Recent market observation"
             data_status = ProvenanceDataStatus.AVAILABLE
         elif data_age_sec <= 86400:
             freshness = "RECENT_HISTORICAL"
-            classification = EvidenceClassification.HISTORICAL_RESEARCH_RESULT
             confidence_basis = "Historical session observation"
             data_status = ProvenanceDataStatus.AVAILABLE
         else:
             freshness = "HISTORICAL"
-            classification = EvidenceClassification.HISTORICAL_RESEARCH_RESULT
             confidence_basis = "Historical dataset sequence"
             data_status = ProvenanceDataStatus.AVAILABLE
 

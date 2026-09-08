@@ -161,13 +161,17 @@ class CanonicalQuoteStore:
             self._rest[symbol] = raw
             return self._reconcile(symbol)
 
-    def update_from_ws(self, raw: Dict[str, Any]) -> Optional[CanonicalQuote]:
-        if not self._accept(raw):
-            logger.warning("[CANONICAL] rejected WS observation with invalid identity/provenance: %s", raw.get("symbol"))
+    def update_from_ws(self, raw_or_symbol: Any, raw: Optional[Dict[str, Any]] = None) -> Optional[CanonicalQuote]:
+        data = raw if raw is not None else raw_or_symbol
+        if not isinstance(data, dict):
+            logger.warning("[CANONICAL] rejected WS observation with non-dict payload: %s", raw_or_symbol)
             return None
-        symbol = str(raw["symbol"])
+        if not self._accept(data):
+            logger.warning("[CANONICAL] rejected WS observation with invalid identity/provenance: %s", data.get("symbol"))
+            return None
+        symbol = str(data["symbol"])
         with self._lock:
-            self._ws[symbol] = raw
+            self._ws[symbol] = data
             return self._reconcile(symbol)
 
     def _reconcile(self, symbol: str) -> Optional[CanonicalQuote]:

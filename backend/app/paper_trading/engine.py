@@ -29,6 +29,13 @@ class PaperOrderRequest(BaseModel):
     exchange: str = "NSE"
     source: str = "MANUAL"
     account_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    signal_id: Optional[str] = None
+    candidate_id: Optional[str] = None
+    strategy_version: Optional[str] = None
+    signal_engine_version: Optional[str] = None
+    configuration_hash: Optional[str] = None
+    decision_reason: Optional[str] = None
 
 
 class PaperPositionResponse(BaseModel):
@@ -64,12 +71,19 @@ class PaperTradingEngine:
         self.closed_trades: List[Dict[str, Any]] = []
         self.order_history: List[Dict[str, Any]] = []
         self.fill_history: List[Dict[str, Any]] = []
+        self.idempotency_cache: Dict[str, Dict[str, Any]] = {}
 
     @property
     def available_capital(self) -> float:
         return round(self.capital, 2)
 
     def execute_order(self, order_req: PaperOrderRequest, account_id: str = "primary_personal_account") -> Dict[str, Any]:
+        # Check idempotency cache first to prevent duplicate execution on retries
+        if order_req.idempotency_key and order_req.idempotency_key in self.idempotency_cache:
+            cached = dict(self.idempotency_cache[order_req.idempotency_key])
+            cached["is_idempotent_replay"] = True
+            return cached
+
         order_id = f"ORD_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
         is_buy = order_req.side.upper() == "BUY"
 
@@ -87,6 +101,12 @@ class PaperTradingEngine:
             target_price=order_req.targetPrice,
             stop_loss=order_req.stopLoss,
             source=order_req.source,
+            signal_id=order_req.signal_id,
+            candidate_id=order_req.candidate_id,
+            strategy_version=order_req.strategy_version,
+            signal_engine_version=order_req.signal_engine_version,
+            configuration_hash=order_req.configuration_hash,
+            decision_reason=order_req.decision_reason,
         )
 
         # 2. Validation
@@ -158,6 +178,7 @@ class PaperTradingEngine:
 
         pos = {
             "id": pos_id,
+            "account_id": account_id,
             "symbol": canonical_order.symbol,
             "companyName": order_req.companyName or canonical_order.symbol.split(".")[0],
             "productType": canonical_order.product_type,
@@ -180,7 +201,7 @@ class PaperTradingEngine:
         self.order_history.append(canonical_order.model_dump())
         self.fill_history.append(fill.model_dump())
 
-        return {
+        res = {
             "status": "FILLED",
             "order_id": order_id,
             "fill_id": fill_id,
@@ -188,6 +209,10 @@ class PaperTradingEngine:
             "fill": fill.model_dump(),
             "available_capital": round(self.capital, 2),
         }
+        if order_req.idempotency_key:
+            self.idempotency_cache[order_req.idempotency_key] = res
+
+        return res
 
     def update_market_price(self, symbol: str, current_price: float):
         """Update mark-to-market prices and unrealized PnL for active positions."""
@@ -200,53 +225,107 @@ class PaperTradingEngine:
                 pos["unrealizedPnL"] = round(diff * pos["quantity"], 2)
                 pos["unrealizedPnLPercent"] = round((diff / pos["entryPrice"]) * 100.0, 2) if pos["entryPrice"] > 0 else 0.0
 
-    def close_position(self, pos_id: str, close_price: Optional[float] = None) -> Dict[str, Any]:
+    def get_position(self, symbol_or_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve active position by pos_id or symbol."""
+        if symbol_or_id in self.positions:
+            return self.positions[symbol_or_id]
+        for pos in self.positions.values():
+            if pos.get("symbol") == symbol_or_id:
+                return pos
+        return None
+
+    def close_position(
+        self,
+        pos_id: str,
+        close_price: Optional[float] = None,
+        account_id: Optional[str] = None,
+        close_quantity: Optional[int] = None,
+    ) -> Dict[str, Any]:
         pos = self.positions.get(pos_id)
         if not pos:
             return {"status": "ERROR", "reason": "Position not found"}
 
+        # IDOR Tenant Isolation: verify ownership
+        if account_id and pos.get("account_id") and pos.get("account_id") != account_id:
+            return {"status": "FORBIDDEN", "reason": "IDOR violation: position belongs to another account"}
+
+        total_qty = pos["quantity"]
+        qty_to_close = close_quantity if (close_quantity is not None and close_quantity > 0) else total_qty
+
+        if qty_to_close <= 0:
+            return {"status": "ERROR", "reason": "Invalid close quantity"}
+        if qty_to_close > total_qty:
+            return {"status": "ERROR", "reason": f"Close quantity {qty_to_close} exceeds open quantity {total_qty}"}
+
+        is_partial = qty_to_close < total_qty
         price_to_use = close_price if close_price and close_price > 0 else pos.get("currentPrice", pos["entryPrice"])
-        qty = pos["quantity"]
         is_buy = pos["side"] == "BUY"
 
         # Calculate authentic exit friction
         exit_frictions = calculate_indian_equity_frictions(
             price=price_to_use,
-            quantity=qty,
+            quantity=qty_to_close,
             is_buy=not is_buy,
             slippage_pct=self.slippage_pct,
         )
         effective_exit_price = round(
-            price_to_use - (exit_frictions["slippage"] / qty if is_buy else -exit_frictions["slippage"] / qty),
+            price_to_use - (exit_frictions["slippage"] / qty_to_close if is_buy else -exit_frictions["slippage"] / qty_to_close),
             2
         )
 
-        gross_pnl = (effective_exit_price - pos["entryPrice"]) * qty if is_buy else (pos["entryPrice"] - effective_exit_price) * qty
+        gross_pnl = (effective_exit_price - pos["entryPrice"]) * qty_to_close if is_buy else (pos["entryPrice"] - effective_exit_price) * qty_to_close
         total_exit_fees = exit_frictions["total_fees"]
         realized_pnl = gross_pnl - total_exit_fees
-        returned_margin = pos.get("marginLocked", (qty * pos["entryPrice"] * 0.20 if "MIS" in pos["productType"] else qty * pos["entryPrice"]))
 
-        self.capital += (returned_margin + realized_pnl)
+        # Proportional returned margin
+        margin_portion = (pos.get("marginLocked", 0.0) / total_qty) * qty_to_close
+        self.capital += (margin_portion + realized_pnl)
 
-        closed_record = dict(pos)
-        closed_record["exitPrice"] = effective_exit_price
-        closed_record["grossPnL"] = round(gross_pnl, 2)
-        closed_record["realizedPnL"] = round(realized_pnl, 2)
-        closed_record["brokerage"] = exit_frictions["brokerage"]
-        closed_record["taxes"] = total_exit_fees - exit_frictions["brokerage"]
-        closed_record["exit_frictions"] = exit_frictions
-        closed_record["closedAt"] = time.time()
+        closed_record = {
+            "id": f"TRD_{pos['symbol']}_{int(time.time() * 1000)}",
+            "account_id": pos.get("account_id", "primary_personal_account"),
+            "pos_id": pos_id,
+            "symbol": pos["symbol"],
+            "companyName": pos.get("companyName"),
+            "productType": pos.get("productType"),
+            "side": pos.get("side"),
+            "quantity": qty_to_close,
+            "entryPrice": pos["entryPrice"],
+            "exitPrice": effective_exit_price,
+            "grossPnL": round(gross_pnl, 2),
+            "realizedPnL": round(realized_pnl, 2),
+            "brokerage": exit_frictions["brokerage"],
+            "taxes": total_exit_fees - exit_frictions["brokerage"],
+            "exit_frictions": exit_frictions,
+            "timestamp": pos.get("timestamp", time.time()),
+            "closedAt": time.time(),
+        }
         self.closed_trades.append(closed_record)
 
-        del self.positions[pos_id]
-
-        return {
-            "status": "CLOSED",
-            "pos_id": pos_id,
-            "realized_pnl": round(realized_pnl, 2),
-            "available_capital": round(self.capital, 2),
-            "trade": closed_record,
-        }
+        if is_partial:
+            pos["quantity"] = total_qty - qty_to_close
+            pos["marginLocked"] = round(pos.get("marginLocked", 0.0) - margin_portion, 2)
+            return {
+                "status": "PARTIALLY_CLOSED",
+                "pos_id": pos_id,
+                "closed_quantity": qty_to_close,
+                "remaining_quantity": pos["quantity"],
+                "realized_pnl": round(realized_pnl, 2),
+                "available_capital": round(self.capital, 2),
+                "trade": closed_record,
+                "position": pos,
+            }
+        else:
+            del self.positions[pos_id]
+            return {
+                "status": "CLOSED",
+                "pos_id": pos_id,
+                "closed_quantity": qty_to_close,
+                "remaining_quantity": 0,
+                "realized_pnl": round(realized_pnl, 2),
+                "available_capital": round(self.capital, 2),
+                "trade": closed_record,
+            }
 
     def get_performance_summary(self) -> Dict[str, Any]:
         """Calculates performance analytics from closed trades and equity curve."""
@@ -254,23 +333,24 @@ class PaperTradingEngine:
         if total_trades == 0:
             return {
                 "total_trades": 0,
+                "winning_trades": 0,
+                "losing_trades": 0,
                 "win_rate_pct": 0.0,
                 "profit_factor": 0.0,
                 "total_realized_pnl": 0.0,
-                "total_fees_paid": 0.0,
+                "gross_profit": 0.0,
+                "gross_loss": 0.0,
                 "avg_trade_pnl": 0.0,
-                "sharpe_ratio": 0.0,
             }
 
-        pnls = [t.get("realizedPnL", 0.0) for t in self.closed_trades]
-        wins = [p for p in pnls if p > 0]
-        losses = [abs(p) for p in pnls if p < 0]
+        wins = [t for t in self.closed_trades if t.get("realizedPnL", 0.0) > 0]
+        losses = [t for t in self.closed_trades if t.get("realizedPnL", 0.0) <= 0]
+        gross_profit = sum(t.get("realizedPnL", 0.0) for t in wins)
+        gross_loss = abs(sum(t.get("realizedPnL", 0.0) for t in losses))
+        total_realized = round(sum(t.get("realizedPnL", 0.0) for t in self.closed_trades), 2)
 
         win_rate = round((len(wins) / total_trades) * 100.0, 2)
-        gross_profit = sum(wins)
-        gross_loss = sum(losses)
         profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.0 if gross_profit > 0 else 0.0)
-        total_realized = round(sum(pnls), 2)
         avg_trade = round(total_realized / total_trades, 2)
 
         return {
@@ -285,11 +365,19 @@ class PaperTradingEngine:
             "avg_trade_pnl": avg_trade,
         }
 
-    def get_portfolio_summary(self) -> Dict[str, Any]:
-        """Returns unified authoritative portfolio overview."""
-        total_unrealized = sum(p.get("unrealizedPnL", 0.0) for p in self.positions.values())
-        total_margin_locked = sum(p.get("marginLocked", 0.0) for p in self.positions.values())
-        total_realized = sum(t.get("realizedPnL", 0.0) for t in self.closed_trades)
+    def get_portfolio_summary(self, account_id: Optional[str] = None) -> Dict[str, Any]:
+        """Returns unified authoritative portfolio overview, optionally scoped by account_id."""
+        relevant_positions = [
+            p for p in self.positions.values()
+            if not account_id or p.get("account_id", "primary_personal_account") == account_id
+        ]
+        relevant_trades = [
+            t for t in self.closed_trades
+            if not account_id or t.get("account_id", "primary_personal_account") == account_id
+        ]
+        total_unrealized = sum(p.get("unrealizedPnL", 0.0) for p in relevant_positions)
+        total_margin_locked = sum(p.get("marginLocked", 0.0) for p in relevant_positions)
+        total_realized = sum(t.get("realizedPnL", 0.0) for t in relevant_trades)
         net_worth = self.capital + total_margin_locked + total_unrealized
 
         return {
@@ -300,10 +388,10 @@ class PaperTradingEngine:
             "net_worth": round(net_worth, 2),
             "total_unrealized_pnl": round(total_unrealized, 2),
             "total_realized_pnl": round(total_realized, 2),
-            "open_positions_count": len(self.positions),
-            "closed_trades_count": len(self.closed_trades),
-            "positions": list(self.positions.values()),
-            "closed_trades": self.closed_trades[-50:],
+            "open_positions_count": len(relevant_positions),
+            "closed_trades_count": len(relevant_trades),
+            "positions": relevant_positions,
+            "closed_trades": relevant_trades[-50:],
             "performance": self.get_performance_summary(),
         }
 
@@ -314,6 +402,7 @@ class PaperTradingEngine:
         self.closed_trades.clear()
         self.order_history.clear()
         self.fill_history.clear()
+        self.idempotency_cache.clear()
 
     async def load_from_db(self, session: Optional[AsyncSession] = None, account_id: str = "primary_personal_account"):
         """Loads authoritative state from database into engine memory cache."""
@@ -348,6 +437,10 @@ class PaperTradingEngine:
                 order_to_save = dict(order_dict)
                 order_to_save["order_id"] = oid
                 order_to_save["id"] = oid
+                if position_dict.get("signal_id"):
+                    order_to_save["signal_id"] = position_dict["signal_id"]
+                if position_dict.get("candidate_id"):
+                    order_to_save["candidate_id"] = position_dict["candidate_id"]
                 
                 fill_dict = None
                 if position_dict.get("fill_id"):

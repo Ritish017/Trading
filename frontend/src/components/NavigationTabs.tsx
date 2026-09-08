@@ -12,7 +12,8 @@ import {
   FlaskConical,
   Building2,
   Cpu,
-  Radio
+  Radio,
+  Radar
 } from 'lucide-react';
 
 export type ActivePage = 
@@ -26,13 +27,15 @@ export type ActivePage =
   | 'strategylab'
   | 'fundamentals'
   | 'researchfactory'
-  | 'commandcenter';
+  | 'commandcenter'
+  | 'signalcenter';
 
 interface NavigationTabsProps {
   activePage: ActivePage;
   onSelectPage: (page: ActivePage) => void;
   eventCount?: number;
   openPositionsCount?: number;
+  activeSignalCount?: number;
 }
 
 export const NavigationTabs: React.FC<NavigationTabsProps> = ({
@@ -40,6 +43,7 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
   onSelectPage,
   eventCount = 0,
   openPositionsCount = 0,
+  activeSignalCount = 0,
 }) => {
   const tabs = [
     {
@@ -127,6 +131,14 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
       badge: 'LIVE',
       badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
       color: 'text-rose-400',
+    },
+    {
+      id: 'signalcenter' as ActivePage,
+      label: 'Signal Center',
+      icon: Radar,
+      badge: activeSignalCount > 0 ? `${activeSignalCount} Signals` : 'APEX CORE',
+      badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+      color: 'text-amber-400',
     },
   ];
 

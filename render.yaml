@@ -1,0 +1,63 @@
+# Render Infrastructure Blueprint Configuration for APEX Quant Lab
+# ===================================================================
+# Provisions:
+# 1. apex-market-worker: Persistent Real-Market Paper Trading Worker (Background Worker)
+# 2. apex-postgres: Persistent Operational PostgreSQL Database
+#
+# Target Architecture:
+# Vercel -> APEX frontend / dashboard / serverless REST API
+# Render -> persistent APEX market-data + Signal Intelligence + paper-trading worker
+# Render PostgreSQL -> persistent operational database
+
+services:
+  # 1. Stateful Market Data & Paper Trading Worker (Dedicated Background Worker)
+  - type: worker
+    name: apex-market-worker
+    runtime: python
+    region: singapore # Optimal low-latency routing to Indian exchange feeds
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.app.worker
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APEX_ENV
+        value: production
+      - key: ENVIRONMENT
+        value: production
+      - key: PAPER_TRADING
+        value: "true"
+      - key: LIVE_TRADING
+        value: "false"
+      - key: REAL_TRADING_ENABLED
+        value: "false"
+      - key: ACTIVE_BROKER_PROVIDER
+        value: UPSTOX
+      - key: UPSTOX_ENABLED
+        value: "true"
+      - key: UPSTOX_BASE_URL
+        value: https://api.upstox.com
+      - key: UPSTOX_WS_ENABLED
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: apex-postgres
+          property: connectionString
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://apex-trading-lab.vercel.app,http://localhost:5173,http://localhost:3000
+      - key: UPSTOX_ACCESS_TOKEN
+        sync: false
+      - key: UPSTOX_ANALYTICS_TOKEN
+        sync: false
+      - key: UPSTOX_CLIENT_ID
+        sync: false
+      - key: UPSTOX_CLIENT_SECRET
+        sync: false
+
+databases:
+  # Managed PostgreSQL Database shared by Worker and Vercel Dashboard
+  - name: apex-postgres
+    region: singapore
+    plan: free
+    databaseName: apex_quant
+    user: apex_user

@@ -211,6 +211,8 @@ class StrategyDefinition:
     requirements: StrategyDataRequirements = field(default_factory=StrategyDataRequirements)
     entry_rules: List[StrategyRule] = field(default_factory=list)
     exit_rules: List[StrategyRule] = field(default_factory=list)
+    short_entry_rules: List[StrategyRule] = field(default_factory=list)
+    short_exit_rules: List[StrategyRule] = field(default_factory=list)
     invalidation_rules: List[StrategyRule] = field(default_factory=list)
     visualization: StrategyVisualization = field(default_factory=StrategyVisualization)
     research_parameters: List[ResearchParameter] = field(default_factory=list)

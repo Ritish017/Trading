@@ -30,6 +30,12 @@ class UpstoxWebSocketClient:
         self._loop_task: Optional[asyncio.Task] = None
         self.reconnect_count: int = 0
         self.last_tick_time: Optional[float] = None
+        self._stats: Dict[str, Any] = {
+            "messages_received": 0,
+            "last_message_time": 0.0,
+            "bytes_received": 0,
+            "errors": 0,
+        }
 
     async def start(self, callback: Callable[[NormalizedTick], Awaitable[None]]) -> bool:
         if websockets is None:
@@ -179,16 +185,21 @@ class UpstoxWebSocketClient:
             try:
                 from backend.app.broker_providers.upstox_proto import decode_upstox_protobuf_frame
                 decoded_data = decode_upstox_protobuf_frame(message)
-                if decoded_data and "feeds" in decoded_data:
-                    for inst_key, feed in decoded_data["feeds"].items():
-                        tick = self._parse_feed_dict(inst_key, feed)
-                        if tick:
-                            ticks.append(tick)
-                    if ticks:
-                        return ticks
+                if decoded_data is not None:
+                    self._stats["messages_received"] += 1
+                    self._stats["last_message_time"] = time.time()
+                    self._stats["bytes_received"] += len(message)
+                    if "feeds" in decoded_data:
+                        for inst_key, feed in decoded_data["feeds"].items():
+                            tick = self._parse_feed_dict(inst_key, feed)
+                            if tick:
+                                ticks.append(tick)
+                    return ticks
             except Exception as e:
                 logger.debug(f"[UPSTOX WS PROTOBUF] Error decoding binary frame: {e}")
+                self._stats["errors"] += 1
 
+            self._stats["errors"] += 1
             logger.warning(
                 "[UPSTOX WS DEGRADED] Received binary protobuf feed (%d bytes) that could not be decoded.",
                 len(message)

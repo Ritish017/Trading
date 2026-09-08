@@ -1580,7 +1580,14 @@ class StrategyRegistryManager:
         keys: Set[str] = {"close"}
         for s in strats:
             if s:
-                for r in s.entry_rules + s.exit_rules + s.invalidation_rules:
+                all_rules = (
+                    s.entry_rules
+                    + s.exit_rules
+                    + getattr(s, "short_entry_rules", [])
+                    + getattr(s, "short_exit_rules", [])
+                    + s.invalidation_rules
+                )
+                for r in all_rules:
                     keys.update(r.dependency_keys)
         return keys
 
@@ -1622,7 +1629,14 @@ ALL_CANONICAL_STRATEGIES: List[StrategyDefinition] = [
     ATR_VOLATILITY_EXPANSION,
 ]
 
+from backend.app.strategy_engine.dsl import StrategyDirection
+from backend.app.strategy_engine.short_rules import SHORT_ENTRY_RULES, SHORT_EXIT_RULES
+
 for _strat in ALL_CANONICAL_STRATEGIES:
+    if _strat.strategy_id in SHORT_ENTRY_RULES:
+        _strat.short_entry_rules = SHORT_ENTRY_RULES[_strat.strategy_id]
+        _strat.short_exit_rules = SHORT_EXIT_RULES.get(_strat.strategy_id, [])
+        _strat.direction = StrategyDirection.BOTH
     registry_manager.register(_strat)
 
 # Backward-compatible dictionary export

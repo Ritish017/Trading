@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 import logging
 import os
 import time
@@ -100,6 +101,8 @@ async def ensure_initialized():
         try:
             await init_db()
             await paper_engine.load_from_db()
+            from backend.app.signal_engine.signal_store import signal_store as apex_signal_store
+            await apex_signal_store.load_from_database()
         except Exception as e:
             logger.warning(f"init_db non-fatal error: {e}")
         try:
@@ -108,8 +111,8 @@ async def ensure_initialized():
             logger.warning(f"market_data_service.initialize non-fatal error: {e}")
         _initialized = True
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
     logger.info(f"Starting APEX Quant Lab Backend in {settings.environment} mode.")
     await ensure_initialized()
     try:
@@ -120,21 +123,21 @@ async def startup_event():
             await market_data_service.connect_websocket(on_normalized_tick_received)
     except Exception as e:
         logger.warning(f"WebSocket background feed non-fatal warning: {e}")
-
-@app.middleware("http")
-async def ensure_init_middleware(request, call_next):
-    if not _initialized and not request.url.path.startswith("/assets"):
-        await ensure_initialized()
-    return await call_next(request)
-
-@app.on_event("shutdown")
-async def shutdown_event():
+    yield
     logger.info("Shutting down APEX Quant Lab Backend...")
     if hasattr(market_data_service.active_provider, "disconnect"):
         try:
             await market_data_service.active_provider.disconnect()
         except Exception:
             pass
+
+app.router.lifespan_context = app_lifespan
+
+@app.middleware("http")
+async def ensure_init_middleware(request, call_next):
+    if not _initialized and not request.url.path.startswith("/assets"):
+        await ensure_initialized()
+    return await call_next(request)
 
 # --- Health Check Endpoints ---
 @app.get("/health")
@@ -157,6 +160,41 @@ async def database_health():
 @app.get("/health/redis")
 async def redis_health():
     return {"status": "ONLINE", "mode": "In-Memory Event Bus"}
+
+@app.get("/health/worker")
+async def worker_health():
+    """Returns lightweight monitoring health status of the stateful background worker."""
+    from backend.app.database.connection import AsyncSessionLocal
+    from backend.app.database.repositories.worker_repository import WorkerRepository
+    async with AsyncSessionLocal() as s:
+        repo = WorkerRepository(s)
+        st = await repo.get_worker_status("apex-market-worker")
+        db_health = await check_db_health()
+        return {
+            "worker_status": st.get("worker_status", "UNKNOWN"),
+            "market_status": st.get("market_connection", "DISCONNECTED"),
+            "database_status": db_health.get("status", "UNKNOWN"),
+            "paper_mode": True,
+            "live_trading": False,
+            "last_market_event": st.get("last_market_event"),
+            "last_signal_event": st.get("last_signal_event"),
+            "last_paper_event": st.get("last_paper_event"),
+            "event_count": st.get("paper_order_count", 0) + st.get("signal_count", 0),
+            "reconnect_count": st.get("reconnect_count", 0),
+            "error_count": st.get("error_count", 0),
+            "heartbeat_age_seconds": st.get("heartbeat_age_seconds"),
+            "is_stale": st.get("is_stale", True),
+        }
+
+@app.get("/api/worker/status")
+async def get_worker_status():
+    """Returns comprehensive stateful worker telemetry for the Vercel dashboard."""
+    from backend.app.database.connection import AsyncSessionLocal
+    from backend.app.database.repositories.worker_repository import WorkerRepository
+    async with AsyncSessionLocal() as s:
+        repo = WorkerRepository(s)
+        return await repo.get_worker_status("apex-market-worker")
+
 
 # --- Market Data API ---
 @app.get("/api/market/quote/{symbol}")
@@ -668,7 +706,7 @@ async def generate_strategy_hypothesis(payload: Dict[str, str]):
 async def place_paper_order(order: PaperOrderRequest, auth: AccountContext = Depends(verify_api_key)):
     authorize_account_access(auth, order.account_id)
     target_account = order.account_id or auth.account_id
-    res = paper_engine.execute_order(order)
+    res = paper_engine.execute_order(order, account_id=target_account)
     if res.get("status") == "FILLED":
         await paper_engine.sync_order_to_db(order.model_dump(), res["position"], target_account)
     trader_profile_mgr.record_trade(order.model_dump())
@@ -677,21 +715,31 @@ async def place_paper_order(order: PaperOrderRequest, auth: AccountContext = Dep
 @app.get("/api/paper/positions")
 async def get_paper_positions(account_id: Optional[str] = None, auth: Optional[AccountContext] = Depends(verify_api_key_optional)):
     """Returns the canonical unified paper trading portfolio."""
-    if account_id and auth:
+    if account_id:
+        if not auth:
+            raise HTTPException(status_code=401, detail="Authentication required to view specific account positions.")
         authorize_account_access(auth, account_id)
-    summary = paper_engine.get_portfolio_summary()
+    summary = paper_engine.get_portfolio_summary(account_id=account_id or (auth.account_id if auth else None))
     if not summary.get("performance", {}).get("total_trades"):
         summary["performance"] = paper_bridge.get_performance_summary()
     return summary
 
 @app.post("/api/paper/close/{pos_id}")
 async def close_paper_position(pos_id: str, payload: Dict[str, Any], auth: AccountContext = Depends(verify_api_key)):
-    target_account = payload.get("account_id")
+    target_account = payload.get("account_id") or auth.account_id
     authorize_account_access(auth, target_account)
+    # IDOR Defense: verify position exists and belongs to the caller account
+    pos = paper_engine.positions.get(pos_id)
+    if not pos:
+        raise HTTPException(status_code=404, detail=f"Position '{pos_id}' not found.")
+    pos_owner = pos.get("account_id", "primary_personal_account")
+    if pos_owner != target_account:
+        raise HTTPException(status_code=403, detail=f"IDOR violation: Account '{auth.account_id}' does not own position '{pos_id}'.")
     close_price = payload.get("close_price")
-    res = paper_engine.close_position(pos_id, close_price)
-    if res.get("status") == "CLOSED" and paper_engine.closed_trades:
-        await paper_engine.sync_close_to_db(pos_id, paper_engine.closed_trades[-1], target_account or auth.account_id)
+    close_qty = payload.get("close_quantity")
+    res = paper_engine.close_position(pos_id, close_price=close_price, account_id=target_account, close_quantity=close_qty)
+    if res.get("status") in ["CLOSED", "PARTIALLY_CLOSED"] and paper_engine.closed_trades:
+        await paper_engine.sync_close_to_db(pos_id, paper_engine.closed_trades[-1], target_account)
     return res
 
 @app.post("/api/paper/reset")
@@ -2044,6 +2092,346 @@ async def challenge_stock_command_center(symbol: str, req: CommandCenterCopilotR
         is_skeptic_mode=True,
     )
     return res
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 14: Signal Intelligence Engine — Opportunity Scanner Endpoints
+# ---------------------------------------------------------------------------
+from backend.app.signal_engine.models import SignalEngineConfig
+from backend.app.signal_engine.scanner import opportunity_scanner
+from backend.app.signal_engine.signal_store import signal_store as apex_signal_store
+
+_signal_engine_config = SignalEngineConfig()
+
+
+@app.get("/api/signals/scan")
+async def run_opportunity_scan(force: bool = False):
+    """
+    Runs the APEX Signal Intelligence Scanner across the configured universe.
+    Evaluates every instrument through the complete 14-stage pipeline:
+      Universe → Data Validation → Multi-TF Analysis → Indicators →
+      Regime → Strategy Voting → Confluence → Stop/Target → Risk/Reward →
+      Scoring → Quality Grade → Signal Generation
+
+    Returns:
+      qualified_signals: Ranked A+/A/B/C signals with full audit trail
+      pipeline_stats: How many instruments were dropped at each stage
+      market_regime: Current Nifty regime
+      rejected_records: Sample of rejected candidates with reasons
+    """
+    try:
+        result = await opportunity_scanner.run_scan(
+            market_data_service=market_data_service,
+            config=_signal_engine_config,
+            portfolio_state=None,
+            force=force,
+        )
+        return result.dict()
+    except Exception as e:
+        logger.error(f"Signal scan error: {e}")
+        raise HTTPException(status_code=500, detail=f"Signal scan failed: {str(e)}")
+
+
+@app.get("/api/signals/active")
+async def get_active_signals(
+    direction: Optional[str] = None,
+    min_grade: Optional[str] = None,
+    symbol: Optional[str] = None,
+):
+    """
+    Returns currently active, non-expired qualified signals from the signal store.
+    Optionally filtered by direction (LONG/SHORT), quality grade, or symbol.
+    """
+    signals = apex_signal_store.get_active_signals(
+        direction=direction,
+        min_grade=min_grade,
+        symbol=symbol,
+    )
+    return {
+        "signals": [s.dict() for s in signals],
+        "count": len(signals),
+        "performance": apex_signal_store.get_performance_stats(),
+    }
+
+
+
+@app.get("/api/signals/history/recent")
+async def get_signal_history(limit: int = 20):
+    """
+    Returns historical signals (expired, invalidated, triggered).
+    Useful for tracking signal outcomes over time.
+    """
+    history = apex_signal_store.get_signal_history(limit=min(limit, 100))
+    return {
+        "signals": [s.dict() for s in history],
+        "count": len(history),
+    }
+
+
+@app.get("/api/signals/rejected/recent")
+async def get_rejected_signals(limit: int = 20):
+    """
+    Returns recently rejected candidates with explicit rejection reasons.
+    This is the 'NO TRADE' transparency log — shows what was evaluated
+    and exactly why each candidate was rejected.
+    """
+    rejections = apex_signal_store.get_recent_rejections(limit=min(limit, 50))
+    return {
+        "rejections": [r.dict() for r in rejections],
+        "count": len(rejections),
+    }
+
+
+class PaperTradeFromSignalRequest(BaseModel):
+    signal_id: str
+    account_id: Optional[str] = None
+    quantity_override: Optional[int] = None
+
+
+@app.post("/api/signals/{signal_id}/paper-trade")
+async def paper_trade_from_signal(
+    signal_id: str,
+    req: PaperTradeFromSignalRequest,
+    auth: AccountContext = Depends(verify_api_key),
+):
+    """
+    Converts a qualified signal into a paper trade order.
+    Uses the signal's computed entry price, stop, and quantity from position sizing.
+    Passes through the risk engine before executing.
+
+    Requires authentication. The signal must be in QUALIFIED state.
+    """
+    signal = apex_signal_store.get_signal_by_id(signal_id)
+    if not signal:
+        raise HTTPException(status_code=404, detail=f"Signal {signal_id} not found")
+
+    q_grade = getattr(signal.quality_grade, "value", signal.quality_grade)
+    if q_grade in ("NO TRADE", "NO_TRADE"):
+        raise HTTPException(status_code=400, detail="Cannot paper trade a NO TRADE signal")
+
+    if not signal.entry or not signal.stop_loss:
+        raise HTTPException(status_code=400, detail="Signal missing entry price or stop loss")
+
+    target_account = req.account_id or auth.account_id
+    authorize_account_access(auth, target_account)
+
+    # Build paper order from signal
+    sig_dir = getattr(signal.direction, "value", signal.direction)
+    side = "BUY" if sig_dir == "LONG" else "SELL"
+    quantity = req.quantity_override or (
+        signal.position_size.quantity if signal.position_size else 1
+    )
+
+    order_req = PaperOrderRequest(
+        symbol=signal.symbol,
+        companyName=signal.symbol,
+        productType="MIS",  # Intraday for signal trades
+        side=side,
+        quantity=quantity,
+        price=signal.entry,
+        targetPrice=signal.targets[0].price if signal.targets else None,
+        stopLoss=signal.stop_loss.price,
+        order_type="MARKET",
+        exchange=signal.exchange,
+        source=f"SIGNAL_{signal_id[:8]}",
+        account_id=target_account,
+        idempotency_key=f"signal_{signal_id}",
+    )
+
+    res = paper_engine.execute_order(order_req, account_id=target_account)
+    if res.get("status") == "FILLED":
+        await paper_engine.sync_order_to_db(order_req.model_dump(), res["position"], target_account)
+        # Update signal state
+        signal.state = "TRIGGERED"
+
+    return {
+        "order_result": res,
+        "signal": signal.dict(),
+        "signal_id": signal_id,
+    }
+
+
+@app.get("/api/signals/config/universe")
+async def get_scanner_universe():
+    """Returns the currently configured scanner universe and configuration."""
+    return {
+        "universe": _signal_engine_config.universe,
+        "primary_timeframe": _signal_engine_config.primary_timeframe,
+        "mtf_timeframes": _signal_engine_config.mtf_timeframes,
+        "min_risk_reward": _signal_engine_config.min_risk_reward,
+        "min_confidence": _signal_engine_config.min_confidence,
+        "capital": _signal_engine_config.capital,
+        "risk_per_trade_pct": _signal_engine_config.risk_per_trade_pct,
+        "max_positions": _signal_engine_config.max_positions,
+        "quality_thresholds": {
+            "A+": _signal_engine_config.a_plus_score_threshold,
+            "A": _signal_engine_config.a_score_threshold,
+            "B": _signal_engine_config.b_score_threshold,
+            "C": _signal_engine_config.c_score_threshold,
+        }
+    }
+
+
+@app.get("/api/signals/performance")
+async def get_signal_performance():
+    """Returns signal engine performance statistics."""
+    return {
+        "store_stats": apex_signal_store.get_performance_stats(),
+        "active_count": len(apex_signal_store.get_active_signals()),
+    }
+
+
+@app.get("/api/signals/futures/{symbol}")
+async def get_futures_decision(symbol: str, direction: str = "LONG"):
+    """
+    Evaluates underlying symbol and available futures metrics for trade decision:
+    BUY FUTURE, SELL FUTURE, or NO TRADE.
+    """
+    from backend.app.signal_engine.futures_engine import FuturesEngine
+    quote = await market_data_service.get_quote(symbol)
+    ltp = float(quote.get("ltp", 100.0)) if quote else 100.0
+    res = FuturesEngine.analyze(
+        underlying_symbol=symbol,
+        underlying_direction=direction.upper(),
+        underlying_price=ltp,
+        futures_price=ltp * 1.002,
+        dte=15,
+        volume=60000,
+        oi=500000,
+        oi_change_pct=2.5,
+        lot_size=250,
+        margin_per_lot=150000.0,
+        stop_loss_pts=ltp * 0.015,
+        target_pts=ltp * 0.03,
+    )
+    return res.to_dict()
+
+
+@app.get("/api/signals/options/{symbol}")
+async def get_options_decision(symbol: str, direction: str = "LONG"):
+    """
+    Evaluates underlying symbol and option chain for contract/spread trade decision:
+    BUY CALL, BUY PUT, BULL CALL SPREAD, BEAR PUT SPREAD, or NO TRADE.
+    """
+    from backend.app.signal_engine.options_engine import OptionsEngine
+    quote = await market_data_service.get_quote(symbol)
+    ltp = float(quote.get("ltp", 100.0)) if quote else 100.0
+    res = OptionsEngine.evaluate(
+        underlying_symbol=symbol,
+        underlying_direction=direction.upper(),
+        underlying_price=ltp,
+        target_price=ltp * 1.03 if direction.upper() == "LONG" else ltp * 0.97,
+        stop_loss_price=ltp * 0.985 if direction.upper() == "LONG" else ltp * 1.015,
+    )
+    return res.to_dict()
+
+
+@app.get("/api/signals/outcomes")
+async def get_historical_outcomes(symbol: Optional[str] = None, limit: int = 50):
+    """
+    Returns recorded forward-market outcomes with realized R, MAE, MFE, and net PnL.
+    """
+    from backend.app.database.connection import AsyncSessionLocal
+    from backend.app.database.repositories.signal_repository import SignalRepository
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = SignalRepository(session)
+            outcomes_db = await repo.get_outcomes(symbol=symbol, limit=limit)
+            return {
+                "outcomes": [
+                    {
+                        "signal_id": o.signal_id,
+                        "symbol": o.symbol,
+                        "asset_class": o.asset_class,
+                        "direction": o.direction,
+                        "status": o.status,
+                        "entry_price": o.entry_price,
+                        "exit_price": o.exit_price,
+                        "stop_loss_price": o.stop_loss_price,
+                        "target_1_price": o.target_1_price,
+                        "mae": o.mae,
+                        "mfe": o.mfe,
+                        "realized_r": o.realized_r,
+                        "gross_pnl": o.gross_pnl,
+                        "net_pnl": o.net_pnl,
+                        "holding_candles": o.holding_candles,
+                    }
+                    for o in outcomes_db
+                ],
+                "count": len(outcomes_db),
+            }
+    except Exception as e:
+        logger.warning(f"Error fetching signal outcomes: {e}")
+        return {"outcomes": [], "count": 0}
+
+
+@app.get("/api/signals/calibration")
+async def get_confidence_calibration():
+    """
+    Returns the confidence calibration report auditing predicted confidence vs empirical outcomes.
+    Explicitly labels whether confidence values are empirical probabilities or heuristic conviction weights.
+    """
+    from backend.app.signal_engine.calibration_engine import calibration_engine
+    history = apex_signal_store.get_signal_history(limit=200)
+    pairs = []
+    for s in history:
+        is_win = s.state in ("TARGET_1", "TARGET_2", "TARGET_3", "TARGET_REACHED")
+        pairs.append((s.confidence, is_win))
+
+    report = calibration_engine.evaluate_calibration(pairs)
+    return report.model_dump()
+
+
+@app.get("/api/signals/continuous-research")
+async def get_continuous_research_state():
+    """
+    Returns the authoritative continuous empirical research state snapshot,
+    including non-parametric bootstrap expectancy, Wilson win-rate confidence interval,
+    sample size gate progress toward N=250, score bucket evaluation, and rejection metrics.
+    """
+    from backend.app.signal_engine.continuous_research_engine import continuous_research_engine
+    state = continuous_research_engine.evaluate_research_state()
+    return state.model_dump()
+
+
+@app.get("/api/signals/version-freeze")
+async def get_frozen_version_metadata():
+    """
+    Returns the certified immutable cryptographic identity metadata and configuration hash.
+    """
+    from backend.app.signal_engine.version_freeze import get_version_metadata, FROZEN_RESEARCH_CONFIGURATION
+    meta = get_version_metadata()
+    return {
+        "metadata": meta.model_dump(),
+        "configuration": FROZEN_RESEARCH_CONFIGURATION,
+    }
+
+
+@app.get("/api/signals/research-ledger")
+async def get_research_experiment_ledger():
+    """
+    Returns the immutable research experiment ledger tracking all hypotheses,
+    overfitting controls, parameter sweeps, and validation outcomes.
+    """
+    from backend.app.signal_engine.research_ledger import research_ledger
+    return {
+        "summary": research_ledger.get_summary(),
+        "experiments": [e.model_dump() for e in research_ledger.get_all_experiments()],
+    }
+
+
+@app.get("/api/signals/{signal_id}")
+async def get_signal_detail(signal_id: str):
+    """
+    Returns the complete signal object for a specific signal_id.
+    Includes: full audit trail, strategy votes, MTF analysis, validation gates,
+    stop/target details, position sizing, and WHY THIS TRADE? explanation.
+    """
+    signal = apex_signal_store.get_signal_by_id(signal_id)
+    if not signal:
+        raise HTTPException(status_code=404, detail=f"Signal {signal_id} not found")
+    return signal.dict()
 
 
 @app.websocket("/ws/ticks")

@@ -322,6 +322,132 @@ INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
         "segment": "NSE_EQ",
         "instrument_type": "EQUITY",
         "display_name": "Asian Paints Ltd"
+    },
+    "BHARTIARTL.NS": {
+        "instrument_key": "NSE_EQ|INE397D01024",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Bharti Airtel Ltd"
+    },
+    "BHARTIARTL": {
+        "instrument_key": "NSE_EQ|INE397D01024",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Bharti Airtel Ltd"
+    },
+    "ITC.NS": {
+        "instrument_key": "NSE_EQ|INE154A01025",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "ITC Ltd"
+    },
+    "ITC": {
+        "instrument_key": "NSE_EQ|INE154A01025",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "ITC Ltd"
+    },
+    "KOTAKBANK.NS": {
+        "instrument_key": "NSE_EQ|INE237A01028",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Kotak Mahindra Bank Ltd"
+    },
+    "KOTAKBANK": {
+        "instrument_key": "NSE_EQ|INE237A01028",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Kotak Mahindra Bank Ltd"
+    },
+    "LT.NS": {
+        "instrument_key": "NSE_EQ|INE018A01030",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Larsen & Toubro Ltd"
+    },
+    "LT": {
+        "instrument_key": "NSE_EQ|INE018A01030",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Larsen & Toubro Ltd"
+    },
+    "HINDUNILVR.NS": {
+        "instrument_key": "NSE_EQ|INE030A01027",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Hindustan Unilever Ltd"
+    },
+    "HINDUNILVR": {
+        "instrument_key": "NSE_EQ|INE030A01027",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Hindustan Unilever Ltd"
+    },
+    "AXISBANK.NS": {
+        "instrument_key": "NSE_EQ|INE238A01034",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Axis Bank Ltd"
+    },
+    "AXISBANK": {
+        "instrument_key": "NSE_EQ|INE238A01034",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Axis Bank Ltd"
+    },
+    "BAJFINANCE.NS": {
+        "instrument_key": "NSE_EQ|INE296A01024",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Bajaj Finance Ltd"
+    },
+    "BAJFINANCE": {
+        "instrument_key": "NSE_EQ|INE296A01024",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Bajaj Finance Ltd"
+    },
+    "HCLTECH.NS": {
+        "instrument_key": "NSE_EQ|INE860A01027",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "HCL Technologies Ltd"
+    },
+    "HCLTECH": {
+        "instrument_key": "NSE_EQ|INE860A01027",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "HCL Technologies Ltd"
+    },
+    "NESTLEIND.NS": {
+        "instrument_key": "NSE_EQ|INE239A01024",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Nestle India Ltd"
+    },
+    "NESTLEIND": {
+        "instrument_key": "NSE_EQ|INE239A01024",
+        "exchange": "NSE",
+        "segment": "NSE_EQ",
+        "instrument_type": "EQUITY",
+        "display_name": "Nestle India Ltd"
     }
 }
 

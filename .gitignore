@@ -16,3 +16,4 @@ venv/
 .vercel
 *.db
 .playwright-mcp/
+logs/

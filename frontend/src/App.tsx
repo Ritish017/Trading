@@ -27,6 +27,7 @@ import { StrategyLabPage } from './components/pages/StrategyLabPage';
 import { FundamentalResearchPage } from './components/pages/FundamentalResearchPage';
 import { ResearchFactoryPage } from './components/pages/ResearchFactoryPage';
 import { CommandCenterPage } from './components/pages/CommandCenterPage';
+import SignalCenterPage from './components/pages/SignalCenterPage';
 
 import { MarketNarrativeBanner } from './components/intelligence/MarketNarrativeBanner';
 import { IntelligenceTimeline } from './components/intelligence/IntelligenceTimeline';
@@ -914,6 +915,10 @@ export default function App() {
           selectedSymbol={selectedSymbol}
           onSelectSymbol={(sym) => setSelectedSymbol(sym)}
         />
+      )}
+
+      {activePage === 'signalcenter' && (
+        <SignalCenterPage />
       )}
 
       {/* Data Health & Latency Bottom Status Bar */}

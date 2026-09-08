@@ -1,0 +1,84 @@
+{
+  "configuration_hash": "d3e94bea101d71505e19c20c2086da9cbf629cdce04c46044eb5a62d9cace94e",
+  "git_commit": "96451be6839ade4c363c1a4860dcb3261c642cb3",
+  "strategy_version": "2026.1.0-FROZEN",
+  "signal_engine_version": "2026.1.0-CERTIFIED",
+  "cost_model_version": "NSE-STATUTORY-2026-V1",
+  "options_engine_version": "BS-GREEKS-DEBIT-V1",
+  "timestamp": "2026-09-08T16:52:47Z",
+  "total_candidates_evaluated": 0,
+  "total_qualified_signals": 0,
+  "total_rejected_candidates": 0,
+  "total_paper_orders": 0,
+  "total_completed_trades": 0,
+  "sample_size_classification": "INSUFFICIENT",
+  "target_sample_size": 250,
+  "progress_to_target_pct": 0.0,
+  "win_rate": 0.0,
+  "win_rate_ci_95": [
+    0.0,
+    0.0
+  ],
+  "expectancy_r": 0.0,
+  "expectancy_ci_95": [
+    0.0,
+    0.0
+  ],
+  "sortino_ratio": 0.0,
+  "profit_factor": 0.0,
+  "max_drawdown_r": 0.0,
+  "recovery_factor": 0.0,
+  "tail_metrics": {},
+  "grade_model_status": "GRADE_MODEL_NOT_YET_VALIDATED",
+  "grade_breakdown": {
+    "notice": "Insufficient sample (N < 30) across grades to validate monotonicity."
+  },
+  "score_bucket_predictive_power": "SCORE_NOT_YET_VALIDATED",
+  "score_buckets": {
+    "notice": "Insufficient scored observations (N < 30) for bucket calibration."
+  },
+  "calibration_status": "CALIBRATION_NOT_ESTABLISHED",
+  "brier_score": null,
+  "calibration_bins": {},
+  "rejection_engine_status": "REJECTION_ENGINE_ACTIVE",
+  "rejection_summary": {
+    "total_rejected_candidates": 0,
+    "rejections_by_gate": {},
+    "safeguard_status": "ACTIVE_NON_COMPENSATORY_FILTERING"
+  },
+  "strategy_rankings": [],
+  "directional_breakdown": {
+    "LONG": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "expectancy_r": 0.0
+    },
+    "SHORT": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "expectancy_r": 0.0
+    }
+  },
+  "asset_breakdown": {
+    "EQUITY": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "expectancy_r": 0.0
+    },
+    "FUTURES": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "expectancy_r": 0.0
+    },
+    "OPTIONS": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "expectancy_r": 0.0
+    }
+  },
+  "regime_breakdown": {},
+  "statistical_edge_verdict": "NOT_ESTABLISHED",
+  "paper_trading_readiness": "READY_FOR_CONTROLLED_VALIDATION",
+  "live_capital_readiness": "NOT_CERTIFIED",
+  "notes": "Statistical edge is NOT ESTABLISHED. Authentic sample size N=0 < 250 target. Platform is certified for offline quantitative research and forward paper-trading only."
+}

@@ -63,6 +63,12 @@ class CanonicalOrder(BaseModel):
     stop_loss: Optional[float] = None
     product_type: str = "CNC"  # CNC or MIS
     source: str = "MANUAL"
+    signal_id: Optional[str] = None
+    candidate_id: Optional[str] = None
+    strategy_version: Optional[str] = None
+    signal_engine_version: Optional[str] = None
+    configuration_hash: Optional[str] = None
+    decision_reason: Optional[str] = None
 
     def transition_to(self, new_state: OrderState, reason: Optional[str] = None) -> None:
         validate_order_transition(self.status, new_state)

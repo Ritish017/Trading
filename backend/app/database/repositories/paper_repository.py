@@ -60,6 +60,12 @@ class PaperRepository:
             order.status = order_dict.get("status", order.status)
             order.source = order_dict.get("source", order.source)
             order.rejection_reason = order_dict.get("rejection_reason", order.rejection_reason)
+            order.signal_id = order_dict.get("signal_id", getattr(order, "signal_id", None))
+            order.candidate_id = order_dict.get("candidate_id", getattr(order, "candidate_id", None))
+            order.strategy_version = order_dict.get("strategy_version", getattr(order, "strategy_version", None))
+            order.signal_engine_version = order_dict.get("signal_engine_version", getattr(order, "signal_engine_version", None))
+            order.configuration_hash = order_dict.get("configuration_hash", getattr(order, "configuration_hash", None))
+            order.decision_reason = order_dict.get("decision_reason", getattr(order, "decision_reason", None))
         else:
             order = PaperOrderModel(
                 order_id=order_id,
@@ -77,6 +83,12 @@ class PaperRepository:
                 status=order_dict.get("status", "FILLED"),
                 source=order_dict.get("source", "MANUAL"),
                 rejection_reason=order_dict.get("rejection_reason"),
+                signal_id=order_dict.get("signal_id"),
+                candidate_id=order_dict.get("candidate_id"),
+                strategy_version=order_dict.get("strategy_version"),
+                signal_engine_version=order_dict.get("signal_engine_version"),
+                configuration_hash=order_dict.get("configuration_hash"),
+                decision_reason=order_dict.get("decision_reason"),
             )
             self.session.add(order)
         await self.session.commit()
@@ -195,6 +207,12 @@ class PaperRepository:
                 order.status = order_dict.get("status", order.status)
                 order.source = order_dict.get("source", order.source)
                 order.rejection_reason = order_dict.get("rejection_reason", order.rejection_reason)
+                order.signal_id = order_dict.get("signal_id", getattr(order, "signal_id", None))
+                order.candidate_id = order_dict.get("candidate_id", getattr(order, "candidate_id", None))
+                order.strategy_version = order_dict.get("strategy_version", getattr(order, "strategy_version", None))
+                order.signal_engine_version = order_dict.get("signal_engine_version", getattr(order, "signal_engine_version", None))
+                order.configuration_hash = order_dict.get("configuration_hash", getattr(order, "configuration_hash", None))
+                order.decision_reason = order_dict.get("decision_reason", getattr(order, "decision_reason", None))
             else:
                 order = PaperOrderModel(
                     order_id=order_id,
@@ -212,6 +230,12 @@ class PaperRepository:
                     status=order_dict.get("status", "FILLED"),
                     source=order_dict.get("source", "MANUAL"),
                     rejection_reason=order_dict.get("rejection_reason"),
+                    signal_id=order_dict.get("signal_id"),
+                    candidate_id=order_dict.get("candidate_id"),
+                    strategy_version=order_dict.get("strategy_version"),
+                    signal_engine_version=order_dict.get("signal_engine_version"),
+                    configuration_hash=order_dict.get("configuration_hash"),
+                    decision_reason=order_dict.get("decision_reason"),
                 )
                 self.session.add(order)
 

@@ -2,18 +2,21 @@
 
 > **Experiment Identification**: `APEX-LIVE-PAPER-2026-09-10`  
 > **Session Target Date**: `2026-09-10` (Thursday Session)  
-> **Pre-Market Verification Timestamp (IST)**: `2026-09-09T00:33:13+05:30` (UTC: `2026-09-08T19:03:13Z`)  
+> **Pre-Market Verification Timestamp (IST)**: `2026-09-09T02:25:00+05:30` (UTC: `2026-09-08T20:55:00Z`)  
 > **Repository**: `https://github.com/Ritish017/Trading`  
-> **Authoritative Commit Hash**: `96451be6839ade4c363c1a4860dcb3261c642cb3`  
+> **Authoritative Commit Hash**: `095865f52a3f2c29ea3007e560ec782937581135`  
 > **Frozen Research Hash**: `d3e94bea101d71505e19c20c2086da9cbf629cdce04c46044eb5a62d9cace94e`  
 > **Execution Mode**: `PAPER TRADING ONLY` (`LIVE_ORDER_ALLOWED = False` hard enforced)  
 > **Master Evidence File**: `logs/live_paper/2026-09-10/APEX_2026-09-10_MASTER.jsonl`
+> **Render Worker Service**: `apex-market-worker-probe` (`https://apex-market-worker-probe.onrender.com`)
+> **Render PostgreSQL**: `apex-postgres` (`dpg-dag6bl0hchos73826v50-a`, Singapore region)
+> **Vercel Dashboard & API**: `https://apex-trading-lab.vercel.app`
 
 ---
 
 ## 1. Executive Summary & Preflight Result
 
-Prior to the full-day trading session on September 10, 2026, the complete APEX Signal Intelligence and Paper Trading Engine underwent automated preflight verification, dry-run stress testing, safety invariant enforcement, and regression test suites.
+Prior to the full-day trading session on September 10, 2026, the complete APEX Signal Intelligence and Paper Trading Engine underwent automated preflight verification, dry-run stress testing, safety invariant enforcement, and regression test suites across the production distributed deployment (Vercel Edge + Render Background Worker + Render PostgreSQL 16).
 
 ```
 ================================================================================
@@ -21,17 +24,17 @@ Prior to the full-day trading session on September 10, 2026, the complete APEX S
 ================================================================================
 Check Name                  Status  Verification Details
 --------------------------------------------------------------------------------
-1. correct_date             WARN    Current IST date is configured for session target 2026-09-10.
+1. correct_date             WARN    Current IST date 2026-09-09 is configured for session target 2026-09-10.
 2. exchange_session         WARN    NSE session closed at night. Scheduled for regular open at 09:15 IST.
 3. upstox_authentication    PASS    Authenticated successfully with Upstox V2 (Token verified).
-4. websocket_authorization  PASS    Authorized WebSocket URI: wss://wsfeeder-api.upstox.com/market-data-feed...
-5. protobuf_decoding        PASS    Binary Protobuf FeedResponse frame decoded (59 bytes).
+4. websocket_authorization  PASS    Authorized WebSocket URI: wss://wsfeeder-api.upstox.com/market-data-feed/v2
+5. protobuf_decoding        PASS    Binary Protobuf FeedResponse frame decoded (154 bytes).
 6. universe_loaded          PASS    All 20 universe instruments mapped in INSTRUMENT_MAP.
 7. strategy_registry        PASS    All 20/20 systematic strategies loaded with LONG/SHORT rules.
 8. frozen_hash_matches      PASS    SHA-256 matches d3e94bea101d71505e19c20c2086da9cbf629cdce04c46044eb5a62d9cace94e.
 9. paper_mode_enforced      PASS    LIVE_ORDER_ALLOWED = False, real_trading_enabled = False strictly asserted.
 10. live_order_path_blocked PASS    Attempted live broker order blocked by LiveOrderForbiddenSecurityError.
-11. database_available      PASS    SQLite ACID connection operational (status: ONLINE).
+11. database_available      PASS    Render PostgreSQL operational (status: ONLINE, 21 tables verified).
 12. master_jsonl_writable   PASS    Append-only sequential JSONL logger verified.
 --------------------------------------------------------------------------------
 OVERALL PREFLIGHT STATUS   : READY_WITH_WARNINGS (10 Passed, 2 Non-Critical Warnings, 0 Failures)
@@ -164,7 +167,7 @@ Schema conformance verified:
   "symbol": null,
   "source": "SESSION_INITIALIZER",
   "data_provenance": "AUTHENTIC_LIVE",
-  "git_commit": "96451be6839ade4c363c1a4860dcb3261c642cb3",
+  "git_commit": "095865f52a3f2c29ea3007e560ec782937581135",
   "config_hash": "d3e94bea101d71505e19c20c2086da9cbf629cdce04c46044eb5a62d9cace94e",
   "engine_version": "2026.1.0-CERTIFIED",
   "payload": {}
@@ -174,6 +177,7 @@ Schema conformance verified:
 * **Sequence Monotonicity**: Verified; sequential numbers increment monotonically ($1, 2, 3 \dots$).
 * **Crash Recovery**: Verified; restarting session reads existing lines and resumes sequence numbering without resetting or overwriting previous records.
 * **Integrity Hash**: SHA-256 checksum computed on file close.
+* **Master Log Durability**: `NOT_VERIFIED` for container replacement on ephemeral Render worker filesystem. Render background workers run in ephemeral containers; local filesystem disk does not survive redeploys or service plan restructuring unless a Render Persistent Disk is explicitly mounted to `/app/logs` or offloaded to AWS S3/Cloudflare R2. However, all critical operational state (positions, orders, trades, worker heartbeats) is fully durable in Render Managed PostgreSQL (`apex-postgres`).
 
 ---
 
@@ -204,3 +208,5 @@ C:\Python314\python.exe -m backend.app.live_paper.cli verify --log-file logs/liv
 1. **Engineering Correctness**: `PASS`. The end-to-end observation, evidence recording, paper execution, and cryptographic audit pipelines operate deterministically.
 2. **Empirical Alpha / Edge**: `NOT_ESTABLISHED`. A single day's trading session (or $N < 250$ trades) cannot mathematically establish quantitative edge under Wilson and bootstrap confidence intervals.
 3. **Safety Status**: `LIVE_ORDERS_BLOCKED`. Real-money trading is strictly forbidden.
+4. **Master Log Durability**: `NOT_VERIFIED`. Ephemeral container storage requires persistent disk attachment or S3 stream for cold log survivability across container teardown.
+

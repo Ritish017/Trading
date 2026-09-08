@@ -31,10 +31,10 @@ if raw_db_url:
     database_url = raw_db_url.strip()
     if database_url.startswith("postgresql://") or database_url.startswith("postgres://"):
         try:
-            import psycopg  # noqa: F401
-            driver = "postgresql+psycopg://"
-        except ImportError:
+            import asyncpg  # noqa: F401
             driver = "postgresql+asyncpg://"
+        except ImportError:
+            driver = "postgresql+psycopg://"
         if database_url.startswith("postgresql://"):
             database_url = database_url.replace("postgresql://", driver, 1)
         else:

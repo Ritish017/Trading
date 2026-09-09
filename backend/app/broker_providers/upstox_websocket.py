@@ -216,15 +216,26 @@ class UpstoxWebSocketClient:
         if ltp <= 0:
             return None
 
-        cp_raw = ltpc.get("cp") or ltpc.get("close")
-        prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else None
-        
-        if prev_close is not None and prev_close > 0:
-            change = round(ltp - prev_close, 2)
-            change_pct = round((change / prev_close) * 100.0, 2)
+        efd = ff.get("marketFF", {}).get("efd", {}) or feed.get("efd", {})
+        efd_change = efd.get("change")
+        efd_pct = efd.get("change_percent")
+
+        if efd_change is not None:
+            try:
+                change = round(float(efd_change), 2)
+                change_pct = round(float(efd_pct), 2) if efd_pct is not None else None
+                prev_close = round(ltp - change, 2)
+            except (ValueError, TypeError):
+                change, change_pct, prev_close = None, None, None
         else:
-            change = None
-            change_pct = None
+            cp_raw = ltpc.get("cp") or ltpc.get("close")
+            prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else None
+            if prev_close is not None and prev_close > 0:
+                change = round(ltp - prev_close, 2)
+                change_pct = round((change / prev_close) * 100.0, 2)
+            else:
+                change = None
+                change_pct = None
 
         ohlc = ff.get("marketFF", {}).get("ohlc", {}) or {}
         raw_open = ohlc.get("open")
@@ -234,14 +245,15 @@ class UpstoxWebSocketClient:
         volume = int(ff.get("marketFF", {}).get("v", 0) or feed.get("v", 0) or 0)
         oi = int(ff.get("marketFF", {}).get("eoi", 0) or feed.get("oi", 0) or 0)
         ltt_raw = ltpc.get("ltt")
+        trade_ts = float(ltt_raw) / 1000.0 if ltt_raw and float(ltt_raw) > 1e11 else (float(ltt_raw) if ltt_raw else time.time())
 
         return NormalizedTick(
             symbol=symbol,
             instrument_key=inst_key,
             exchange="NSE",
-            timestamp=time.time(),
+            timestamp=trade_ts,
             received_at=time.time() * 1000.0,
-            last_trade_time=float(ltt_raw) / 1000.0 if ltt_raw and float(ltt_raw) > 1e11 else (float(ltt_raw) if ltt_raw else time.time()),
+            last_trade_time=trade_ts,
             ltp=ltp,
             open=float(raw_open) if raw_open is not None else None,
             high=float(raw_high) if raw_high is not None else None,

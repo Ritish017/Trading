@@ -55,9 +55,11 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         <div className="flex items-center space-x-1.5">
           <Globe className="w-3.5 h-3.5 text-sky-400" />
           <div className="flex flex-col">
-            <span className="text-[9px] text-stone-400 font-sans uppercase">FII Net Cash</span>
+            <span className="text-[9px] text-stone-400 font-sans uppercase">
+              FII Net Cash {fiiDiiFlow?.date ? `(${fiiDiiFlow.date})` : ''}
+            </span>
             <span className={`font-bold ${fiiCash !== undefined && fiiCash !== null ? (fiiCash >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-stone-500'}`}>
-              {fiiCash !== undefined && fiiCash !== null ? `${fiiCash >= 0 ? '+' : ''}₹${fiiCash.toLocaleString()} Cr` : 'UNAVAILABLE'}
+              {fiiCash !== undefined && fiiCash !== null ? `${fiiCash >= 0 ? '+' : ''}₹${fiiCash.toLocaleString()} Cr` : 'DATA PENDING'}
             </span>
           </div>
         </div>
@@ -67,9 +69,11 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         <div className="flex items-center space-x-1.5">
           <Landmark className="w-3.5 h-3.5 text-purple-400" />
           <div className="flex flex-col">
-            <span className="text-[9px] text-stone-400 font-sans uppercase">DII Net Cash</span>
+            <span className="text-[9px] text-stone-400 font-sans uppercase">
+              DII Net Cash {fiiDiiFlow?.date ? `(${fiiDiiFlow.date})` : ''}
+            </span>
             <span className={`font-bold ${diiCash !== undefined && diiCash !== null ? (diiCash >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-stone-500'}`}>
-              {diiCash !== undefined && diiCash !== null ? `${diiCash >= 0 ? '+' : ''}₹${diiCash.toLocaleString()} Cr` : 'UNAVAILABLE'}
+              {diiCash !== undefined && diiCash !== null ? `${diiCash >= 0 ? '+' : ''}₹${diiCash.toLocaleString()} Cr` : 'DATA PENDING'}
             </span>
           </div>
         </div>
@@ -79,7 +83,9 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         <div className="flex flex-col">
           <span className="text-[9px] text-stone-400 font-sans uppercase">NSE Market Breadth</span>
           <span className="font-bold text-sky-400">
-            {adv !== undefined && dec !== undefined ? `${adv} A : ${dec} D (${ratio ?? '-'}x)` : 'UNAVAILABLE'}
+            {breadth && breadth.status !== 'UNAVAILABLE' && (adv !== undefined && dec !== undefined && (adv > 0 || dec > 0 || (breadth as any).unchanged > 0))
+              ? `${adv} A : ${dec} D (${ratio !== null && ratio !== undefined ? `${ratio}x` : '—'})`
+              : 'DATA UNAVAILABLE'}
           </span>
         </div>
       </div>

@@ -416,7 +416,8 @@ async def get_market_breadth():
     tracked_syms = [
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
         "SBIN.NS", "TATAMOTORS.NS", "BHARTIARTL.NS", "ITC.NS", "KOTAKBANK.NS",
-        "LT.NS", "HINDUNILVR.NS", "AXISBANK.NS", "BAJFINANCE.NS", "MARUTI.NS"
+        "LT.NS", "HINDUNILVR.NS", "AXISBANK.NS", "BAJFINANCE.NS", "MARUTI.NS",
+        "SUNPHARMA.NS", "ASIANPAINT.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
     ]
     try:
         quotes = await market_data_service.get_quotes(tracked_syms)
@@ -430,7 +431,7 @@ async def get_market_breadth():
             "advances": 0,
             "declines": 0,
             "unchanged": 0,
-            "ratio": 1.0,
+            "ratio": None,
             "new52WeekHighs": None,
             "new52WeekLows": None,
             "upperCircuits": None,
@@ -457,8 +458,16 @@ async def get_market_breadth():
                 unchanged += 1
 
     ratio = round(advances / declines, 2) if declines > 0 else (float(advances) if advances > 0 else 1.0)
-    is_live = market_data_service.is_live
-    status = "LIVE" if is_live else ("SIMULATED" if market_data_service.provider_mode == "SIMULATED" else "HISTORICAL")
+    
+    from backend.app.market_data.session_engine import MarketSessionEngine, MarketSessionState
+    session_state = MarketSessionEngine.get_market_session_state()
+    is_live = (session_state == MarketSessionState.LIVE) and market_data_service.is_live
+    if session_state in (MarketSessionState.MARKET_CLOSED, MarketSessionState.POST_MARKET):
+        status = "MARKET_CLOSED"
+    elif is_live:
+        status = "LIVE"
+    else:
+        status = "RECENT"
 
     return {
         "universe": f"NSE Liquid Basket ({len(valid_quotes)} tracked)",
@@ -473,6 +482,8 @@ async def get_market_breadth():
         "source": market_data_service.active_provider.provider_name,
         "status": status,
         "is_live": is_live,
+        "timestamp": time.time(),
+        "trading_date": MarketSessionEngine.get_ist_now().strftime("%Y-%m-%d"),
     }
 
 # --- Quantitative Analysis API ---

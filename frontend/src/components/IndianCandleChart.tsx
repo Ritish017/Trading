@@ -47,13 +47,19 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
   const currentChangePct = changePercent ?? stock?.changePercent ?? 0;
   const isPos = currentChange >= 0;
 
-  // Strict Candle Validation
-  const validCandles = (candles || []).filter((c) => {
-    if (!c || typeof c.open !== 'number' || typeof c.close !== 'number' || isNaN(c.open) || isNaN(c.close)) return false;
-    const maxOC = Math.max(c.open, c.close);
-    const minOC = Math.min(c.open, c.close);
-    return c.high >= maxOC && c.low <= minOC;
-  });
+  // Strict Candle Validation & Chronological Sort
+  const validCandles = (candles || [])
+    .filter((c) => {
+      if (!c || typeof c.open !== 'number' || typeof c.close !== 'number' || isNaN(c.open) || isNaN(c.close)) return false;
+      const maxOC = Math.max(c.open, c.close);
+      const minOC = Math.min(c.open, c.close);
+      return c.high >= maxOC && c.low <= minOC;
+    })
+    .sort((a, b) => {
+      const ta = typeof a.time === 'number' ? a.time : (a.timestamp ? Number(a.timestamp) : 0);
+      const tb = typeof b.time === 'number' ? b.time : (b.timestamp ? Number(b.timestamp) : 0);
+      return ta - tb;
+    });
 
   const candleList = validCandles.length > 0 ? validCandles : [];
 
@@ -89,24 +95,28 @@ export const IndianCandleChart: React.FC<IndianCandleChartProps> = ({
     1000
   ) : 1000;
 
-  // Format Timestamps for X-Axis Labels and Crosshairs
+  // Format Timestamps for X-Axis Labels and Crosshairs in Indian Standard Time (Asia/Kolkata)
   const formatTimeLabel = (timestamp: number | string, tf: string) => {
     try {
       const ms = typeof timestamp === 'number' ? (timestamp > 1e11 ? timestamp : timestamp * 1000) : new Date(timestamp).getTime();
       const d = new Date(ms);
       if (isNaN(d.getTime())) return '';
-      
-      const day = d.getDate().toString().padStart(2, '0');
-      const month = d.toLocaleString('en-US', { month: 'short' });
-      const hours = d.getHours().toString().padStart(2, '0');
-      const mins = d.getMinutes().toString().padStart(2, '0');
+
+      const istTimeFormatter = new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
 
       if (tf === '1D') {
-        return `${day} ${month}`;
+        return new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' }).format(d);
       } else if (tf === '1h' || tf === '15m') {
-        return `${day} ${month} ${hours}:${mins}`;
+        const datePart = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' }).format(d);
+        const timePart = istTimeFormatter.format(d);
+        return `${datePart} ${timePart}`;
       } else {
-        return `${hours}:${mins}`;
+        return istTimeFormatter.format(d);
       }
     } catch {
       return '';

@@ -69,7 +69,9 @@ export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows, flow }) => 
               <Globe className="w-3 h-3 text-sky-400" />
               <span>FII CASH NET</span>
             </span>
-            <span className="font-mono text-[9px]">{latest.date || 'Today'}</span>
+            <span className="font-mono text-[9px]">
+              {latest.date ? `${latest.date}${latest.is_today === false ? ' (PREV)' : ''}` : 'PENDING'}
+            </span>
           </div>
           <div className={`text-base font-black font-mono ${fiiCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {fiiCash >= 0 ? '+' : ''}₹{fiiCash.toLocaleString()} Cr
@@ -84,7 +86,9 @@ export const FIIDIITracker: React.FC<FIIDIITrackerProps> = ({ flows, flow }) => 
               <Landmark className="w-3 h-3 text-purple-400" />
               <span>DII CASH NET</span>
             </span>
-            <span className="font-mono text-[9px]">{latest.date || 'Today'}</span>
+            <span className="font-mono text-[9px]">
+              {latest.date ? `${latest.date}${latest.is_today === false ? ' (PREV)' : ''}` : 'PENDING'}
+            </span>
           </div>
           <div className={`text-base font-black font-mono ${diiCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {diiCash >= 0 ? '+' : ''}₹{diiCash.toLocaleString()} Cr

@@ -223,16 +223,26 @@ export default function App() {
                 const canonical = canonicalQuoteStore.getQuote(stock.symbol);
                 if (!canonical || canonical.ltp === null || canonical.ltp <= 0) return stock;
                 const newPrice = canonical.ltp;
-                const prevClose = canonical.previous_close || stock.prevClose || newPrice;
+                const prevClose = canonical.previous_close !== null && canonical.previous_close !== undefined && canonical.previous_close > 0
+                  ? canonical.previous_close
+                  : (canonical.change !== null && canonical.change !== undefined && canonical.change !== 0
+                      ? Number((newPrice - canonical.change).toFixed(2))
+                      : (stock.prevClose || null));
+                const change = canonical.change !== null && canonical.change !== undefined
+                  ? canonical.change
+                  : (prevClose && prevClose > 0 ? Number((newPrice - prevClose).toFixed(2)) : 0);
+                const changePercent = canonical.change_percent !== null && canonical.change_percent !== undefined
+                  ? canonical.change_percent
+                  : (prevClose && prevClose > 0 ? Number((((newPrice - prevClose) / prevClose) * 100).toFixed(2)) : 0);
                 return {
                   ...stock,
                   price: newPrice,
-                  change: canonical.change ?? (prevClose > 0 ? Number((newPrice - prevClose).toFixed(2)) : 0),
-                  changePercent: canonical.change_percent ?? (prevClose > 0 ? Number((((newPrice - prevClose) / prevClose) * 100).toFixed(2)) : 0),
+                  change: change,
+                  changePercent: changePercent,
                   high: canonical.high ?? stock.high ?? newPrice,
                   low: canonical.low ?? stock.low ?? newPrice,
                   open: canonical.open ?? stock.open ?? newPrice,
-                  prevClose: prevClose,
+                  prevClose: prevClose ?? newPrice,
                   source: canonical.provider,
                   isLive: canonical.is_live,
                   providerTimestamp: canonical.provider_timestamp,
@@ -248,12 +258,22 @@ export default function App() {
                 const canonical = canonicalQuoteStore.getQuote(idx.symbol);
                 if (!canonical || canonical.ltp === null || canonical.ltp <= 0) return idx;
                 const newLtp = canonical.ltp;
-                const pClose = canonical.previous_close || idx.value || newLtp;
+                const pClose = canonical.previous_close !== null && canonical.previous_close !== undefined && canonical.previous_close > 0
+                  ? canonical.previous_close
+                  : (canonical.change !== null && canonical.change !== undefined && canonical.change !== 0
+                      ? Number((newLtp - canonical.change).toFixed(2))
+                      : ((idx as any).prevClose || null));
+                const change = canonical.change !== null && canonical.change !== undefined
+                  ? canonical.change
+                  : (pClose && pClose > 0 ? Number((newLtp - pClose).toFixed(2)) : 0);
+                const changePercent = canonical.change_percent !== null && canonical.change_percent !== undefined
+                  ? canonical.change_percent
+                  : (pClose && pClose > 0 ? Number((((newLtp - pClose) / pClose) * 100).toFixed(2)) : 0);
                 return {
                   ...idx,
                   value: newLtp,
-                  change: canonical.change ?? (pClose > 0 ? Number((newLtp - pClose).toFixed(2)) : 0),
-                  changePercent: canonical.change_percent ?? (pClose > 0 ? Number((((newLtp - pClose) / pClose) * 100).toFixed(2)) : 0),
+                  change: change,
+                  changePercent: changePercent,
                   isLive: canonical.is_live,
                   providerTimestamp: canonical.provider_timestamp,
                 };
@@ -455,16 +475,26 @@ export default function App() {
                 (prev || []).map((s) => {
                   if (!s || !s.symbol) return s;
                   if (s.symbol === tick.symbol || s.symbol === tick.instrument_key) {
-                    const prevClose = canonical.previous_close || s.prevClose || newPrice;
+                    const prevClose = canonical.previous_close !== null && canonical.previous_close !== undefined && canonical.previous_close > 0
+                      ? canonical.previous_close
+                      : (canonical.change !== null && canonical.change !== undefined && canonical.change !== 0
+                          ? Number((newPrice - canonical.change).toFixed(2))
+                          : (s.prevClose || null));
+                    const change = canonical.change !== null && canonical.change !== undefined
+                      ? canonical.change
+                      : (prevClose && prevClose > 0 ? Number((newPrice - prevClose).toFixed(2)) : 0);
+                    const changePercent = canonical.change_percent !== null && canonical.change_percent !== undefined
+                      ? canonical.change_percent
+                      : (prevClose && prevClose > 0 ? Number((((newPrice - prevClose) / prevClose) * 100).toFixed(2)) : 0);
                     return {
                       ...s,
                       price: newPrice,
-                      change: canonical.change ?? (prevClose > 0 ? Number((newPrice - prevClose).toFixed(2)) : 0),
-                      changePercent: canonical.change_percent ?? (prevClose > 0 ? Number((((newPrice - prevClose) / prevClose) * 100).toFixed(2)) : 0),
+                      change: change,
+                      changePercent: changePercent,
                       high: canonical.high ?? s.high ?? newPrice,
                       low: canonical.low ?? s.low ?? newPrice,
                       open: canonical.open ?? s.open ?? newPrice,
-                      prevClose: prevClose,
+                      prevClose: prevClose ?? newPrice,
                       source: canonical.provider,
                       isLive: canonical.is_live,
                       providerTimestamp: canonical.provider_timestamp,

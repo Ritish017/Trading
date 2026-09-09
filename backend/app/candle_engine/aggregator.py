@@ -27,8 +27,9 @@ class CandleAggregator:
         "1D": 86400,
     }
 
-    def __init__(self, max_history_per_interval: int = 500):
+    def __init__(self, max_history_per_interval: int = 500, enforce_market_hours: bool = False):
         self.max_history = max_history_per_interval
+        self.enforce_market_hours = enforce_market_hours
         # active_candles[symbol][interval] -> current active candle dict
         self.active_candles: Dict[str, Dict[str, Dict[str, Any]]] = {}
         # completed_candles[symbol][interval] -> list of completed candle dicts
@@ -64,6 +65,12 @@ class CandleAggregator:
         raw_vol = int(tick.volume or 0)
         ts = float(tick.timestamp or time.time())
         source = tick.provider or "GENERIC"
+
+        # If market hours enforcement is enabled, prevent out-of-session ticks from creating intraday candles
+        if self.enforce_market_hours and tick.exchange in ("NSE", "BSE"):
+            from backend.app.market_data.session_engine import MarketSessionEngine
+            if not MarketSessionEngine.is_valid_equity_candle_timestamp(ts):
+                return {}
 
         # Determine volume contribution for this tick
         if getattr(tick, "is_cumulative_volume", False):
@@ -144,6 +151,13 @@ class CandleAggregator:
         history = self.completed_candles.get(symbol, {}).get(timeframe, [])
         active = self.active_candles.get(symbol, {}).get(timeframe)
         res = list(history)
-        if active:
-            res.append(active)
+        if active and (not history or history[-1]["time"] != active["time"]):
+            step = self.INTERVAL_SECONDS.get(timeframe, 300)
+            now_ts = time.time()
+            if now_ts >= active["time"] + step:
+                active_copy = copy.deepcopy(active)
+                active_copy["is_closed"] = True
+                res.append(active_copy)
+            else:
+                res.append(active)
         return res[-limit:] if limit and len(res) > limit else res

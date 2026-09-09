@@ -62,7 +62,8 @@ class UpstoxRESTClient:
                 logger.debug("[UPSTOX REST] %s %s (Attempt %s)", method, endpoint, attempt + 1)
                 resp = await self.client.request(method, url, params=params)
                 if resp.status_code == 429:
-                    await asyncio.sleep(1.5 * (attempt + 1))
+                    last_error = httpx.HTTPStatusError(f"429 Too Many Requests for {endpoint}", request=resp.request, response=resp)
+                    await asyncio.sleep(2.0 * (attempt + 1))
                     continue
                 resp.raise_for_status()
                 return resp.json()
@@ -145,12 +146,36 @@ class UpstoxRESTClient:
         ltp = float(ltp_raw)
         if ltp <= 0:
             raise ValueError(f"Upstox returned invalid price for {symbol}: {ltp}")
-        cp_raw = ohlc.get("close") or quote_body.get("previous_close")
-        prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else None
-        change = round(ltp - prev_close, 2) if prev_close is not None else None
-        change_pct = round((change / prev_close) * 100, 2) if prev_close and change is not None else None
+        net_chg_raw = quote_body.get("net_change")
+        if net_chg_raw is not None:
+            try:
+                change = round(float(net_chg_raw), 2)
+                prev_close = round(ltp - change, 2)
+            except (ValueError, TypeError):
+                change = None
+                prev_close = None
+        else:
+            cp_raw = quote_body.get("previous_close")
+            if cp_raw is None and ohlc.get("close") is not None and float(ohlc.get("close")) != ltp:
+                cp_raw = ohlc.get("close")
+            prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else None
+            change = round(ltp - prev_close, 2) if prev_close is not None else None
+
+        change_pct = round((change / prev_close) * 100, 2) if prev_close and prev_close > 0 and change is not None else None
         meta = get_instrument_metadata(symbol) or {}
         raw_open, raw_high, raw_low = ohlc.get("open"), ohlc.get("high"), ohlc.get("low")
+        raw_close = ohlc.get("close") or ltp
+        
+        # Prefer exchange execution trade timestamp (last_trade_time) over HTTP response generation timestamp
+        ltt_raw = quote_body.get("last_trade_time")
+        if ltt_raw:
+            try:
+                ltt_val = float(ltt_raw)
+                trade_timestamp = ltt_val / 1000.0 if ltt_val > 1e11 else ltt_val
+            except (ValueError, TypeError):
+                trade_timestamp = parse_upstox_timestamp(quote_body.get("timestamp"))
+        else:
+            trade_timestamp = parse_upstox_timestamp(quote_body.get("timestamp"))
         return {
             "symbol": symbol,
             "instrument_key": inst_key,
@@ -162,7 +187,7 @@ class UpstoxRESTClient:
             "open": float(raw_open) if raw_open is not None else None,
             "high": float(raw_high) if raw_high is not None else None,
             "low": float(raw_low) if raw_low is not None else None,
-            "close": float(cp_raw) if cp_raw is not None else None,
+            "close": float(raw_close) if raw_close is not None else ltp,
             "previous_close": prev_close,
             "change": change,
             "change_percent": change_pct,
@@ -170,7 +195,7 @@ class UpstoxRESTClient:
             "open_interest": int(quote_body.get("oi", 0) or 0),
             "bid": float(bids[0].get("price")) if bids and bids[0].get("price") is not None else None,
             "ask": float(asks[0].get("price")) if asks and asks[0].get("price") is not None else None,
-            "timestamp": parse_upstox_timestamp(quote_body.get("timestamp")),
+            "timestamp": trade_timestamp,
             "source": "UPSTOX",
             "provider": "UPSTOX",
             "provider_mode": "AUTHENTIC_LIVE",
@@ -331,9 +356,102 @@ class UpstoxRESTClient:
         import urllib.parse
         import datetime
         inst_key = get_instrument_key(symbol)
+        
+        # 1. Authentic Upstox Intraday Market Feed (09:15 - 15:30 IST session)
+        if inst_key and not to_date:
+            try:
+                encoded_key = urllib.parse.quote(inst_key, safe="")
+                # Query authentic 1-minute intraday stream
+                intraday_url = f"/v2/historical-candle/intraday/{encoded_key}/1minute"
+                res = await self._request("GET", intraday_url)
+                raw_candles = res.get("data", {}).get("candles", [])
+                if raw_candles:
+                    candles_1m = []
+                    # Raw Upstox is newest-first; reverse to chronological ascending order
+                    for c in reversed(raw_candles):
+                        ts_str = c[0]
+                        try:
+                            dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                            ts = int(dt.timestamp())
+                        except Exception:
+                            ts = int(c[0]) if isinstance(c[0], (int, float)) else 0
+                        candles_1m.append({
+                            "timestamp": ts,
+                            "time": ts,
+                            "open": float(c[1]),
+                            "high": float(c[2]),
+                            "low": float(c[3]),
+                            "close": float(c[4]),
+                            "volume": int(c[5]) if len(c) > 5 else 0,
+                            "source": "UPSTOX",
+                            "provider": "UPSTOX",
+                            "is_live": False,
+                            "symbol": symbol,
+                            "instrument_key": inst_key,
+                            "price_domain": "RAW_EXCHANGE_PRICE",
+                            "adjustment_status": "RAW_EXCHANGE_PRICE"
+                        })
+                    
+                    if interval == "1m":
+                        return candles_1m
+                    
+                    step_minutes = 5 if interval == "5m" else (15 if interval == "15m" else (30 if interval == "30m" else 5))
+                    step_sec = step_minutes * 60
+                    aggregated = []
+                    current_bucket = None
+                    chunk = []
+                    for c in candles_1m:
+                        b_start = (c["timestamp"] // step_sec) * step_sec
+                        if current_bucket is None:
+                            current_bucket = b_start
+                        if b_start == current_bucket:
+                            chunk.append(c)
+                        else:
+                            if chunk:
+                                aggregated.append({
+                                    "timestamp": current_bucket,
+                                    "time": current_bucket,
+                                    "open": chunk[0]["open"],
+                                    "high": max(x["high"] for x in chunk),
+                                    "low": min(x["low"] for x in chunk),
+                                    "close": chunk[-1]["close"],
+                                    "volume": sum(x["volume"] for x in chunk),
+                                    "source": "UPSTOX",
+                                    "provider": "UPSTOX",
+                                    "is_live": False,
+                                    "symbol": symbol,
+                                    "instrument_key": inst_key,
+                                    "price_domain": "RAW_EXCHANGE_PRICE",
+                                    "adjustment_status": "RAW_EXCHANGE_PRICE"
+                                })
+                            current_bucket = b_start
+                            chunk = [c]
+                    if chunk:
+                        aggregated.append({
+                            "timestamp": current_bucket,
+                            "time": current_bucket,
+                            "open": chunk[0]["open"],
+                            "high": max(x["high"] for x in chunk),
+                            "low": min(x["low"] for x in chunk),
+                            "close": chunk[-1]["close"],
+                            "volume": sum(x["volume"] for x in chunk),
+                            "source": "UPSTOX",
+                            "provider": "UPSTOX",
+                            "is_live": False,
+                            "symbol": symbol,
+                            "instrument_key": inst_key,
+                            "price_domain": "RAW_EXCHANGE_PRICE",
+                            "adjustment_status": "RAW_EXCHANGE_PRICE"
+                        })
+                    if aggregated:
+                        return aggregated
+            except Exception as e:
+                logger.info("[UPSTOX REST] Intraday candle query for %s failed/skipped: %s", symbol, e)
+
+        # 2. Historical Date-Range Query (for past dates)
         upstox_supported_map = {"1m": "1minute", "30m": "30minute", "1D": "day"}
         mapped_interval = upstox_supported_map.get(interval)
-        if mapped_interval and inst_key:
+        if mapped_interval and inst_key and to_date:
             try:
                 encoded_key = urllib.parse.quote(inst_key, safe="")
                 endpoint = f"/v2/historical-candle/{encoded_key}/{mapped_interval}/{to_date}/{from_date}"

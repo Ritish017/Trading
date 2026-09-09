@@ -46,9 +46,26 @@ class ClientCanonicalQuoteStore {
       return existing;
     }
 
-    const prevClose = rawQuote.previous_close ?? rawQuote.prevClose ?? ltp;
-    const change = rawQuote.change ?? (prevClose > 0 ? Number((ltp - prevClose).toFixed(2)) : 0);
-    const changePct = rawQuote.change_percent ?? rawQuote.changePercent ?? (prevClose > 0 ? Number((((ltp - prevClose) / prevClose) * 100).toFixed(2)) : 0);
+    const rawChange = rawQuote.change !== undefined && rawQuote.change !== null ? Number(rawQuote.change) : null;
+    let prevClose = rawQuote.previous_close !== undefined && rawQuote.previous_close !== null && Number(rawQuote.previous_close) > 0
+      ? Number(rawQuote.previous_close)
+      : (rawQuote.prevClose !== undefined && rawQuote.prevClose !== null && Number(rawQuote.prevClose) > 0 ? Number(rawQuote.prevClose) : null);
+
+    if (rawChange !== null) {
+      if (prevClose === null || prevClose === ltp) {
+        prevClose = Number((ltp - rawChange).toFixed(2));
+      }
+    }
+
+    const change = rawChange !== null
+      ? rawChange
+      : (prevClose !== null && prevClose > 0 ? Number((ltp - prevClose).toFixed(2)) : null);
+
+    const changePct = rawQuote.change_percent !== undefined && rawQuote.change_percent !== null
+      ? Number(rawQuote.change_percent)
+      : (rawQuote.changePercent !== undefined && rawQuote.changePercent !== null
+          ? Number(rawQuote.changePercent)
+          : (change !== null && prevClose && prevClose > 0 ? Number((((ltp - prevClose) / prevClose) * 100).toFixed(2)) : null));
 
     const canonical: CanonicalQuote = {
       symbol: symbol,
@@ -95,11 +112,26 @@ class ClientCanonicalQuoteStore {
 
     const symbol = tick.symbol;
     const existing = this.quotes.get(symbol);
-    const incomingTs = Number(tick.timestamp || tick.provider_timestamp || 0);
+    const rawChange = tick.change !== undefined && tick.change !== null ? Number(tick.change) : null;
+    let prevClose = tick.previous_close !== undefined && tick.previous_close !== null && Number(tick.previous_close) > 0
+      ? Number(tick.previous_close)
+      : (existing?.previous_close ?? null);
 
-    const prevClose = tick.previous_close ?? existing?.previous_close ?? ltp;
-    const change = tick.change ?? (prevClose > 0 ? Number((ltp - prevClose).toFixed(2)) : 0);
-    const changePct = tick.change_percent ?? tick.changePercent ?? (prevClose > 0 ? Number((((ltp - prevClose) / prevClose) * 100).toFixed(2)) : 0);
+    if (rawChange !== null) {
+      if (prevClose === null || prevClose === ltp) {
+        prevClose = Number((ltp - rawChange).toFixed(2));
+      }
+    }
+
+    const change = rawChange !== null
+      ? rawChange
+      : (prevClose !== null && prevClose > 0 ? Number((ltp - prevClose).toFixed(2)) : (existing?.change ?? null));
+
+    const changePct = tick.change_percent !== undefined && tick.change_percent !== null
+      ? Number(tick.change_percent)
+      : (tick.changePercent !== undefined && tick.changePercent !== null
+          ? Number(tick.changePercent)
+          : (change !== null && prevClose && prevClose > 0 ? Number((((ltp - prevClose) / prevClose) * 100).toFixed(2)) : (existing?.change_percent ?? null)));
 
     const canonical: CanonicalQuote = {
       symbol: symbol,

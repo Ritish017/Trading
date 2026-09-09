@@ -43,6 +43,8 @@ class CanonicalQuote:
     last_ws_ts: Optional[float] = None
     canonical_source: str = "REST"
     quote_sequence_id: int = 0
+    change: Optional[float] = None
+    change_percent: Optional[float] = None
 
     @property
     def data_age_seconds(self) -> float:
@@ -80,17 +82,25 @@ class CanonicalQuote:
         return "EXPIRED"
 
     def to_api_dict(self) -> Dict[str, Any]:
-        change = None
-        change_pct = None
-        if self.previous_close and self.previous_close > 0:
-            change = round(self.ltp - self.previous_close, 2)
-            change_pct = round(change / self.previous_close * 100, 2)
+        change = self.change
+        change_pct = self.change_percent
+        prev_close = self.previous_close
+
+        if change is not None:
+            if prev_close is None or prev_close <= 0 or prev_close == self.ltp:
+                prev_close = round(self.ltp - change, 2)
+            if change_pct is None and prev_close and prev_close > 0:
+                change_pct = round(change / prev_close * 100, 2)
+        elif prev_close and prev_close > 0:
+            change = round(self.ltp - prev_close, 2)
+            change_pct = round(change / prev_close * 100, 2)
+
         return {
             "symbol": self.symbol,
             "instrument_key": self.instrument_key,
             "exchange": self.exchange,
             "ltp": self.ltp,
-            "previous_close": self.previous_close,
+            "previous_close": prev_close,
             "change": change,
             "change_percent": change_pct,
             "open": self.open,
@@ -193,12 +203,21 @@ class CanonicalQuoteStore:
         if prov_ts <= 0:
             return None
         mode = winner.get("provider_mode", "AUTHENTIC_LIVE")
+        raw_change = winner.get("change")
+        raw_pct = winner.get("change_percent") or winner.get("change_pct")
+        parsed_change = float(raw_change) if raw_change is not None else None
+        parsed_pct = float(raw_pct) if raw_pct is not None else None
+        ltp_val = float(winner["ltp"])
+        prev_close_val = float(winner["previous_close"]) if winner.get("previous_close") is not None else None
+        if parsed_change is not None and (prev_close_val is None or prev_close_val <= 0 or prev_close_val == ltp_val):
+            prev_close_val = round(ltp_val - parsed_change, 2)
+
         canonical = CanonicalQuote(
             symbol=symbol,
             instrument_key=str(winner.get("instrument_key") or winner.get("symbol") or symbol),
             exchange=str(winner.get("exchange", "NSE")),
-            ltp=float(winner["ltp"]),
-            previous_close=float(winner["previous_close"]) if winner.get("previous_close") is not None else None,
+            ltp=ltp_val,
+            previous_close=prev_close_val,
             open=float(winner["open"]) if winner.get("open") is not None else None,
             high=float(winner["high"]) if winner.get("high") is not None else None,
             low=float(winner["low"]) if winner.get("low") is not None else None,
@@ -217,6 +236,8 @@ class CanonicalQuoteStore:
             last_ws_ts=float(ws.get("provider_timestamp") or ws.get("timestamp") or 0) if ws else None,
             canonical_source=source_name,
             quote_sequence_id=self._next_seq(symbol),
+            change=parsed_change,
+            change_percent=parsed_pct,
         )
         if canonical.provider_mode == "AUTHENTIC_LIVE":
             canonical.price_domain = "RAW_EXCHANGE_PRICE"

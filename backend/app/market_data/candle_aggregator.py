@@ -13,8 +13,11 @@ class MarketCandleAggregator:
 
     INTERVAL_SECONDS = CandleAggregator.INTERVAL_SECONDS
 
-    def __init__(self, max_history_per_interval: int = 500):
-        self._canonical_aggregator = CandleAggregator(max_history_per_interval=max_history_per_interval)
+    def __init__(self, max_history_per_interval: int = 500, enforce_market_hours: bool = True):
+        self._canonical_aggregator = CandleAggregator(
+            max_history_per_interval=max_history_per_interval,
+            enforce_market_hours=enforce_market_hours
+        )
 
     @property
     def active_candles(self) -> Dict[str, Dict[str, Dict[str, Any]]]:

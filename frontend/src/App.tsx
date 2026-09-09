@@ -35,6 +35,7 @@ import { SecurityIntelligencePanel } from './components/intelligence/SecurityInt
 import { AICommentary, MarketEvent, MarketNarrative } from './types/intelligence';
 import { PriceTracePanel } from './components/PriceTracePanel';
 import { canonicalQuoteStore } from './stores/canonicalQuoteStore';
+import { getISTMarketSessionInfo } from './utils/marketStatus';
 import { 
   NSEStock, 
   MarketIndex, 
@@ -545,43 +546,47 @@ export default function App() {
     if (!selectedStock || !selectedStock.price) return;
     const currentPrice = selectedStock.price;
 
-    setCandles((prev) => {
-      const currentCandles = prev[selectedSymbol];
-      if (!currentCandles || currentCandles.length === 0) return prev;
+    // Enforce market hours: never synthesize out-of-session candles outside 09:15-15:30 IST
+    const sessionInfo = getISTMarketSessionInfo(Date.now(), feedStatus?.mode === 'SIMULATED');
+    if (sessionInfo.isSessionActive && (feedStatus?.is_live || feedStatus?.mode === 'SIMULATED')) {
+      setCandles((prev) => {
+        const currentCandles = prev[selectedSymbol];
+        if (!currentCandles || currentCandles.length === 0) return prev;
 
-      const lastCandle = currentCandles[currentCandles.length - 1];
-      const nowSec = Math.floor(lastTickTimeMs / 1000);
+        const lastCandle = currentCandles[currentCandles.length - 1];
+        const nowSec = Math.floor(lastTickTimeMs / 1000);
 
-      if (nowSec - lastCandle.time >= 300) {
-        const newCandle: IndianCandle = {
-          time: nowSec,
-          open: currentPrice,
-          high: currentPrice,
-          low: currentPrice,
-          close: currentPrice,
-          volume: 5000,
-          volumeLakhs: 0.05,
-          vwap: currentPrice,
-          source: selectedStock.source || 'LIVE_TICK'
-        };
-        return {
-          ...prev,
-          [selectedSymbol]: [...currentCandles.slice(-199), newCandle],
-        };
-      } else {
-        const updatedLast: IndianCandle = {
-          ...lastCandle,
-          high: Math.max(lastCandle.high, currentPrice),
-          low: Math.min(lastCandle.low, currentPrice),
-          close: currentPrice,
-          vwap: selectedStock.vwap || lastCandle.vwap || currentPrice,
-        };
-        return {
-          ...prev,
-          [selectedSymbol]: [...currentCandles.slice(0, -1), updatedLast],
-        };
-      }
-    });
+        if (nowSec - lastCandle.time >= 300) {
+          const newCandle: IndianCandle = {
+            time: nowSec,
+            open: currentPrice,
+            high: currentPrice,
+            low: currentPrice,
+            close: currentPrice,
+            volume: 0,
+            volumeLakhs: 0,
+            vwap: currentPrice,
+            source: selectedStock.source || 'LIVE_TICK'
+          };
+          return {
+            ...prev,
+            [selectedSymbol]: [...currentCandles.slice(-199), newCandle],
+          };
+        } else {
+          const updatedLast: IndianCandle = {
+            ...lastCandle,
+            high: Math.max(lastCandle.high, currentPrice),
+            low: Math.min(lastCandle.low, currentPrice),
+            close: currentPrice,
+            vwap: selectedStock.vwap || lastCandle.vwap || currentPrice,
+          };
+          return {
+            ...prev,
+            [selectedSymbol]: [...currentCandles.slice(0, -1), updatedLast],
+          };
+        }
+      });
+    }
 
     setPaperPositions((prev) =>
       prev.map((pos) => {

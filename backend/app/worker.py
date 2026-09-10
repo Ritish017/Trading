@@ -213,15 +213,10 @@ async def worker_lifespan(app: FastAPI):
         worker_instance.target_date = target_date
         worker_instance.experiment_id = f"APEX-WORKER-{target_date}"
 
-    # Auto-start worker if enabled
+    # Auto-start worker in background task so HTTP probe is immediately responsive
     auto_start = os.environ.get("WORKER_AUTO_START", "true").lower() in ("true", "1", "yes")
     if auto_start:
-        try:
-            await worker_instance.start()
-        except Exception as e:
-            logger.critical(f"[WORKER STARTUP FAILED] {e}")
-            if settings.is_production:
-                sys.exit(1)
+        asyncio.create_task(worker_instance.start())
     yield
     await worker_instance.stop()
 

@@ -198,4 +198,5 @@ class WorkerRepository:
             "is_stale": is_stale,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
             "details": record.details_json or {},
+            "details_json": record.details_json or {},
         }

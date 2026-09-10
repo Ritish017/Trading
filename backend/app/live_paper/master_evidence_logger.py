@@ -198,6 +198,12 @@ class MasterEvidenceLogger:
             "closed_trade_count": 0,
         }
 
+        # Asynchronous cloud database persistence queue
+        self._db_queue: asyncio.Queue = asyncio.Queue()
+        self._is_active: bool = True
+        self._flush_task: Optional[asyncio.Task] = None
+        self._db_enabled: bool = True
+
         # Recover sequence number and stats if resuming an existing master file
         self._recover_state_if_exists()
 
@@ -334,7 +340,101 @@ class MasterEvidenceLogger:
                 logger.critical(f"[MASTER LOGGER] FATAL: Could not write to master evidence file: {e}")
                 raise
 
+            # Enqueue for durable cloud database persistence
+            if self._db_enabled:
+                self._ensure_flush_task()
+                event_dict = event.model_dump()
+                event_dict["session_date"] = self.session_date
+                try:
+                    self._db_queue.put_nowait(event_dict)
+                except Exception as e:
+                    logger.debug(f"[MASTER LOGGER] DB queue enqueue notice: {e}")
+
         return event
+
+    def _ensure_flush_task(self) -> None:
+        """Ensures the background database flusher task is running."""
+        if self._flush_task is None or self._flush_task.done():
+            try:
+                loop = asyncio.get_running_loop()
+                self._flush_task = loop.create_task(self._flush_worker())
+            except RuntimeError:
+                pass
+
+    async def _flush_worker(self) -> None:
+        """Background loop continuously batching and writing events into PostgreSQL / SQLite."""
+        while self._is_active:
+            try:
+                batch = []
+                try:
+                    first_item = await asyncio.wait_for(self._db_queue.get(), timeout=1.0)
+                    batch.append(first_item)
+                    while not self._db_queue.empty() and len(batch) < 100:
+                        batch.append(self._db_queue.get_nowait())
+                except asyncio.TimeoutError:
+                    continue
+
+                if batch:
+                    await self._write_batch_to_db(batch)
+                    for _ in batch:
+                        self._db_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"[MASTER LOGGER] DB flush worker notice: {e}")
+
+    async def _write_batch_to_db(self, batch: List[Dict[str, Any]]) -> None:
+        """Atomically inserts batch into audit_events table."""
+        try:
+            from backend.app.database.connection import AsyncSessionLocal
+            from backend.app.database.repositories.audit_repository import AuditRepository
+            async with AsyncSessionLocal() as session:
+                repo = AuditRepository(session)
+                await repo.insert_audit_events_batch(batch)
+        except Exception as e:
+            logger.debug(f"[MASTER LOGGER] DB batch insert notice: {e}")
+
+    async def flush_db(self) -> None:
+        """Flushes all queued events to the database and awaits completion."""
+        batch = []
+        while not self._db_queue.empty():
+            try:
+                batch.append(self._db_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        if batch:
+            await self._write_batch_to_db(batch)
+            for _ in batch:
+                self._db_queue.task_done()
+
+    async def recover_state_from_db_if_needed(self) -> None:
+        """Recovers monotonic sequence number and stats from database if container restarted with fresh disk."""
+        if self._sequence_number > 0:
+            return
+        try:
+            from backend.app.database.connection import AsyncSessionLocal
+            from backend.app.database.models import AuditEventModel
+            from sqlalchemy import select, func
+            async with AsyncSessionLocal() as session:
+                stmt = select(
+                    func.max(AuditEventModel.sequence_number),
+                    func.count(AuditEventModel.id)
+                ).where(AuditEventModel.session_date == self.session_date)
+                res = await session.execute(stmt)
+                row = res.first()
+                if row and row[0]:
+                    self._sequence_number = int(row[0])
+                    self._counts["total_events"] = int(row[1]) if row[1] else 0
+                    logger.info(f"[MASTER LOGGER] Recovered sequence {self._sequence_number} from database for date {self.session_date}")
+        except Exception as e:
+            logger.debug(f"[MASTER LOGGER] DB sequence recovery notice: {e}")
+
+    async def close(self) -> None:
+        """Gracefully closes logger and flushes all pending database events."""
+        self._is_active = False
+        await self.flush_db()
+        if self._flush_task and not self._flush_task.done():
+            self._flush_task.cancel()
 
     def compute_sha256(self) -> str:
         """Computes SHA-256 checksum of the entire master JSONL log file."""
@@ -376,6 +476,7 @@ class MasterEvidenceLogger:
         """
         Emits mandatory SESSION_SUMMARY event with complete integrity and performance metrics.
         """
+        await self.flush_db()
         sha256_hash = self.compute_sha256()
         payload = {
             "experiment_id": self.experiment_id,

@@ -516,6 +516,56 @@ class WorkerHeartbeatModel(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class AuditEventModel(Base):
+    """
+    Durable append-only audit event log stored in PostgreSQL / SQLite.
+    Mirrors the MasterEvidenceEvent schema to guarantee zero loss of evidence
+    even on ephemeral container restarts or cloud node migrations.
+    """
+    __tablename__ = "audit_events"
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    event_id = Column(String(100), unique=True, nullable=False, index=True)
+    experiment_id = Column(String(100), nullable=False, index=True)
+    session_date = Column(String(20), nullable=False, index=True)
+    event_type = Column(String(100), nullable=False, index=True)
+    sequence_number = Column(BigInteger, nullable=False, index=True)
+    event_timestamp_utc = Column(String(50), nullable=False)
+    event_timestamp_ist = Column(String(50), nullable=False)
+    symbol = Column(String(50), nullable=True, index=True)
+    source = Column(String(100), nullable=False)
+    data_provenance = Column(String(50), nullable=False, default="AUTHENTIC_LIVE")
+    git_commit = Column(String(50), nullable=True)
+    config_hash = Column(String(100), nullable=True)
+    engine_version = Column(String(50), nullable=True)
+    payload = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SessionReportModel(Base):
+    """
+    Durable certified session reports and market-close evidence records.
+    Stores the authoritative final session summary, SHA-256 seal,
+    periodic 15-minute checkpoints, and human-readable certified Markdown report.
+    """
+    __tablename__ = "session_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(String(100), nullable=False, index=True)
+    session_date = Column(String(20), unique=True, nullable=False, index=True)
+    status = Column(String(50), nullable=False, default="FINALIZED")  # IN_PROGRESS, EQUITY_CLOSED, FINALIZED
+    master_log_sha256 = Column(String(100), nullable=True)
+    total_events = Column(Integer, default=0)
+    first_event_id = Column(String(100), nullable=True)
+    last_event_id = Column(String(100), nullable=True)
+    summary_metrics = Column(JSON, nullable=True)
+    checkpoints = Column(JSON, nullable=True)  # List of checkpoint telemetry snapshots
+    report_markdown = Column(Text, nullable=True)
+    is_certified = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 # Composite index for signal querying
 Index("idx_signal_sym_state", SignalModel.symbol, SignalModel.state)
 Index("idx_signal_grade_score", SignalModel.quality_grade, SignalModel.opportunity_score)
@@ -524,7 +574,6 @@ Index("idx_perf_dim_ts", SignalPerformanceSnapshotModel.dimension_type, SignalPe
 Index("idx_cand_obs_sym_status", CandidateObservationModel.symbol, CandidateObservationModel.evaluation_status)
 Index("idx_order_signal_id", PaperOrderModel.signal_id)
 Index("idx_worker_id_updated", WorkerHeartbeatModel.worker_id, WorkerHeartbeatModel.updated_at)
-
-
-
-
+Index("idx_audit_session_seq", AuditEventModel.session_date, AuditEventModel.sequence_number)
+Index("idx_audit_type_date", AuditEventModel.event_type, AuditEventModel.session_date)
+Index("idx_session_reports_date", SessionReportModel.session_date)

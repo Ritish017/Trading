@@ -1,6 +1,6 @@
 import logging
 from typing import AsyncGenerator, Dict, Any
-from sqlalchemy import text
+from sqlalchemy import text, event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
@@ -64,6 +64,14 @@ else:
     engine_options["pool_recycle"] = 3600
 
 engine = create_async_engine(database_url, **engine_options)
+
+if database_url.startswith("sqlite+"):
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

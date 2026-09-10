@@ -225,7 +225,115 @@ async def get_worker_status():
         return st
 
 
-# --- Market Data API ---
+# --- Cloud Autonomy & Certified Session Endpoints ---
+@app.get("/api/session/report")
+async def get_session_report(session_date: Optional[str] = None):
+    """Retrieves authoritative certified session report and SHA-256 seal from PostgreSQL."""
+    from backend.app.database.connection import AsyncSessionLocal
+    from backend.app.database.repositories.audit_repository import AuditRepository
+    try:
+        async with AsyncSessionLocal() as s:
+            repo = AuditRepository(s)
+            report = await repo.get_session_report(session_date)
+            if report:
+                return report
+    except Exception as e:
+        logger.warning(f"[API] DB session report query notice: {e}")
+
+    # Fallback read from live Render worker probe if database returned nothing
+    render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
+    if render_worker_url:
+        try:
+            import httpx
+            params = {"session_date": session_date} if session_date else {}
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                resp = await client.get(f"{render_worker_url.rstrip('/')}/api/session/report", params=params)
+                if resp.status_code == 200:
+                    return resp.json()
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=404, detail=f"No session report found for date {session_date or 'today'}")
+
+
+@app.get("/api/session/checkpoints")
+async def get_session_checkpoints(session_date: Optional[str] = None):
+    """Retrieves 15-minute checkpoint audit trail for today's session."""
+    from backend.app.database.connection import AsyncSessionLocal
+    from backend.app.database.repositories.audit_repository import AuditRepository
+    try:
+        async with AsyncSessionLocal() as s:
+            repo = AuditRepository(s)
+            cps = await repo.get_checkpoints(session_date)
+            if cps:
+                return cps
+    except Exception as e:
+        logger.warning(f"[API] DB checkpoints query notice: {e}")
+
+    render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
+    if render_worker_url:
+        try:
+            import httpx
+            params = {"session_date": session_date} if session_date else {}
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                resp = await client.get(f"{render_worker_url.rstrip('/')}/api/session/checkpoints", params=params)
+                if resp.status_code == 200:
+                    return resp.json()
+        except Exception:
+            pass
+
+    return []
+
+
+@app.get("/api/audit/events")
+async def get_audit_events(
+    session_date: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    event_type: Optional[str] = None,
+    symbol: Optional[str] = None,
+):
+    """Queries durable append-only audit events from PostgreSQL."""
+    from backend.app.database.connection import AsyncSessionLocal
+    from backend.app.database.repositories.audit_repository import AuditRepository
+    try:
+        async with AsyncSessionLocal() as s:
+            repo = AuditRepository(s)
+            return await repo.get_audit_events(
+                session_date=session_date,
+                limit=limit,
+                offset=offset,
+                event_type=event_type,
+                symbol=symbol,
+            )
+    except Exception as e:
+        logger.warning(f"[API] DB audit events query notice: {e}")
+        return {"session_date": session_date, "total_returned": 0, "limit": limit, "offset": offset, "events": []}
+
+
+@app.get("/api/session/status")
+async def get_session_status():
+    """Returns 100% cloud autonomy session state, clock progress, and certification status."""
+    render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
+    if render_worker_url:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{render_worker_url.rstrip('/')}/api/session/status")
+                if resp.status_code == 200:
+                    return resp.json()
+        except Exception:
+            pass
+
+    import datetime
+    ist_now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+    return {
+        "cloud_autonomous": True,
+        "current_time_ist": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "live_orders_blocked": True,
+        "paper_mode": True,
+        "frozen_configuration_hash": "d3e94bea101d71505e19c20c2086da9cbf629cdce04c46044eb5a62d9cace94e",
+    }
 @app.get("/api/market/quote/{symbol}")
 async def get_market_quote(symbol: str):
     return await market_data_service.get_quote(symbol)

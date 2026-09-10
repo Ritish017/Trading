@@ -81,7 +81,7 @@ class UpstoxWebSocketClient:
                 }
             }
             try:
-                await self.ws.send(json.dumps(payload))
+                await self.ws.send(json.dumps(payload).encode('utf-8'))
             except Exception as e:
                 logger.error(f"[UPSTOX WS] Unsubscribe send failed: {e}")
 
@@ -98,7 +98,7 @@ class UpstoxWebSocketClient:
         }
         try:
             logger.info(f"[UPSTOX WS] Subscribing to {len(keys)} instruments (mode: {mode})...")
-            await self.ws.send(json.dumps(payload))
+            await self.ws.send(json.dumps(payload).encode('utf-8'))
         except Exception as e:
             logger.error(f"[UPSTOX WS] Subscription send failed: {str(e)}")
 
@@ -216,26 +216,26 @@ class UpstoxWebSocketClient:
         if ltp <= 0:
             return None
 
+        cp_raw = ltpc.get("cp") or ltpc.get("close")
+        prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else None
+
         efd = ff.get("marketFF", {}).get("efd", {}) or feed.get("efd", {})
         efd_change = efd.get("change")
         efd_pct = efd.get("change_percent")
 
-        if efd_change is not None:
+        if prev_close is not None and prev_close > 0:
+            change = round(ltp - prev_close, 2)
+            change_pct = round((change / prev_close) * 100.0, 2)
+        elif efd_change is not None and float(efd_change) != 0.0:
             try:
                 change = round(float(efd_change), 2)
                 change_pct = round(float(efd_pct), 2) if efd_pct is not None else None
                 prev_close = round(ltp - change, 2)
             except (ValueError, TypeError):
-                change, change_pct, prev_close = None, None, None
+                change, change_pct = 0.0, 0.0
         else:
-            cp_raw = ltpc.get("cp") or ltpc.get("close")
-            prev_close = float(cp_raw) if cp_raw is not None and float(cp_raw) > 0 else None
-            if prev_close is not None and prev_close > 0:
-                change = round(ltp - prev_close, 2)
-                change_pct = round((change / prev_close) * 100.0, 2)
-            else:
-                change = None
-                change_pct = None
+            change = 0.0
+            change_pct = 0.0
 
         ohlc = ff.get("marketFF", {}).get("ohlc", {}) or {}
         raw_open = ohlc.get("open")
@@ -247,6 +247,11 @@ class UpstoxWebSocketClient:
         ltt_raw = ltpc.get("ltt")
         trade_ts = float(ltt_raw) / 1000.0 if ltt_raw and float(ltt_raw) > 1e11 else (float(ltt_raw) if ltt_raw else time.time())
 
+        tick_open = float(raw_open) if raw_open is not None and float(raw_open) > 0 else ltp
+        tick_high = float(raw_high) if raw_high is not None and float(raw_high) > 0 else max(ltp, tick_open)
+        tick_low = float(raw_low) if raw_low is not None and float(raw_low) > 0 else min(ltp, tick_open)
+        tick_close = float(raw_close) if raw_close is not None and float(raw_close) > 0 else ltp
+
         return NormalizedTick(
             symbol=symbol,
             instrument_key=inst_key,
@@ -255,10 +260,10 @@ class UpstoxWebSocketClient:
             received_at=time.time() * 1000.0,
             last_trade_time=trade_ts,
             ltp=ltp,
-            open=float(raw_open) if raw_open is not None else None,
-            high=float(raw_high) if raw_high is not None else None,
-            low=float(raw_low) if raw_low is not None else None,
-            close=float(raw_close) if raw_close is not None else ltp,
+            open=tick_open,
+            high=tick_high,
+            low=tick_low,
+            close=tick_close,
             previous_close=prev_close,
             change=change,
             change_percent=change_pct,

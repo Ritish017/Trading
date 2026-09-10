@@ -136,8 +136,14 @@ class StatefulMarketWorker:
         )
 
         # 5. Execute runner in background task
+        async def _run_safely():
+            try:
+                await self.runner.start()
+            except Exception as e:
+                logger.critical(f"[WORKER RUNNER CRASH] Runner crashed: {e}", exc_info=True)
+
         self.is_running = True
-        self._runner_task = asyncio.create_task(self.runner.start())
+        self._runner_task = asyncio.create_task(_run_safely())
 
         # Update status to ONLINE
         async with AsyncSessionLocal() as s:

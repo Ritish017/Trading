@@ -35,6 +35,8 @@ from backend.app.signal_engine.models import (
     SignalDirection,
     SignalEngineConfig,
     DataProvenance,
+    CandidateRecord,
+    AssetClass,
 )
 from backend.app.signal_engine.signal_pipeline import evaluate_candidate_signal
 from backend.app.signal_engine.transaction_cost import (
@@ -205,11 +207,28 @@ class LivePaperSessionRunner:
                     payload={"provider": "UPSTOX", "status": "CONNECTED", "is_live": True},
                     source="MARKET_DATA_SERVICE",
                 )
+                # Seed authentic historical candles for universe symbols
+                logger.info(f"[SESSION RUNNER] Seeding authentic historical candles for {len(self.universe)} universe instruments...")
+                for sym in self.universe:
+                    inst_key = get_instrument_key(sym) or sym
+                    try:
+                        h15 = await self.provider.get_historical_candles(inst_key, "15minute", count=50)
+                        if h15:
+                            self.candle_aggregator.seed_historical_candles(sym, "15m", h15)
+                        h5 = await self.provider.get_historical_candles(inst_key, "5minute", count=50)
+                        if h5:
+                            self.candle_aggregator.seed_historical_candles(sym, "5m", h5)
+                        h1 = await self.provider.get_historical_candles(inst_key, "1minute", count=50)
+                        if h1:
+                            self.candle_aggregator.seed_historical_candles(sym, "1m", h1)
+                    except Exception as e:
+                        logger.warning(f"[SESSION RUNNER] Candle seeding notice for {sym}: {e}")
+
                 # Subscribe to universe
-                subscribed = await self.provider.subscribe(self.universe)
+                await self.provider.subscribe(self.universe)
                 await self.evidence_logger.log_event(
                     event_type=EventType.MARKET_SUBSCRIPTION,
-                    payload={"provider": "UPSTOX", "symbols": self.universe, "subscribed": subscribed},
+                    payload={"provider": "UPSTOX", "symbols": self.universe, "subscribed": True},
                     source="MARKET_DATA_SERVICE",
                 )
                 # Start WebSocket tick stream
@@ -288,19 +307,65 @@ class LivePaperSessionRunner:
         ltp = tick.ltp
         self.last_tick_timestamps[sym] = tick.timestamp
 
-        # Update canonical store
+        # Update canonical store with complete authentic quote fields
         canonical_store.update_from_ws(sym, {
             "symbol": sym,
+            "instrument_key": tick.instrument_key,
+            "exchange": tick.exchange,
             "ltp": ltp,
+            "previous_close": tick.previous_close,
+            "change": tick.change,
+            "change_percent": tick.change_percent,
+            "open": tick.open,
+            "high": tick.high,
+            "low": tick.low,
+            "close": tick.close,
+            "volume": tick.volume,
             "provider_timestamp": tick.timestamp,
+            "received_timestamp": tick.received_at / 1000.0 if tick.received_at else time.time(),
             "is_live": True,
             "provider": "UPSTOX_WS",
         })
+
+        # Log RAW_MARKET_TICK event
+        if self.session_stats["ticks_received"] <= 50 or (self.session_stats["ticks_received"] % 10 == 0):
+            await self.evidence_logger.log_event(
+                event_type=EventType.RAW_MARKET_TICK,
+                payload={
+                    "symbol": sym,
+                    "instrument_key": tick.instrument_key,
+                    "ltp": ltp,
+                    "change": tick.change,
+                    "change_percent": tick.change_percent,
+                    "volume": tick.volume,
+                    "timestamp": tick.timestamp,
+                    "ticks_total": self.session_stats["ticks_received"],
+                },
+                symbol=sym,
+                source="UPSTOX_WS",
+            )
 
         # Update candle aggregator
         updated_candles = self.candle_aggregator.process_tick(tick)
         for tf, candle in updated_candles.items():
             self.session_stats["candles_updated"] += 1
+            if self.session_stats["candles_updated"] <= 30 or (self.session_stats["candles_updated"] % 15 == 0):
+                await self.evidence_logger.log_event(
+                    event_type=EventType.CANDLE_UPDATED,
+                    payload={
+                        "symbol": sym,
+                        "timeframe": tf,
+                        "time": candle.get("time"),
+                        "open": candle.get("open"),
+                        "high": candle.get("high"),
+                        "low": candle.get("low"),
+                        "close": candle.get("close"),
+                        "volume": candle.get("volume"),
+                        "is_closed": candle.get("is_closed", False),
+                    },
+                    symbol=sym,
+                    source="CANDLE_AGGREGATOR",
+                )
 
         # Check open positions on this symbol for stop/target exits
         await self._check_position_stops_and_targets(sym, ltp, tick.timestamp)
@@ -445,132 +510,158 @@ class LivePaperSessionRunner:
         quote = canonical_store.get_canonical_quote(symbol)
         ltp = quote.ltp if quote and quote.ltp else candles[-1].get("close", 100.0)
 
-        # 1. Run all 20 strategies
-        features = {}  # Feature calculation if needed
-        all_votes, raw_candidates = evaluate_strategies_observatory(
-            symbol=symbol,
+        # 1. Run all 20 strategies observatory
+        obs_res = evaluate_strategies_observatory(
             candles=candles,
-            features=features,
-            provenance="AUTHENTIC_LIVE" if not self.dry_run else "TEST_FIXTURE",
+            is_live_feed=not self.dry_run,
+            symbol=symbol,
         )
 
-        for vote in all_votes:
-            v_dir = getattr(vote.direction, "value", str(vote.direction))
+        strategies = obs_res.get("strategies", [])
+        for s in strategies:
+            s_id = s.get("strategy_id")
+            s_dir = s.get("directional_state", "NEUTRAL")
+            s_passing = s.get("entry_rules_passing", 0)
+            s_total = s.get("entry_rules_total", 1)
+            score = round((s_passing / max(1, s_total)) * 100, 1)
             await self.evidence_logger.log_event(
                 event_type=EventType.STRATEGY_EVALUATION,
                 payload={
-                    "strategy_id": vote.strategy_id,
-                    "direction": v_dir,
-                    "score": vote.score,
-                    "confidence": vote.confidence,
-                    "rationale": vote.rationale,
-                    "triggered_conditions": vote.triggered_conditions,
-                    "failed_conditions": vote.failed_conditions,
+                    "strategy_id": s_id,
+                    "strategy_name": s.get("strategy_name"),
+                    "direction": s_dir,
+                    "state": s.get("state"),
+                    "score": score,
+                    "passing_rules": s_passing,
+                    "total_rules": s_total,
                 },
                 symbol=symbol,
                 source="STRATEGY_EVALUATOR",
             )
 
-        if not raw_candidates:
+        # 2. Build Candidate Record
+        candidate_id = f"CAND_{symbol}_{int(time.time()*1000)}"
+        self.session_stats["candidates_created"] += 1
+        await self.evidence_logger.log_event(
+            event_type=EventType.CANDIDATE_CREATED,
+            payload={
+                "candidate_id": candidate_id,
+                "symbol": symbol,
+                "last_price": ltp,
+                "regime": obs_res.get("market_regime", {}).get("regime", "UNKNOWN"),
+            },
+            symbol=symbol,
+            source="CANDIDATE_GENERATOR",
+        )
+
+        candidate = CandidateRecord(
+            symbol=symbol,
+            exchange="NSE",
+            asset_class=AssetClass.EQUITY,
+            last_price=ltp,
+            change_pct=quote.change_percent if quote else 0.0,
+            volume=quote.volume if quote else 0,
+        )
+
+        # 3. Evaluate candidate through SignalPipeline
+        candles_5m = self.candle_aggregator.get_history(symbol, "5m", 100)
+        portfolio_summary = self.paper_engine.get_portfolio_summary()
+        cfg = SignalEngineConfig()
+
+        decision, rejection = await evaluate_candidate_signal(
+            candidate=candidate,
+            candles_by_timeframe={"15m": candles, "5m": candles_5m},
+            quote={
+                "symbol": symbol,
+                "ltp": ltp,
+                "volume": quote.volume if quote else 500000,
+                "timestamp": time.time(),
+                "change_percent": quote.change_percent if quote else 0.0,
+                "provider": "UPSTOX",
+            },
+            is_market_open=True,
+            portfolio_state=portfolio_summary,
+            config=cfg,
+        )
+
+        # 4. Log validation gate results
+        if decision.validation_gates:
+            for g in decision.validation_gates:
+                g_res = getattr(g.result, "value", str(g.result))
+                await self.evidence_logger.log_event(
+                    event_type=EventType.VALIDATION_GATE_RESULT,
+                    payload={
+                        "candidate_id": candidate_id,
+                        "gate_id": g.gate_id,
+                        "gate_name": g.gate_name,
+                        "gate_type": g.gate_type,
+                        "result": g_res,
+                        "reason": g.reason,
+                    },
+                    symbol=symbol,
+                    source="VALIDATION_PIPELINE",
+                )
+
+        # 5. Check if candidate passed or failed
+        is_qualified = (decision.direction != SignalDirection.NO_TRADE and decision.entry is not None)
+        if not is_qualified:
+            self.session_stats["candidates_rejected"] += 1
+            await self.evidence_logger.log_event(
+                event_type=EventType.CANDIDATE_REJECTED,
+                payload={
+                    "candidate_id": candidate_id,
+                    "rejection_reasons": decision.why_reasons if decision.why_reasons else [rejection.reason if rejection else "NO_EDGE"],
+                    "opportunity_score": decision.opportunity_score,
+                    "quality_grade": getattr(decision.quality_grade, "value", str(decision.quality_grade)),
+                },
+                symbol=symbol,
+                source="VALIDATION_PIPELINE",
+            )
             await self.evidence_logger.log_event(
                 event_type=EventType.NO_QUALIFIED_SIGNAL,
-                payload={"symbol": symbol, "reason": "No strategy triggered threshold conditions"},
+                payload={
+                    "symbol": symbol,
+                    "candidate_id": candidate_id,
+                    "reason": rejection.reason if rejection else "Candidate did not meet qualification thresholds",
+                },
                 symbol=symbol,
                 source="STRATEGY_EVALUATOR",
             )
-            return
-
-        # 2. Evaluate each raw candidate through SignalPipeline
-        for cand in raw_candidates:
-            self.session_stats["candidates_created"] += 1
+        else:
+            # Candidate Validated & Signal Qualified
+            self.session_stats["signals_qualified"] += 1
             await self.evidence_logger.log_event(
-                event_type=EventType.CANDIDATE_CREATED,
+                event_type=EventType.CANDIDATE_VALIDATED,
                 payload={
-                    "candidate_id": cand.candidate_id,
-                    "direction": getattr(cand.direction, "value", str(cand.direction)),
-                    "strategy_id": cand.strategy_id,
-                    "opportunity_score": cand.opportunity_score,
+                    "candidate_id": candidate_id,
+                    "signal_id": decision.signal_id,
+                    "score": decision.opportunity_score,
                 },
                 symbol=symbol,
-                source="CANDIDATE_GENERATOR",
+                source="VALIDATION_PIPELINE",
             )
 
-            # Evaluate candidate through 17-stage validation pipeline
-            current_time_ms = int(time.time() * 1000)
-            decision = evaluate_candidate_signal(
-                candidate=cand,
-                candles_15m=candles,
-                quote={"symbol": symbol, "ltp": ltp, "volume": 500000, "timestamp": current_time_ms / 1000.0},
-                account_cash=self.paper_engine.capital,
-                open_positions_count=len(self.paper_engine.positions),
+            utc_cutoff, _ = get_current_timestamps()
+            await self.evidence_logger.log_event(
+                event_type=EventType.SIGNAL_QUALIFIED,
+                payload={
+                    "signal_id": decision.signal_id,
+                    "candidate_id": candidate_id,
+                    "direction": getattr(decision.direction, "value", str(decision.direction)),
+                    "grade": getattr(decision.quality_grade, "value", str(decision.quality_grade)),
+                    "opportunity_score": decision.opportunity_score,
+                    "entry": decision.entry,
+                    "stop_loss": decision.stop_loss.price if decision.stop_loss else None,
+                    "target_1": decision.targets[0].price if decision.targets else None,
+                    "risk_reward": decision.risk_reward,
+                    "information_cutoff_timestamp": utc_cutoff,
+                },
+                symbol=symbol,
+                source="SIGNAL_PIPELINE",
             )
 
-            # Log gate results
-            if decision.validation_gates:
-                for g in decision.validation_gates:
-                    g_status = getattr(g.status, "value", str(g.status))
-                    await self.evidence_logger.log_event(
-                        event_type=EventType.VALIDATION_GATE_RESULT,
-                        payload={
-                            "candidate_id": cand.candidate_id,
-                            "gate_name": g.gate_name,
-                            "status": g_status,
-                            "reason": g.reason,
-                        },
-                        symbol=symbol,
-                        source="VALIDATION_PIPELINE",
-                    )
-
-            # Check if candidate passed or failed
-            is_qualified = (decision.direction != SignalDirection.NO_TRADE and decision.entry is not None)
-            if not is_qualified:
-                self.session_stats["candidates_rejected"] += 1
-                await self.evidence_logger.log_event(
-                    event_type=EventType.CANDIDATE_REJECTED,
-                    payload={
-                        "candidate_id": cand.candidate_id,
-                        "rejection_reasons": decision.rejection_reasons,
-                        "opportunity_score": decision.opportunity_score,
-                        "quality_grade": getattr(decision.quality_grade, "value", str(decision.quality_grade)),
-                    },
-                    symbol=symbol,
-                    source="VALIDATION_PIPELINE",
-                )
-            else:
-                # Candidate Validated & Signal Qualified
-                self.session_stats["signals_qualified"] += 1
-                await self.evidence_logger.log_event(
-                    event_type=EventType.CANDIDATE_VALIDATED,
-                    payload={
-                        "candidate_id": cand.candidate_id,
-                        "signal_id": decision.signal_id,
-                        "score": decision.opportunity_score,
-                    },
-                    symbol=symbol,
-                    source="VALIDATION_PIPELINE",
-                )
-
-                utc_cutoff, _ = get_current_timestamps()
-                await self.evidence_logger.log_event(
-                    event_type=EventType.SIGNAL_QUALIFIED,
-                    payload={
-                        "signal_id": decision.signal_id,
-                        "candidate_id": cand.candidate_id,
-                        "direction": getattr(decision.direction, "value", str(decision.direction)),
-                        "grade": getattr(decision.quality_grade, "value", str(decision.quality_grade)),
-                        "opportunity_score": decision.opportunity_score,
-                        "entry": decision.entry,
-                        "stop_loss": decision.stop_loss.price if decision.stop_loss else None,
-                        "target_1": decision.targets[0].price if decision.targets else None,
-                        "risk_reward": decision.risk_reward,
-                        "information_cutoff_timestamp": utc_cutoff,
-                    },
-                    symbol=symbol,
-                    source="SIGNAL_PIPELINE",
-                )
-
-                # Route to Paper Trading Engine
-                await self._execute_paper_trade(decision)
+            # Route to Paper Trading Engine
+            await self._execute_paper_trade(decision)
 
     async def _execute_paper_trade(self, signal: SignalDecision) -> None:
         """Executes a qualified signal in the paper trading engine."""
@@ -811,13 +902,15 @@ class LivePaperSessionRunner:
 
     async def _periodic_scanner_loop(self) -> None:
         """Periodically scans universe symbols for strategy evaluations."""
+        # Initial scan right after startup once candles are seeded
+        await asyncio.sleep(5.0)
         while self.is_running:
             try:
-                await asyncio.sleep(60.0)  # Scan every 1 minute
                 for sym in self.universe:
                     if not self.is_running:
                         break
                     await self.evaluate_symbol_signals(sym)
+                await asyncio.sleep(60.0)  # Scan every 1 minute
             except asyncio.CancelledError:
                 break
             except Exception as e:

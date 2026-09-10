@@ -204,6 +204,13 @@ def decode_upstox_protobuf_frame(binary_data: bytes) -> Optional[Dict[str, Any]]
                             "eoi": int(mff.efd.oi) if mff.HasField("efd") else 0,
                         }
                     }
+                    if mff.HasField("efd"):
+                        feed_dict["ff"]["marketFF"]["efd"] = {
+                            "change": mff.efd.change,
+                            "change_percent": mff.efd.change_percent,
+                            "v": mff.efd.v,
+                            "eoi": int(mff.efd.oi),
+                        }
                     if mff.HasField("market_level"):
                         feed_dict["market_level"] = {
                             "bid_price": mff.market_level.bid_price,
@@ -228,6 +235,11 @@ def decode_upstox_protobuf_frame(binary_data: bytes) -> Optional[Dict[str, Any]]
                             },
                         }
                     }
+                    if iff.HasField("efd"):
+                        feed_dict["ff"]["marketFF"]["efd"] = {
+                            "change": iff.efd.change,
+                            "change_percent": iff.efd.change_percent,
+                        }
             feeds_dict[key] = feed_dict
 
         return {

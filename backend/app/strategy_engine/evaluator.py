@@ -788,7 +788,7 @@ def evaluate_strategies_observatory(
             "low": float(c.get("low", 0.0)),
             "close": float(c.get("close", 0.0)),
             "volume": float(c.get("volume", 0.0)),
-            "vwap": float(c.get("vwap", c.get("close", 0.0))),
+            "vwap": float(c.get("vwap") or c.get("close") or 0.0),
         })
 
     return {

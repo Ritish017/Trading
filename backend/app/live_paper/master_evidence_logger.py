@@ -7,10 +7,13 @@ entire live paper-trading session.
 Key Invariants:
 1. Exactly ONE primary append-only JSONL file for the entire session.
    Format: logs/live_paper/YYYY-MM-DD/APEX_YYYY-MM-DD_MASTER.jsonl
-2. Every line is a self-contained JSON event with strictly increasing sequence_number.
-3. Monotonic sequence numbering survives crashes: on restart, recovers max sequence number.
+2. Every line is a self-contained JSON event with strictly increasing sequence_number
+   and global_sequence_number.
+3. Monotonic sequence numbering survives process restarts: recovers max sequence from DB.
 4. No event is ever silently overwritten or deleted.
 5. End-of-session computes deterministic SHA-256 checksum of the master log file.
+6. Three-timestamp semantics: market_timestamp, event_timestamp (UTC/IST), processing_timestamp.
+7. Strict data provenance tracking (AUTHENTIC_LIVE, AUTHENTIC_HISTORICAL, etc.).
 """
 
 import asyncio
@@ -19,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import uuid
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
@@ -30,23 +34,37 @@ from backend.app.signal_engine.version_freeze import (
     CONFIGURATION_HASH,
     GIT_COMMIT,
 )
+from backend.app.live_paper.session_lifecycle import (
+    MarketPhase,
+    DataProvenance,
+    SessionAnomalyType,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Authoritative Event Types (Prompt Section 4)
+# Authoritative Event Types
 # ---------------------------------------------------------------------------
 
 class EventType:
     # Session Lifecycle
     SESSION_START = "SESSION_START"
     SESSION_PREFLIGHT = "SESSION_PREFLIGHT"
+    MARKET_OPEN = "MARKET_OPEN"
     SESSION_REGULAR_OPEN = "SESSION_REGULAR_OPEN"
     SESSION_HEARTBEAT = "SESSION_HEARTBEAT"
+    EQUITY_MARKET_CLOSE = "EQUITY_MARKET_CLOSE"
     SESSION_REGULAR_CLOSE = "SESSION_REGULAR_CLOSE"
     SESSION_END = "SESSION_END"
     SESSION_SUMMARY = "SESSION_SUMMARY"
+    SESSION_CHECKPOINT = "SESSION_CHECKPOINT"
+
+    # Worker & Recovery Lifecycle
+    WORKER_STARTUP = "WORKER_STARTUP"
+    WORKER_RECOVERY = "WORKER_RECOVERY"
+    WORKER_SHUTDOWN = "WORKER_SHUTDOWN"
+    SESSION_ANOMALY = "SESSION_ANOMALY"
 
     # Market Connectivity & Data
     MARKET_CONNECTION = "MARKET_CONNECTION"
@@ -60,6 +78,7 @@ class EventType:
     CANDLE_UPDATED = "CANDLE_UPDATED"
     UNIVERSE_SNAPSHOT = "UNIVERSE_SNAPSHOT"
     DATA_QUALITY_EVENT = "DATA_QUALITY_EVENT"
+    HISTORICAL_WARMUP_COMPLETED = "HISTORICAL_WARMUP_COMPLETED"
 
     # Market State & Multi-Timeframe
     REGIME_UPDATE = "REGIME_UPDATE"
@@ -120,7 +139,7 @@ class EventType:
 
 
 # ---------------------------------------------------------------------------
-# Event Schema (Prompt Section 3)
+# Standardized Event Schema
 # ---------------------------------------------------------------------------
 
 class MasterEvidenceEvent(BaseModel):
@@ -129,23 +148,37 @@ class MasterEvidenceEvent(BaseModel):
     """
     event_id: str
     experiment_id: str
+    trading_day: str
+    session_instance_id: Optional[str] = None
+    worker_instance_id: Optional[str] = None
+    sequence_number: int
+    global_sequence_number: int
     event_type: str
+
+    market_timestamp: Optional[float] = None
     event_timestamp_utc: str
     event_timestamp_ist: str
-    sequence_number: int
+    processing_timestamp_utc: Optional[str] = None
+    processing_latency_ms: Optional[float] = None
+
     symbol: Optional[str] = None
+    instrument_key: Optional[str] = None
+
     source: str
-    data_provenance: str
+    provider: Optional[str] = None
+    data_provenance: str = DataProvenance.AUTHENTIC_LIVE.value
+
     git_commit: str = GIT_COMMIT
     config_hash: str = CONFIGURATION_HASH
     engine_version: str = SIGNAL_ENGINE_VERSION
+    market_phase: str = MarketPhase.PREMARKET.value
+
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 def get_current_timestamps() -> tuple[str, str]:
     """Returns (UTC_ISO, IST_ISO) timestamps."""
     now_utc = datetime.datetime.now(datetime.timezone.utc)
-    # Asia/Kolkata is UTC + 5:30
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     now_ist = now_utc.astimezone(ist_tz)
     return now_utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ"), now_ist.strftime("%Y-%m-%dT%H:%M:%S.%f+05:30")
@@ -158,9 +191,18 @@ def get_current_timestamps() -> tuple[str, str]:
 class MasterEvidenceLogger:
     """
     Append-only thread/async-safe logger writing strictly sequenced JSONL events.
+    Guarantees monotonic global event numbering across restarts.
     """
 
-    def __init__(self, experiment_id: str, log_dir: Optional[str] = None, session_date: Optional[str] = None):
+    def __init__(
+        self,
+        experiment_id: str,
+        log_dir: Optional[str] = None,
+        session_date: Optional[str] = None,
+        worker_instance_id: Optional[str] = None,
+        session_instance_id: Optional[str] = None,
+        global_sequence_start: int = 0,
+    ):
         self.experiment_id = experiment_id
         
         # Derive date string YYYY-MM-DD
@@ -170,6 +212,11 @@ class MasterEvidenceLogger:
             now_ist = now_utc.astimezone(ist_tz)
             session_date = now_ist.strftime("%Y-%m-%d")
         self.session_date = session_date
+        self.trading_day = session_date
+
+        self.worker_instance_id = worker_instance_id or f"WRK-{uuid.uuid4().hex[:8]}"
+        self.session_instance_id = session_instance_id or f"SES-{self.session_date}-{uuid.uuid4().hex[:6]}"
+        self.market_phase: str = MarketPhase.PREMARKET.value
 
         if log_dir:
             self.log_dir = log_dir
@@ -181,9 +228,11 @@ class MasterEvidenceLogger:
 
         self._lock = asyncio.Lock()
         self._sequence_number = 0
+        self._global_sequence_number = max(0, global_sequence_start)
         self._first_event_id: Optional[str] = None
         self._last_event_id: Optional[str] = None
         self._last_event_type: Optional[str] = None
+        self._last_market_timestamp: Optional[float] = None
 
         # Counters for integrity verification
         self._counts: Dict[str, int] = {
@@ -204,11 +253,15 @@ class MasterEvidenceLogger:
         self._flush_task: Optional[asyncio.Task] = None
         self._db_enabled: bool = True
 
-        # Recover sequence number and stats if resuming an existing master file
+        # Recover sequence number and stats if resuming an existing master file on disk
         self._recover_state_if_exists()
 
+    def set_market_phase(self, phase: str) -> None:
+        """Updates the active market phase for subsequently logged events."""
+        self.market_phase = phase
+
     def _recover_state_if_exists(self) -> None:
-        """Crash recovery: reads existing lines to recover max sequence_number."""
+        """Crash recovery from local disk: reads existing lines to recover max sequence_number."""
         if not os.path.exists(self.log_file):
             return
 
@@ -224,6 +277,10 @@ class MasterEvidenceLogger:
                         if seq > self._sequence_number:
                             self._sequence_number = seq
                         
+                        gseq = record.get("global_sequence_number", 0)
+                        if gseq > self._global_sequence_number:
+                            self._global_sequence_number = gseq
+                        
                         eid = record.get("event_id")
                         if self._first_event_id is None and eid:
                             self._first_event_id = eid
@@ -232,7 +289,7 @@ class MasterEvidenceLogger:
 
                         self._counts["total_events"] += 1
                         etype = record.get("event_type", "")
-                        if "ERROR" in etype:
+                        if "ERROR" in etype or "ANOMALY" in etype:
                             self._counts["error_count"] += 1
                         if "MARKET" in etype or "TICK" in etype or "CANDLE" in etype:
                             self._counts["market_events"] += 1
@@ -252,7 +309,7 @@ class MasterEvidenceLogger:
                         continue
             logger.info(
                 f"[MASTER LOGGER] Recovered session file: {self.log_file} "
-                f"at sequence {self._sequence_number}, events: {self._counts['total_events']}"
+                f"at sequence {self._sequence_number} (global: {self._global_sequence_number}), events: {self._counts['total_events']}"
             )
         except Exception as e:
             logger.error(f"[MASTER LOGGER] Crash recovery parse notice: {e}")
@@ -260,6 +317,10 @@ class MasterEvidenceLogger:
     @property
     def current_sequence_number(self) -> int:
         return self._sequence_number
+
+    @property
+    def current_global_sequence_number(self) -> int:
+        return self._global_sequence_number
 
     @property
     def counts(self) -> Dict[str, int]:
@@ -275,34 +336,55 @@ class MasterEvidenceLogger:
         payload: Optional[Dict[str, Any]] = None,
         symbol: Optional[str] = None,
         source: str = "APEX_SIGNAL_ENGINE",
-        data_provenance: str = "AUTHENTIC_LIVE",
+        data_provenance: str = DataProvenance.AUTHENTIC_LIVE.value,
         event_id: Optional[str] = None,
+        market_timestamp: Optional[float] = None,
+        processing_timestamp_utc: Optional[str] = None,
+        processing_latency_ms: Optional[float] = None,
+        provider: Optional[str] = None,
+        instrument_key: Optional[str] = None,
+        market_phase: Optional[str] = None,
     ) -> MasterEvidenceEvent:
         """
         Atomically appends an event to the master JSONL file with sequential numbering.
         """
-        import uuid
-
         utc_ts, ist_ts = get_current_timestamps()
         eid = event_id or f"EVT-{uuid.uuid4().hex[:12].upper()}"
+        active_phase = market_phase or self.market_phase
 
         async with self._lock:
             self._sequence_number += 1
+            self._global_sequence_number += 1
             seq = self._sequence_number
+            gseq = self._global_sequence_number
+
+            # Track market timestamp sequence
+            if market_timestamp is not None:
+                self._last_market_timestamp = market_timestamp
 
             event = MasterEvidenceEvent(
                 event_id=eid,
                 experiment_id=self.experiment_id,
+                trading_day=self.trading_day,
+                session_instance_id=self.session_instance_id,
+                worker_instance_id=self.worker_instance_id,
+                sequence_number=seq,
+                global_sequence_number=gseq,
                 event_type=event_type,
+                market_timestamp=market_timestamp,
                 event_timestamp_utc=utc_ts,
                 event_timestamp_ist=ist_ts,
-                sequence_number=seq,
+                processing_timestamp_utc=processing_timestamp_utc,
+                processing_latency_ms=processing_latency_ms,
                 symbol=symbol,
+                instrument_key=instrument_key,
                 source=source,
+                provider=provider,
                 data_provenance=data_provenance,
                 git_commit=GIT_COMMIT,
                 config_hash=CONFIGURATION_HASH,
                 engine_version=SIGNAL_ENGINE_VERSION,
+                market_phase=active_phase,
                 payload=payload or {},
             )
 
@@ -313,7 +395,7 @@ class MasterEvidenceLogger:
             self._last_event_id = eid
             self._last_event_type = event_type
 
-            if "ERROR" in event_type:
+            if "ERROR" in event_type or "ANOMALY" in event_type:
                 self._counts["error_count"] += 1
             if "MARKET" in event_type or "TICK" in event_type or "CANDLE" in event_type:
                 self._counts["market_events"] += 1
@@ -351,6 +433,33 @@ class MasterEvidenceLogger:
                     logger.debug(f"[MASTER LOGGER] DB queue enqueue notice: {e}")
 
         return event
+
+    async def log_anomaly(
+        self,
+        anomaly_type: SessionAnomalyType,
+        description: str,
+        expected: Any,
+        actual: Any,
+        recovery_action: str,
+        severity: str = "WARNING",
+    ) -> MasterEvidenceEvent:
+        """
+        Logs a structured anomaly event to the audit trail without silently altering evidence.
+        """
+        payload = {
+            "anomaly_type": anomaly_type.value if hasattr(anomaly_type, "value") else str(anomaly_type),
+            "severity": severity,
+            "description": description,
+            "expected": str(expected),
+            "actual": str(actual),
+            "recovery_action": recovery_action,
+        }
+        return await self.log_event(
+            event_type=EventType.SESSION_ANOMALY,
+            payload=payload,
+            source="ANOMALY_DETECTOR",
+            data_provenance=DataProvenance.DERIVED.value,
+        )
 
     def _ensure_flush_task(self) -> None:
         """Ensures the background database flusher task is running."""
@@ -408,24 +517,24 @@ class MasterEvidenceLogger:
                 self._db_queue.task_done()
 
     async def recover_state_from_db_if_needed(self) -> None:
-        """Recovers monotonic sequence number and stats from database if container restarted with fresh disk."""
-        if self._sequence_number > 0:
-            return
+        """
+        Recovers monotonic sequence number and stats from PostgreSQL / SQLite
+        to guarantee global sequencing survives restarts even with an ephemeral container disk.
+        """
         try:
             from backend.app.database.connection import AsyncSessionLocal
-            from backend.app.database.models import AuditEventModel
-            from sqlalchemy import select, func
+            from backend.app.database.repositories.audit_repository import AuditRepository
             async with AsyncSessionLocal() as session:
-                stmt = select(
-                    func.max(AuditEventModel.sequence_number),
-                    func.count(AuditEventModel.id)
-                ).where(AuditEventModel.session_date == self.session_date)
-                res = await session.execute(stmt)
-                row = res.first()
-                if row and row[0]:
-                    self._sequence_number = int(row[0])
-                    self._counts["total_events"] = int(row[1]) if row[1] else 0
-                    logger.info(f"[MASTER LOGGER] Recovered sequence {self._sequence_number} from database for date {self.session_date}")
+                repo = AuditRepository(session)
+                max_gseq, max_lseq = await repo.get_last_sequence_numbers(self.session_date)
+                if max_gseq > self._global_sequence_number:
+                    self._global_sequence_number = max_gseq
+                if max_lseq > self._sequence_number:
+                    self._sequence_number = max_lseq
+                logger.info(
+                    f"[MASTER LOGGER] Database sequence recovery: global={self._global_sequence_number}, "
+                    f"local={self._sequence_number} for session {self.session_date}"
+                )
         except Exception as e:
             logger.debug(f"[MASTER LOGGER] DB sequence recovery notice: {e}")
 
@@ -452,6 +561,9 @@ class MasterEvidenceLogger:
         payload = {
             "experiment_id": self.experiment_id,
             "session_date": self.session_date,
+            "trading_day": self.trading_day,
+            "session_instance_id": self.session_instance_id,
+            "worker_instance_id": self.worker_instance_id,
             "utc_start_timestamp": utc_ts,
             "ist_start_timestamp": ist_ts,
             "git_commit": GIT_COMMIT,
@@ -470,7 +582,41 @@ class MasterEvidenceLogger:
         }
         if metadata:
             payload.update(metadata)
-        return await self.log_event(EventType.SESSION_START, payload=payload, source="SESSION_INITIALIZER")
+        return await self.log_event(
+            EventType.SESSION_START,
+            payload=payload,
+            source="SESSION_INITIALIZER",
+            data_provenance=DataProvenance.AUTHENTIC_LIVE.value,
+            market_phase=self.market_phase,
+        )
+
+    async def log_worker_recovery(
+        self,
+        recovered_from_global_sequence: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> MasterEvidenceEvent:
+        """Emits WORKER_RECOVERY when process restarts within an ongoing trading session."""
+        utc_ts, ist_ts = get_current_timestamps()
+        payload = {
+            "experiment_id": self.experiment_id,
+            "trading_day": self.trading_day,
+            "session_instance_id": self.session_instance_id,
+            "worker_instance_id": self.worker_instance_id,
+            "recovered_from_global_sequence": recovered_from_global_sequence,
+            "current_global_sequence": self._global_sequence_number + 1,
+            "utc_recovery_timestamp": utc_ts,
+            "ist_recovery_timestamp": ist_ts,
+            "market_phase": self.market_phase,
+        }
+        if metadata:
+            payload.update(metadata)
+        return await self.log_event(
+            EventType.WORKER_RECOVERY,
+            payload=payload,
+            source="WORKER_RECOVERY_MANAGER",
+            data_provenance=DataProvenance.DERIVED.value,
+            market_phase=self.market_phase,
+        )
 
     async def log_session_summary(self, summary_metrics: Optional[Dict[str, Any]] = None) -> MasterEvidenceEvent:
         """
@@ -481,11 +627,21 @@ class MasterEvidenceLogger:
         payload = {
             "experiment_id": self.experiment_id,
             "session_date": self.session_date,
+            "trading_day": self.trading_day,
+            "session_instance_id": self.session_instance_id,
+            "worker_instance_id": self.worker_instance_id,
             "master_log_file": self.log_file,
             "master_log_sha256": sha256_hash,
             "first_event_id": self._first_event_id,
             "last_event_id": self._last_event_id,
+            "global_sequence_number": self._global_sequence_number + 1,
             "event_counts": self.counts,
             "metrics": summary_metrics or {},
         }
-        return await self.log_event(EventType.SESSION_SUMMARY, payload=payload, source="SESSION_FINALIZER")
+        return await self.log_event(
+            EventType.SESSION_SUMMARY,
+            payload=payload,
+            source="SESSION_FINALIZER",
+            data_provenance=DataProvenance.DERIVED.value,
+            market_phase=self.market_phase,
+        )

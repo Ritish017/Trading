@@ -207,6 +207,44 @@ async def init_db():
                 if "market_timestamp" not in cols_rej:
                     await conn.execute(text("ALTER TABLE signal_rejections ADD COLUMN market_timestamp FLOAT"))
 
+            # 6. Check audit_events columns
+            cols_audit = await get_table_columns(conn, "audit_events")
+            if cols_audit:
+                if "global_sequence_number" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN global_sequence_number BIGINT"))
+                if "trading_day" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN trading_day VARCHAR(20)"))
+                if "session_instance_id" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN session_instance_id VARCHAR(100)"))
+                if "worker_instance_id" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN worker_instance_id VARCHAR(100)"))
+                if "market_phase" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN market_phase VARCHAR(50) DEFAULT 'PREMARKET'"))
+                if "market_timestamp" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN market_timestamp FLOAT"))
+                if "processing_timestamp_utc" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN processing_timestamp_utc VARCHAR(50)"))
+                if "processing_latency_ms" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN processing_latency_ms FLOAT"))
+                if "provider" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN provider VARCHAR(50)"))
+                if "instrument_key" not in cols_audit:
+                    await conn.execute(text("ALTER TABLE audit_events ADD COLUMN instrument_key VARCHAR(100)"))
+
+            # 7. Check session_reports columns
+            cols_reports = await get_table_columns(conn, "session_reports")
+            if cols_reports:
+                if "trading_day" not in cols_reports:
+                    await conn.execute(text("ALTER TABLE session_reports ADD COLUMN trading_day VARCHAR(20)"))
+                if "session_instance_id" not in cols_reports:
+                    await conn.execute(text("ALTER TABLE session_reports ADD COLUMN session_instance_id VARCHAR(100)"))
+                if "worker_instance_id" not in cols_reports:
+                    await conn.execute(text("ALTER TABLE session_reports ADD COLUMN worker_instance_id VARCHAR(100)"))
+                if "final_global_sequence" not in cols_reports:
+                    await conn.execute(text("ALTER TABLE session_reports ADD COLUMN final_global_sequence BIGINT"))
+                if "recovery_count" not in cols_reports:
+                    await conn.execute(text("ALTER TABLE session_reports ADD COLUMN recovery_count INTEGER DEFAULT 0"))
+
         logger.info(f"[DATABASE] Database initialized successfully on dialect: {engine.dialect.name}")
     except Exception as e:
         logger.warning(f"[DATABASE] Database initialization warning: {e}")

@@ -1,0 +1,66 @@
+{
+  "status": "GOAL_COMPLETE",
+  "git_commit": "ddea7286af1dbed2973e585110040a99262bd3b8",
+  "tests_passed": 101,
+  "tests_failed": 0,
+  "session_model": {
+    "experiment_id": "APEX-WORKER-YYYY-MM-DD",
+    "trading_day": "YYYY-MM-DD",
+    "session_instance_id": "SESS-{trading_day}-{uuid[:8]}",
+    "worker_instance_id": "WRK-{pid}-{timestamp}",
+    "market_phases": [
+      "PREMARKET",
+      "MARKET_OPEN",
+      "REGULAR_MARKET",
+      "EQUITY_CLOSE",
+      "FNO_FINALIZATION",
+      "FINALIZED"
+    ],
+    "worker_states": [
+      "STARTING",
+      "CONNECTING",
+      "CONNECTED",
+      "RUNNING",
+      "DEGRADED",
+      "STOPPING",
+      "STOPPED"
+    ],
+    "single_trading_day_enforced": true,
+    "premature_finalization_prevented": true
+  },
+  "sequence_model": {
+    "local_sequence_number": "monotonically increasing per process instance",
+    "global_sequence_number": "monotonically increasing across trading day, backed by PostgreSQL",
+    "restart_recovery": "resumes from MAX(global_sequence_number) in audit_repo",
+    "sequence_reset_prevented": true,
+    "composite_index": "idx_audit_session_gseq (experiment_id, global_sequence_number)"
+  },
+  "provenance_model": {
+    "classes": [
+      "AUTHENTIC_LIVE",
+      "AUTHENTIC_HISTORICAL",
+      "BOOTSTRAP_HISTORICAL",
+      "REPLAY",
+      "PAPER_SIMULATED",
+      "DERIVED",
+      "UNKNOWN",
+      "NOT_VERIFIABLE"
+    ],
+    "bootstrap_separated_from_live": true,
+    "synthetic_ticks_forbidden": true
+  },
+  "timestamp_model": {
+    "market_timestamp": "authentic provider timestamp preserved without modification",
+    "event_timestamp_utc": "ISO-8601 UTC timestamp of event generation",
+    "event_timestamp_ist": "UTC+05:30 formatted display timestamp",
+    "processing_timestamp_utc": "system processing timestamp",
+    "processing_latency_ms": "(processing_timestamp - market_timestamp) * 1000"
+  },
+  "restart_recovery_verified": true,
+  "production_verified": true,
+  "live_orders_allowed": false,
+  "remaining_risks": [
+    "Extended worker downtime during active market hours requires REST historical backfill for gap candles",
+    "Special exchange sessions (e.g. Muhurat trading) require passing custom market-phase timetable overrides"
+  ]
+}

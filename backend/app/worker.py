@@ -42,6 +42,7 @@ from backend.app.live_paper.safety import (
     LivePaperSafetyGuard,
     LiveOrderForbiddenSecurityError,
 )
+from backend.app.live_paper.session_lifecycle import WorkerState, MarketPhase, SessionLifecycleManager
 from backend.app.live_paper.preflight import SessionPreflight
 from backend.app.live_paper.session_runner import LivePaperSessionRunner
 from backend.app.live_paper.master_evidence_logger import EventType, get_current_timestamps
@@ -69,6 +70,8 @@ class StatefulMarketWorker:
         ist_now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
         self.target_date = target_date or ist_now.strftime("%Y-%m-%d")
         self.experiment_id = f"APEX-WORKER-{self.target_date}"
+        self.worker_instance_id = f"worker_{os.getpid()}_{int(time.time()*1000)}"
+        self.worker_state = WorkerState.STARTING
         self.dry_run = dry_run
         self.log_dir = log_dir
         
@@ -88,6 +91,7 @@ class StatefulMarketWorker:
     async def start(self) -> None:
         """Starts worker lifecycle: validation -> database -> recovery -> market processing."""
         logger.info(f"[WORKER STARTUP] Starting {self.worker_id} for session {self.target_date}...")
+        self.worker_state = WorkerState.STARTING
 
         # 1. Enforce safety & production invariants
         LivePaperSafetyGuard.assert_paper_mode_enforced()
@@ -113,6 +117,7 @@ class StatefulMarketWorker:
             raise RuntimeError(err_msg)
         logger.info(f"[WORKER STARTUP] Preflight checks passed with status: {preflight_report.get('overall_status')}")
 
+        self.worker_state = WorkerState.CONNECTING
         # 3. Register worker startup in database
         async with AsyncSessionLocal() as s:
             repo = WorkerRepository(s)
@@ -125,14 +130,16 @@ class StatefulMarketWorker:
                 paper_mode=True,
                 live_trading=False,
                 data_quality="AUTHENTIC_LIVE" if not self.dry_run else "DRY_RUN_FIXTURE",
+                details_json={"worker_instance_id": self.worker_instance_id},
             )
 
-        # 4. Initialize LivePaperSessionRunner
+        # 4. Initialize LivePaperSessionRunner with unique worker_instance_id
         self.runner = LivePaperSessionRunner(
             experiment_id=self.experiment_id,
             session_date=self.target_date,
             dry_run=self.dry_run,
             log_dir=self.log_dir,
+            worker_instance_id=self.worker_instance_id,
         )
 
         # 5. Execute runner in background task
@@ -143,6 +150,7 @@ class StatefulMarketWorker:
                 logger.critical(f"[WORKER RUNNER CRASH] Runner crashed: {e}", exc_info=True)
 
         self.is_running = True
+        self.worker_state = WorkerState.RUNNING
         self._runner_task = asyncio.create_task(_run_safely())
 
         # Update status to ONLINE
@@ -156,15 +164,17 @@ class StatefulMarketWorker:
                 database_status="ONLINE",
                 paper_mode=True,
                 live_trading=False,
+                details_json={"worker_instance_id": self.worker_instance_id},
             )
 
-        logger.info(f"[WORKER ACTIVE] {self.worker_id} is operating continuously.")
+        logger.info(f"[WORKER ACTIVE] {self.worker_id} ({self.worker_instance_id}) is operating continuously.")
 
     async def stop(self) -> None:
         """Stops the worker gracefully and flushes evidence logs."""
         if not self.is_running:
             return
-        logger.info(f"[WORKER SHUTDOWN] Shutting down {self.worker_id}...")
+        logger.info(f"[WORKER SHUTDOWN] Shutting down {self.worker_id} ({self.worker_instance_id})...")
+        self.worker_state = WorkerState.STOPPING
         self.is_running = False
 
         if self.runner:
@@ -187,6 +197,7 @@ class StatefulMarketWorker:
                         database_status="ONLINE",
                         paper_mode=True,
                         live_trading=False,
+                        details_json={"worker_instance_id": self.worker_instance_id},
                     )
                 break
             except Exception as e:
@@ -195,8 +206,9 @@ class StatefulMarketWorker:
                 else:
                     await asyncio.sleep(0.15)
 
+        self.worker_state = WorkerState.STOPPED
         self._shutdown_event.set()
-        logger.info(f"[WORKER SHUTDOWN] {self.worker_id} shutdown complete.")
+        logger.info(f"[WORKER SHUTDOWN] {self.worker_id} ({self.worker_instance_id}) shutdown complete.")
 
 
 # Shared worker instance
@@ -271,18 +283,26 @@ async def health_worker():
     db_health = await check_db_health()
     stats = worker_instance.runner.session_stats if worker_instance.runner else {}
     last_tick = max(worker_instance.runner.last_tick_timestamps.values()) if (worker_instance.runner and worker_instance.runner.last_tick_timestamps) else None
+    last_gseq = worker_instance.runner.evidence_logger.current_global_sequence_number if worker_instance.runner else 0
     
     return {
-        "worker_status": "RUNNING" if worker_instance.is_running else "STOPPED",
+        "worker_status": worker_instance.worker_state.value,
+        "worker_instance_id": worker_instance.worker_instance_id,
         "market_status": "CONNECTED" if (worker_instance.runner and getattr(worker_instance.runner, "is_running", False)) else "DISCONNECTED",
+        "market_phase": worker_instance.runner.market_phase.value if worker_instance.runner else "UNKNOWN",
         "database_status": db_health.get("status", "UNKNOWN"),
         "paper_mode": True,
         "live_trading": False,
         "last_market_event": "TICK" if last_tick else None,
         "last_signal_event": "SIGNAL" if stats.get("signals_qualified", 0) > 0 else None,
         "last_paper_event": "ORDER" if stats.get("paper_orders_placed", 0) > 0 else None,
-        "event_count": worker_instance.runner.evidence_logger.current_sequence_number if worker_instance.runner else 0,
+        "event_count": last_gseq,
+        "ticks_live": stats.get("ticks_live", 0),
+        "ticks_historical": stats.get("ticks_historical", 0),
+        "candles_live": stats.get("candles_live", 0),
+        "candles_historical": stats.get("candles_historical", 0),
         "reconnect_count": 0,
+        "recovery_count": worker_instance.runner.recovery_count if worker_instance.runner else 0,
         "error_count": stats.get("errors", 0),
         "open_positions": len(worker_instance.runner.paper_engine.positions) if worker_instance.runner else 0,
         "net_pnl": stats.get("net_pnl", 0.0),
@@ -361,13 +381,49 @@ async def get_audit_events(
 
 @worker_app.get("/api/session/status")
 async def get_session_status():
-    """Returns 100% cloud autonomy session state, clock progress, and certification status."""
+    """Returns authoritative session state conforming to Phase 13 contract."""
     runner = worker_instance.runner
     ist_now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+    
+    market_phase = runner.market_phase.value if runner else (
+        SessionLifecycleManager.get_market_phase(ist_now).value
+    )
+    session_instance_id = runner.session_instance_id if runner else f"session_{worker_instance.target_date}_default"
+    
+    session_status = "FINALIZED" if (runner and runner._session_finalized) else (
+        "RUNNING" if worker_instance.is_running else "STOPPED"
+    )
+    is_market_open = (market_phase == MarketPhase.REGULAR_MARKET.value)
+    
+    stats = runner.session_stats if runner else {}
+    last_market_ts = max(runner.last_tick_timestamps.values()) if (runner and runner.last_tick_timestamps) else None
+    last_event_ts = getattr(runner.evidence_logger, "last_event_timestamp", None) if (runner and runner.evidence_logger) else None
+    last_gseq = runner.evidence_logger.current_global_sequence_number if (runner and runner.evidence_logger) else 0
+    
     return {
-        "cloud_autonomous": True,
-        "worker_id": worker_instance.worker_id,
         "experiment_id": worker_instance.experiment_id,
+        "trading_day": worker_instance.target_date,
+        "worker_instance_id": worker_instance.worker_instance_id,
+        "session_instance_id": session_instance_id,
+        "worker_state": worker_instance.worker_state.value,
+        "market_phase": market_phase,
+        "session_status": session_status,
+        "is_market_open": is_market_open,
+        "cloud_autonomous": True,
+        "last_market_timestamp": last_market_ts,
+        "last_event_timestamp": last_event_ts,
+        "last_global_sequence": last_gseq,
+        "ticks_live": stats.get("ticks_live", 0),
+        "ticks_historical": stats.get("ticks_historical", 0),
+        "candles_live": stats.get("candles_live", 0),
+        "candles_historical": stats.get("candles_historical", 0),
+        "evaluations": stats.get("evaluations_run", 0),
+        "candidates": stats.get("candidates_created", 0),
+        "signals": stats.get("signals_qualified", 0),
+        "paper_orders": stats.get("paper_orders_placed", 0),
+        "recovery_count": runner.recovery_count if runner else 0,
+        # Backward compatibility fields
+        "worker_id": worker_instance.worker_id,
         "target_date": worker_instance.target_date,
         "current_time_ist": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
         "is_running": worker_instance.is_running,
@@ -375,7 +431,7 @@ async def get_session_status():
         "session_finalized": runner._session_finalized if runner else False,
         "checkpoints_executed": list(runner._checkpoints_executed) if runner else [],
         "checkpoints_count": len(runner._checkpoints) if runner else 0,
-        "master_events_logged": runner.evidence_logger.current_sequence_number if runner else 0,
+        "master_events_logged": last_gseq,
         "master_log_sha256": runner.master_log_sha256 if runner else None,
         "live_orders_blocked": True,
         "paper_mode": True,

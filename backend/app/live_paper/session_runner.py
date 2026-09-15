@@ -19,6 +19,7 @@ import logging
 import os
 import psutil
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.app.config import settings
@@ -34,7 +35,6 @@ from backend.app.signal_engine.models import (
     SignalDecision,
     SignalDirection,
     SignalEngineConfig,
-    DataProvenance,
     CandidateRecord,
     AssetClass,
 )
@@ -64,6 +64,13 @@ from backend.app.live_paper.master_evidence_logger import (
     EventType,
     get_current_timestamps,
 )
+from backend.app.live_paper.session_lifecycle import (
+    MarketPhase,
+    WorkerState,
+    DataProvenance,
+    SessionLifecycleManager,
+    SessionAnomalyType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,19 +89,29 @@ class LivePaperSessionRunner:
         universe: Optional[List[str]] = None,
         initial_capital: float = 1000000.0,
         dry_run: bool = False,
+        worker_instance_id: Optional[str] = None,
+        session_instance_id: Optional[str] = None,
+        initial_market_phase: Optional[MarketPhase] = None,
     ):
         self.experiment_id = experiment_id
         
         ist_now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
         self.session_date = session_date or ist_now.strftime("%Y-%m-%d")
         self.dry_run = dry_run
+        self.worker_instance_id = worker_instance_id or f"WRK-{uuid.uuid4().hex[:8]}"
+        self.session_instance_id = session_instance_id or f"SES-{self.session_date}-{uuid.uuid4().hex[:6]}"
+        self.market_phase = initial_market_phase or SessionLifecycleManager.determine_market_phase(ist_now)
+        self.recovery_count = 0
 
         # Master evidence logger
         self.evidence_logger = MasterEvidenceLogger(
             experiment_id=self.experiment_id,
             log_dir=log_dir,
             session_date=self.session_date,
+            worker_instance_id=self.worker_instance_id,
+            session_instance_id=self.session_instance_id,
         )
+        self.evidence_logger.set_market_phase(self.market_phase.value)
 
         # Safety assertions
         LivePaperSafetyGuard.assert_paper_mode_enforced()
@@ -136,8 +153,12 @@ class LivePaperSessionRunner:
         # Tracking metrics for session summary
         self.session_stats = {
             "ticks_received": 0,
+            "ticks_live": 0,
+            "ticks_historical": 0,
             "candles_created": 0,
             "candles_updated": 0,
+            "candles_live": 0,
+            "candles_historical": 0,
             "evaluations_run": 0,
             "candidates_created": 0,
             "candidates_rejected": 0,
@@ -152,12 +173,38 @@ class LivePaperSessionRunner:
             "winning_trades": 0,
             "losing_trades": 0,
             "errors": 0,
+            "recovery_count": 0,
         }
 
+
     async def initialize_session(self) -> None:
-        """Emits SESSION_START and UNIVERSE_SNAPSHOT events, restoring portfolio state from database."""
+        """Emits SESSION_START or WORKER_RECOVERY events, restoring portfolio state from database."""
         logger.info(f"[SESSION RUNNER] Initializing session: {self.experiment_id} for date {self.session_date}")
         
+        # Check database for prior session state to recover monotonic sequence and prevent duplicate SESSION_START
+        has_started = False
+        if not self.dry_run:
+            try:
+                from backend.app.database.connection import AsyncSessionLocal
+                from backend.app.database.repositories.audit_repository import AuditRepository
+                async with AsyncSessionLocal() as session:
+                    repo = AuditRepository(session)
+                    recovery_state = await repo.get_session_recovery_state(self.session_date)
+                    max_gseq = recovery_state["max_global_sequence"]
+                    has_started = recovery_state["has_started"]
+                    if max_gseq > self.evidence_logger.current_global_sequence_number:
+                        self.evidence_logger._global_sequence_number = max_gseq
+                    
+                    # Check if session was already finalized in DB (enforced for non-dry-run sessions)
+                    if recovery_state["is_finalized"]:
+                        logger.warning(f"[SESSION RUNNER] Session {self.session_date} was already FINALIZED in database. Terminal state enforced.")
+                        self._session_finalized = True
+                        self.market_phase = MarketPhase.FINALIZED
+                        self.evidence_logger.set_market_phase(MarketPhase.FINALIZED.value)
+                        return
+            except Exception as e:
+                logger.warning(f"[SESSION RUNNER] DB recovery query notice: {e}")
+
         # Restore durable portfolio state from PostgreSQL / SQLite if available
         try:
             await self.paper_engine.load_from_db()
@@ -165,42 +212,91 @@ class LivePaperSessionRunner:
         except Exception as e:
             logger.warning(f"[SESSION RUNNER] Database state restoration notice: {e}")
 
-        # 1. Log SESSION_START
-        await self.evidence_logger.log_session_start(
-            universe=self.universe,
-            metadata={
-                "dry_run": self.dry_run,
-                "initial_capital": self.paper_engine.initial_capital,
-                "concurrency_limit": 5,
-                "restored_positions_count": len(self.paper_engine.positions),
-            }
-        )
+        if not has_started:
+            # 1. First startup of the trading day: Log SESSION_START
+            await self.evidence_logger.log_session_start(
+                universe=self.universe,
+                metadata={
+                    "dry_run": self.dry_run,
+                    "initial_capital": self.paper_engine.initial_capital,
+                    "concurrency_limit": 5,
+                    "restored_positions_count": len(self.paper_engine.positions),
+                    "market_phase": self.market_phase.value,
+                }
+            )
 
-        # 2. Log UNIVERSE_SNAPSHOT
-        universe_details = {}
-        for sym in self.universe:
-            meta = INSTRUMENT_MAP.get(sym, {})
-            universe_details[sym] = {
-                "instrument_key": meta.get("instrument_key", get_instrument_key(sym)),
-                "exchange": meta.get("exchange", "NSE"),
-                "segment": meta.get("segment", "NSE_EQ"),
-                "instrument_type": meta.get("instrument_type", "EQUITY"),
-                "display_name": meta.get("display_name", sym),
-            }
+            # 2. Log UNIVERSE_SNAPSHOT
+            universe_details = {}
+            for sym in self.universe:
+                meta = INSTRUMENT_MAP.get(sym, {})
+                universe_details[sym] = {
+                    "instrument_key": meta.get("instrument_key", get_instrument_key(sym)),
+                    "exchange": meta.get("exchange", "NSE"),
+                    "segment": meta.get("segment", "NSE_EQ"),
+                    "instrument_type": meta.get("instrument_type", "EQUITY"),
+                    "display_name": meta.get("display_name", sym),
+                }
 
-        await self.evidence_logger.log_event(
-            event_type=EventType.UNIVERSE_SNAPSHOT,
-            payload={
-                "universe_count": len(self.universe),
-                "instruments": universe_details,
-            },
-            source="SESSION_INITIALIZER",
-        )
+            await self.evidence_logger.log_event(
+                event_type=EventType.UNIVERSE_SNAPSHOT,
+                payload={
+                    "universe_count": len(self.universe),
+                    "instruments": universe_details,
+                },
+                source="SESSION_INITIALIZER",
+            )
+
+            # 3. Checkpoint PREMARKET_READY if starting in premarket
+            if self.market_phase == MarketPhase.PREMARKET and "PREMARKET_READY" not in self._checkpoints_executed:
+                await self.execute_checkpoint("PREMARKET_READY")
+        else:
+            # Worker restarted within an ongoing trading session!
+            self.recovery_count += 1
+            self.session_stats["recovery_count"] = self.recovery_count
+            logger.info(
+                f"[SESSION RUNNER] Worker process resumed session {self.experiment_id}. "
+                f"Global sequence resumes from {self.evidence_logger.current_global_sequence_number}."
+            )
+            await self.evidence_logger.log_worker_recovery(
+                recovered_from_global_sequence=self.evidence_logger.current_global_sequence_number,
+                metadata={
+                    "dry_run": self.dry_run,
+                    "recovery_count": self.recovery_count,
+                    "market_phase": self.market_phase.value,
+                    "restored_positions_count": len(self.paper_engine.positions),
+                }
+            )
+
+            # Emit UNIVERSE_SNAPSHOT on recovery to maintain audit trail completeness
+            universe_details = {}
+            for sym in self.universe:
+                meta = INSTRUMENT_MAP.get(sym, {})
+                universe_details[sym] = {
+                    "instrument_key": meta.get("instrument_key", get_instrument_key(sym)),
+                    "exchange": meta.get("exchange", "NSE"),
+                    "segment": meta.get("segment", "NSE_EQ"),
+                    "instrument_type": meta.get("instrument_type", "EQUITY"),
+                    "display_name": meta.get("display_name", sym),
+                }
+
+            await self.evidence_logger.log_event(
+                event_type=EventType.UNIVERSE_SNAPSHOT,
+                payload={
+                    "universe_count": len(self.universe),
+                    "instruments": universe_details,
+                    "is_recovery": True,
+                },
+                source="SESSION_INITIALIZER",
+            )
 
     async def start(self) -> None:
         """Starts live observation, market data feeds, and strategy scanner."""
         self.is_running = True
         await self.initialize_session()
+
+        if self._session_finalized:
+            logger.info(f"[SESSION RUNNER] Session {self.experiment_id} is already finalized. Background tasks not started.")
+            return
 
         # Connect Upstox provider if not dry run
         if not self.dry_run and self.provider:
@@ -216,22 +312,39 @@ class LivePaperSessionRunner:
                     payload={"provider": "UPSTOX", "status": "CONNECTED", "is_live": True},
                     source="MARKET_DATA_SERVICE",
                 )
-                # Seed authentic historical candles for universe symbols
+                # Seed authentic historical candles for universe symbols (explicitly labeled BOOTSTRAP_HISTORICAL)
                 logger.info(f"[SESSION RUNNER] Seeding authentic historical candles for {len(self.universe)} universe instruments...")
+                total_historical_candles = 0
                 for sym in self.universe:
                     inst_key = get_instrument_key(sym) or sym
                     try:
                         h15 = await self.provider.get_historical_candles(inst_key, "15minute", count=50)
                         if h15:
                             self.candle_aggregator.seed_historical_candles(sym, "15m", h15)
+                            total_historical_candles += len(h15)
                         h5 = await self.provider.get_historical_candles(inst_key, "5minute", count=50)
                         if h5:
                             self.candle_aggregator.seed_historical_candles(sym, "5m", h5)
+                            total_historical_candles += len(h5)
                         h1 = await self.provider.get_historical_candles(inst_key, "1minute", count=50)
                         if h1:
                             self.candle_aggregator.seed_historical_candles(sym, "1m", h1)
+                            total_historical_candles += len(h1)
                     except Exception as e:
                         logger.warning(f"[SESSION RUNNER] Candle seeding notice for {sym}: {e}")
+
+                self.session_stats["candles_historical"] += total_historical_candles
+                await self.evidence_logger.log_event(
+                    event_type=EventType.HISTORICAL_WARMUP_COMPLETED,
+                    payload={
+                        "universe_count": len(self.universe),
+                        "total_historical_candles_seeded": total_historical_candles,
+                        "timeframes": ["15m", "5m", "1m"],
+                        "note": "Bootstrap candles strictly segregated from live ticks/candles",
+                    },
+                    source="CANDLE_AGGREGATOR",
+                    data_provenance=DataProvenance.BOOTSTRAP_HISTORICAL.value,
+                )
 
                 # Subscribe to universe
                 await self.provider.subscribe(self.universe)
@@ -256,13 +369,13 @@ class LivePaperSessionRunner:
         self._scan_task = asyncio.create_task(self._periodic_scanner_loop())
         self._clock_task = asyncio.create_task(self._session_clock_loop())
 
-        logger.info(f"[SESSION RUNNER] Live session {self.experiment_id} active with 100% cloud autonomy.")
+        logger.info(f"[SESSION RUNNER] Live session {self.experiment_id} active with 100% cloud autonomy in phase {self.market_phase.value}.")
 
     async def stop(self) -> None:
-        """Gracefully stops the session and outputs final summary."""
+        """Gracefully stops the worker process. Does NOT falsely finalize the trading session unless market closed."""
         if not self.is_running:
             return
-        logger.info(f"[SESSION RUNNER] Stopping session {self.experiment_id}...")
+        logger.info(f"[SESSION RUNNER] Stopping worker process for session {self.experiment_id}...")
         self.is_running = False
 
         # Cancel background tasks
@@ -287,13 +400,36 @@ class LivePaperSessionRunner:
             except Exception as e:
                 logger.warning(f"[SESSION RUNNER] Provider disconnect notice: {e}")
 
-        # Finalize session if not already done
-        if not self._session_finalized:
+        # Check if market hours are actually completed (>= 15:40 IST)
+        now_ist = SessionLifecycleManager.get_ist_now()
+        is_past_close = now_ist.time() >= SessionLifecycleManager.FNO_CLOSE_TIME
+
+        if is_past_close and not self._session_finalized:
+            logger.info("[SESSION RUNNER] Process stopping after 15:40 IST close. Finalizing certified session...")
             await self.finalize_fno_and_session_close()
+        elif not self._session_finalized:
+            # Worker process exited during premarket or regular market hours!
+            logger.info(f"[SESSION RUNNER] Process stopping during {self.market_phase.value}. Logging WORKER_SHUTDOWN without premature session finalization.")
+            await self.evidence_logger.log_event(
+                event_type=EventType.WORKER_SHUTDOWN,
+                payload={
+                    "experiment_id": self.experiment_id,
+                    "trading_day": self.session_date,
+                    "worker_instance_id": self.worker_instance_id,
+                    "session_instance_id": self.session_instance_id,
+                    "reason": "PROCESS_SHUTDOWN_OR_RESTART",
+                    "market_phase": self.market_phase.value,
+                    "last_global_sequence": self.evidence_logger.current_global_sequence_number,
+                    "session_finalized": False,
+                },
+                source="WORKER_LIFECYCLE_MANAGER",
+                data_provenance=DataProvenance.DERIVED.value,
+            )
 
         # Close evidence logger and flush DB
         await self.evidence_logger.close()
-        logger.info(f"[SESSION RUNNER] Session {self.experiment_id} completed successfully.")
+        logger.info(f"[SESSION RUNNER] Worker stopped cleanly for session {self.experiment_id}.")
+
 
     async def execute_checkpoint(self, checkpoint_label: str) -> Dict[str, Any]:
         """
@@ -392,7 +528,7 @@ class LivePaperSessionRunner:
                     "change_percent": quote.change_percent if quote else 0.0,
                     "provider": "UPSTOX",
                 },
-                is_market_open=True,
+                is_market_open=(self.market_phase == MarketPhase.REGULAR_MARKET),
                 portfolio_state=self.paper_engine.get_portfolio_summary(),
                 config=SignalEngineConfig(),
             )
@@ -449,7 +585,8 @@ class LivePaperSessionRunner:
                     symbol=sym,
                     source="SIGNAL_PIPELINE",
                 )
-                await self._execute_paper_trade(decision)
+                if self.market_phase == MarketPhase.REGULAR_MARKET:
+                    await self._execute_paper_trade(decision)
 
         self.session_stats["evaluations_run"] += eval_count
         self.session_stats["candidates_created"] += cand_count
@@ -468,12 +605,23 @@ class LivePaperSessionRunner:
 
         checkpoint_payload = {
             "checkpoint_id": checkpoint_label,
+            "experiment_id": self.experiment_id,
+            "trading_day": self.session_date,
+            "session_instance_id": self.session_instance_id,
+            "worker_instance_id": self.worker_instance_id,
+            "market_phase": self.market_phase.value,
+            "global_sequence_number": self.evidence_logger.current_global_sequence_number,
+            "sequence_number": self.evidence_logger.current_sequence_number,
             "timestamp_ist": now_ist.strftime("%Y-%m-%d %H:%M:%S IST"),
             "worker_status": "ONLINE" if self.is_running else "STOPPED",
             "market_connection": "CONNECTED" if (self.provider and getattr(self.provider, "is_connected", False)) else "DISCONNECTED",
             "ticks_received_total": self.session_stats["ticks_received"],
+            "ticks_live": self.session_stats.get("ticks_live", 0),
+            "ticks_historical": self.session_stats.get("ticks_historical", 0),
             "candles_updated_total": self.session_stats["candles_updated"],
-            "master_events_logged": self.evidence_logger.current_sequence_number + 1,
+            "candles_live": self.session_stats.get("candles_live", 0),
+            "candles_historical": self.session_stats.get("candles_historical", 0),
+            "master_events_logged": self.evidence_logger.current_global_sequence_number,
             "data_quality": "AUTHENTIC_LIVE" if not self.dry_run else "DRY_RUN_FIXTURE",
             "market_breadth": {"advances": adv, "declines": dec, "unchanged": unch, "ratio": ratio},
             "evaluations_in_checkpoint": eval_count,
@@ -483,6 +631,7 @@ class LivePaperSessionRunner:
             "open_positions": len(self.paper_engine.positions),
             "cpu_percent": cpu,
             "memory_percent": mem.percent,
+            "recovery_count": self.recovery_count,
         }
 
         # Log checkpoint event to master log (and DB)
@@ -492,7 +641,7 @@ class LivePaperSessionRunner:
             source="SESSION_CHECKPOINT_RUNNER",
         )
         self._checkpoints.append(checkpoint_payload)
-        logger.info(f"[SESSION CHECKPOINT] {checkpoint_label} recorded. Master sequence: {self.evidence_logger.current_sequence_number}")
+        logger.info(f"[SESSION CHECKPOINT] {checkpoint_label} recorded. Master global sequence: {self.evidence_logger.current_global_sequence_number}")
         return checkpoint_payload
 
     async def finalize_equity_close(self) -> None:
@@ -505,6 +654,8 @@ class LivePaperSessionRunner:
         if self._equity_finalized:
             return
         logger.info("[SESSION FINALIZER] Executing Phase 31 — NSE Equity Market Close (15:30 IST)...")
+        self.market_phase = MarketPhase.EQUITY_CLOSE
+        self.evidence_logger.set_market_phase(MarketPhase.EQUITY_CLOSE.value)
 
         # Record 15:30 checkpoint if not yet recorded
         if "CHECKPOINT_15_30" not in self._checkpoints_executed:
@@ -539,7 +690,9 @@ class LivePaperSessionRunner:
             source="MARKET_SESSION_CONTROLLER",
         )
         self._equity_finalized = True
-        logger.info("[SESSION FINALIZER] EQUITY_MARKET_CLOSE event recorded.")
+        self.market_phase = MarketPhase.FNO_FINALIZATION
+        self.evidence_logger.set_market_phase(MarketPhase.FNO_FINALIZATION.value)
+        logger.info("[SESSION FINALIZER] EQUITY_MARKET_CLOSE event recorded. Transitioned to FNO_FINALIZATION.")
 
     async def finalize_fno_and_session_close(self) -> None:
         """
@@ -559,6 +712,10 @@ class LivePaperSessionRunner:
 
         if not self._equity_finalized:
             await self.finalize_equity_close()
+
+        # Record FNO_CLOSE checkpoint
+        if "FNO_CLOSE" not in self._checkpoints_executed:
+            await self.execute_checkpoint("FNO_CLOSE")
 
         # 1. Close remaining open paper positions
         await self._close_open_positions_at_session_end()
@@ -639,10 +796,15 @@ class LivePaperSessionRunner:
                     status="FINALIZED",
                     report_markdown=self.final_report_markdown,
                     master_log_sha256=self.master_log_sha256,
-                    total_events=self.evidence_logger.current_sequence_number,
+                    total_events=self.evidence_logger.current_global_sequence_number,
                     summary_metrics=self.session_stats,
                     checkpoints=self._checkpoints,
                     is_certified=True,
+                    trading_day=self.session_date,
+                    session_instance_id=self.session_instance_id,
+                    worker_instance_id=self.worker_instance_id,
+                    final_global_sequence=self.evidence_logger.current_global_sequence_number,
+                    recovery_count=self.recovery_count,
                 )
             logger.info("[SESSION FINALIZER] Persisted certified session report and SHA-256 seal to PostgreSQL.")
         except Exception as e:
@@ -678,20 +840,28 @@ class LivePaperSessionRunner:
                         "master_log_sha256": self.master_log_sha256,
                         "final_report_saved": True,
                         "checkpoints_count": len(self._checkpoints),
-                        "total_events": self.evidence_logger.current_sequence_number,
+                        "total_events": self.evidence_logger.current_global_sequence_number,
+                        "worker_instance_id": self.worker_instance_id,
+                        "session_instance_id": self.session_instance_id,
+                        "market_phase": MarketPhase.FINALIZED.value,
                     }
                 )
         except Exception as e:
             logger.debug(f"[SESSION FINALIZER] Worker heartbeat finalization notice: {e}")
 
         self._session_finalized = True
+        self.market_phase = MarketPhase.FINALIZED
+        self.evidence_logger.set_market_phase(MarketPhase.FINALIZED.value)
+        if "FINALIZED" not in self._checkpoints_executed:
+            await self.execute_checkpoint("FINALIZED")
         logger.info(f"[SESSION FINALIZER] Session {self.experiment_id} successfully finalized and certified.")
 
     async def _session_clock_loop(self) -> None:
         """
         Autonomous Cloud Session Clock:
-        Monitors IST time continuously. Automatically triggers 15-minute checkpoints,
-        Equity Market Close at 15:30 IST, and F&O Close / Final Certification at 15:40 IST.
+        Monitors IST time continuously. Automatically transitions through:
+        PREMARKET -> MARKET_OPEN -> REGULAR_MARKET -> EQUITY_CLOSE -> FNO_FINALIZATION -> FINALIZED.
+        Triggers scheduled 15-minute checkpoints, Equity Close at 15:30 IST, and F&O Close at 15:40 IST.
         Zero user PC presence required.
         """
         ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
@@ -727,10 +897,30 @@ class LivePaperSessionRunner:
             try:
                 now_ist = datetime.datetime.now(ist_tz)
                 current_time = now_ist.time()
-                
-                # Check scheduled 15-minute checkpoints during active equity session (09:15 to 15:30 IST)
-                # Only trigger when within 15 minutes of the slot arriving to avoid historical catchup storms
-                if datetime.time(9, 15) <= current_time <= datetime.time(15, 30):
+
+                # 1. Market Open transition at 09:15 IST
+                if datetime.time(9, 15) <= current_time < datetime.time(15, 30):
+                    if self.market_phase == MarketPhase.PREMARKET:
+                        logger.info("[SESSION CLOCK] 09:15 IST reached: Transitioning PREMARKET -> MARKET_OPEN -> REGULAR_MARKET")
+                        self.market_phase = MarketPhase.MARKET_OPEN
+                        self.evidence_logger.set_market_phase(MarketPhase.MARKET_OPEN.value)
+                        await self.evidence_logger.log_event(
+                            event_type=EventType.MARKET_OPEN,
+                            payload={
+                                "trading_day": self.session_date,
+                                "experiment_id": self.experiment_id,
+                                "market_phase": MarketPhase.MARKET_OPEN.value,
+                                "timestamp_ist": now_ist.strftime("%Y-%m-%d %H:%M:%S IST"),
+                                "universe_count": len(self.universe),
+                            },
+                            source="MARKET_SESSION_CONTROLLER",
+                        )
+                        if "MARKET_OPEN" not in self._checkpoints_executed:
+                            await self.execute_checkpoint("MARKET_OPEN")
+                        self.market_phase = MarketPhase.REGULAR_MARKET
+                        self.evidence_logger.set_market_phase(MarketPhase.REGULAR_MARKET.value)
+
+                    # Scheduled 15-minute checkpoints during active equity session
                     for slot_time_str, label in target_slots:
                         sh, sm = map(int, slot_time_str.split(":"))
                         slot_dt = now_ist.replace(hour=sh, minute=sm, second=0, microsecond=0)
@@ -738,11 +928,11 @@ class LivePaperSessionRunner:
                         if 0 <= diff_sec < 900 and label not in self._checkpoints_executed:
                             await self.execute_checkpoint(label)
 
-                # Equity Close at 15:30 IST
+                # 2. Equity Close at 15:30 IST
                 if current_time >= datetime.time(15, 30) and not self._equity_finalized:
                     await self.finalize_equity_close()
 
-                # F&O Close and Final Certification at 15:40 IST
+                # 3. F&O Close and Final Certification at 15:40 IST
                 if current_time >= datetime.time(15, 40) and not self._session_finalized:
                     await self.finalize_fno_and_session_close()
 
@@ -904,6 +1094,7 @@ class LivePaperSessionRunner:
     async def on_tick_received(self, tick: NormalizedTick) -> None:
         """Processes incoming authentic market tick."""
         self.session_stats["ticks_received"] += 1
+        self.session_stats["ticks_live"] = self.session_stats.get("ticks_live", 0) + 1
         sym = tick.symbol
         ltp = tick.ltp
         self.last_tick_timestamps[sym] = tick.timestamp
@@ -928,6 +1119,12 @@ class LivePaperSessionRunner:
             "provider": "UPSTOX_WS",
         })
 
+        # Calculate processing latency if provider timestamp exists
+        market_ts = tick.timestamp
+        proc_latency_ms = None
+        if market_ts:
+            proc_latency_ms = max(0.0, round((time.time() - market_ts) * 1000.0, 2))
+
         # Log RAW_MARKET_TICK event
         if self.session_stats["ticks_received"] <= 50 or (self.session_stats["ticks_received"] % 10 == 0):
             await self.evidence_logger.log_event(
@@ -941,15 +1138,23 @@ class LivePaperSessionRunner:
                     "volume": tick.volume,
                     "timestamp": tick.timestamp,
                     "ticks_total": self.session_stats["ticks_received"],
+                    "ticks_live": self.session_stats["ticks_live"],
                 },
                 symbol=sym,
                 source="UPSTOX_WS",
+                provider="UPSTOX",
+                instrument_key=tick.instrument_key,
+                data_provenance=DataProvenance.AUTHENTIC_LIVE.value if self.market_phase in (MarketPhase.REGULAR_MARKET, MarketPhase.MARKET_OPEN) else DataProvenance.DERIVED.value,
+                market_timestamp=market_ts,
+                processing_timestamp_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                processing_latency_ms=proc_latency_ms,
             )
 
         # Update candle aggregator
         updated_candles = self.candle_aggregator.process_tick(tick)
         for tf, candle in updated_candles.items():
             self.session_stats["candles_updated"] += 1
+            self.session_stats["candles_live"] = self.session_stats.get("candles_live", 0) + 1
             if self.session_stats["candles_updated"] <= 30 or (self.session_stats["candles_updated"] % 15 == 0):
                 await self.evidence_logger.log_event(
                     event_type=EventType.CANDLE_UPDATED,
@@ -966,6 +1171,12 @@ class LivePaperSessionRunner:
                     },
                     symbol=sym,
                     source="CANDLE_AGGREGATOR",
+                    provider="UPSTOX",
+                    instrument_key=tick.instrument_key,
+                    data_provenance=DataProvenance.AUTHENTIC_LIVE.value,
+                    market_timestamp=candle.get("time"),
+                    processing_timestamp_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    processing_latency_ms=proc_latency_ms,
                 )
 
         # Check open positions on this symbol for stop/target exits
@@ -1180,7 +1391,7 @@ class LivePaperSessionRunner:
                 "change_percent": quote.change_percent if quote else 0.0,
                 "provider": "UPSTOX",
             },
-            is_market_open=True,
+            is_market_open=(self.market_phase == MarketPhase.REGULAR_MARKET),
             portfolio_state=portfolio_summary,
             config=cfg,
         )
@@ -1261,13 +1472,30 @@ class LivePaperSessionRunner:
                 source="SIGNAL_PIPELINE",
             )
 
-            # Route to Paper Trading Engine
-            await self._execute_paper_trade(decision)
+            # Route to Paper Trading Engine only if within REGULAR_MARKET hours
+            if self.market_phase == MarketPhase.REGULAR_MARKET:
+                await self._execute_paper_trade(decision)
 
     async def _execute_paper_trade(self, signal: SignalDecision) -> None:
         """Executes a qualified signal in the paper trading engine."""
         # Safety invariant check
         LivePaperSafetyGuard.assert_paper_mode_enforced()
+
+        # Hard market-phase guard: intraday paper trade orders prohibited outside REGULAR_MARKET
+        if self.market_phase != MarketPhase.REGULAR_MARKET:
+            logger.warning(
+                f"[SESSION RUNNER] Paper trade blocked for {signal.symbol}: "
+                f"Market phase is {self.market_phase.value}, required REGULAR_MARKET."
+            )
+            await self.evidence_logger.log_anomaly(
+                anomaly_type=SessionAnomalyType.LIVE_DATA_OUTSIDE_SESSION,
+                description=f"Attempted paper trade outside regular market hours in phase {self.market_phase.value}",
+                expected="REGULAR_MARKET",
+                actual=self.market_phase.value,
+                recovery_action="BLOCKED_PAPER_ORDER",
+                metadata={"symbol": signal.symbol, "signal_id": signal.signal_id}
+            )
+            return
 
         side = "BUY" if signal.direction == SignalDirection.LONG else "SELL"
         qty = signal.position_size.quantity if signal.position_size else 1
@@ -1413,9 +1641,17 @@ class LivePaperSessionRunner:
                     "memory_percent": mem.percent,
                     "memory_used_mb": round(mem.used / (1024 * 1024), 1),
                     "ticks_received_total": self.session_stats["ticks_received"],
+                    "ticks_live": self.session_stats.get("ticks_live", 0),
+                    "ticks_historical": self.session_stats.get("ticks_historical", 0),
                     "candles_updated_total": self.session_stats["candles_updated"],
+                    "candles_live": self.session_stats.get("candles_live", 0),
+                    "candles_historical": self.session_stats.get("candles_historical", 0),
                     "open_positions_count": len(self.paper_engine.positions),
-                    "master_events_logged": self.evidence_logger.current_sequence_number,
+                    "master_events_logged": self.evidence_logger.current_global_sequence_number,
+                    "market_phase": self.market_phase.value,
+                    "worker_instance_id": self.worker_instance_id,
+                    "session_instance_id": self.session_instance_id,
+                    "recovery_count": self.recovery_count,
                 }
                 await self.evidence_logger.log_event(
                     event_type=EventType.SESSION_HEARTBEAT,

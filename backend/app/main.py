@@ -395,17 +395,54 @@ async def get_session_status():
             pass
 
     import datetime
+    from backend.app.live_paper.session_lifecycle import MarketPhase, SessionLifecycleManager
     ist_now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+    target_date = ist_now.strftime("%Y-%m-%d")
+    current_phase = SessionLifecycleManager.get_market_phase(ist_now)
+
+    # Check database worker status if available
+    db_status = None
+    try:
+        from backend.app.database.connection import AsyncSessionLocal
+        from backend.app.database.repositories.worker_repository import WorkerRepository
+        async with AsyncSessionLocal() as s:
+            repo = WorkerRepository(s)
+            db_status = await repo.get_worker_status("apex-market-worker")
+    except Exception:
+        pass
+
+    is_finalized = (current_phase == MarketPhase.FINALIZED)
+    session_status = "FINALIZED" if is_finalized else ("RUNNING" if db_status and db_status.get("worker_status") == "ONLINE" else "STANDBY")
+
     return {
+        "experiment_id": f"APEX-WORKER-{target_date}",
+        "trading_day": target_date,
+        "worker_instance_id": db_status.get("details", {}).get("worker_instance_id", "worker_fallback") if db_status else "worker_fallback",
+        "session_instance_id": db_status.get("details", {}).get("session_instance_id", f"session_{target_date}_default") if db_status else f"session_{target_date}_default",
+        "worker_state": db_status.get("worker_status", "ONLINE") if db_status else "ONLINE",
+        "market_phase": current_phase.value,
+        "session_status": session_status,
+        "is_market_open": (current_phase == MarketPhase.REGULAR_MARKET),
         "cloud_autonomous": True,
-        "session_status": "COMPLETED_FINALIZED",
-        "is_certified": True,
-        "session_date": ist_now.strftime("%Y-%m-%d"),
+        "last_market_timestamp": db_status.get("last_tick") if db_status else None,
+        "last_event_timestamp": db_status.get("last_event") if db_status else None,
+        "last_global_sequence": db_status.get("details", {}).get("master_events_logged", 0) if db_status else 0,
+        "ticks_live": db_status.get("details", {}).get("ticks_live", 0) if db_status else 0,
+        "ticks_historical": db_status.get("details", {}).get("ticks_historical", 0) if db_status else 0,
+        "candles_live": db_status.get("details", {}).get("candles_live", 0) if db_status else 0,
+        "candles_historical": db_status.get("details", {}).get("candles_historical", 0) if db_status else 0,
+        "evaluations": db_status.get("details", {}).get("evaluations", 0) if db_status else 0,
+        "candidates": db_status.get("candidate_count", 0) if db_status else 0,
+        "signals": db_status.get("signal_count", 0) if db_status else 0,
+        "paper_orders": db_status.get("paper_order_count", 0) if db_status else 0,
+        "recovery_count": db_status.get("details", {}).get("recovery_count", 0) if db_status else 0,
+        # Backward compatibility fields
+        "session_date": target_date,
         "current_time_ist": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
         "live_orders_blocked": True,
         "paper_mode": True,
-        "equity_finalized": True,
-        "session_finalized": True,
+        "equity_finalized": is_finalized,
+        "session_finalized": is_finalized,
         "frozen_configuration_hash": "d3e94bea101d71505e19c20c2086da9cbf629cdce04c46044eb5a62d9cace94e",
     }
 @app.get("/api/market/quote/{symbol}")

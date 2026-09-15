@@ -93,7 +93,7 @@ async def get_fii_dii_flow() -> Dict[str, Any]:
         stale_copy["is_live"] = False
         return stale_copy
 
-    # Otherwise truthfully return DATA_PENDING with null data
+    # Otherwise truthfully return UNAVAILABLE with null data
     return {
         "date": None,
         "trading_date": None,
@@ -103,7 +103,7 @@ async def get_fii_dii_flow() -> Dict[str, Any]:
         "fiiIndexFuturesCr": None,
         "fiiIndexOptionsCr": None,
         "fiiStockFuturesCr": None,
-        "status": "DATA_PENDING",
+        "status": "UNAVAILABLE",
         "provenance": "PENDING_EXCHANGE_DISCLOSURE",
         "source": "NSE/NSDL",
         "is_live": False,

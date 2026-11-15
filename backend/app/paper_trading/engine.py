@@ -2,7 +2,7 @@ import time
 import uuid
 import logging
 from enum import Enum
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 

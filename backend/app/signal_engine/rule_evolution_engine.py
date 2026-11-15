@@ -17,6 +17,10 @@ from pydantic import BaseModel, Field
 from backend.app.config import settings
 from backend.app.ai_engine.gemini_client import GeminiClient
 from backend.app.ai_engine.hybrid_ai import HybridAIEngine, hybrid_ai
+from backend.app.signal_engine.backtest_gate import (
+    evaluate_backtest_robustness,
+    BacktestEvaluationResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,8 @@ class DynamicTradingRule(BaseModel):
     loss_count: int = 0
     synthesized_by: str = "J.A.R.V.I.S. Quant AI"
     generation: int = 1
+    backtest_score: Optional[int] = 75
+    backtest_verdict: Optional[str] = "Deploy"
 
 
 class TradeMemoryEntry(BaseModel):

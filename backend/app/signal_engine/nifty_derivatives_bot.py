@@ -37,6 +37,12 @@ from backend.app.signal_engine.futures_engine import OpenInterestPattern
 from backend.app.quant_engine.indicators import calculate_rsi, calculate_atr, calculate_vwap, calculate_ema
 from backend.app.paper_trading.engine import PaperTradingEngine, PaperOrderRequest
 from backend.app.signal_engine.rule_evolution_engine import RuleEvolutionEngine, DynamicTradingRule
+from backend.app.signal_engine.circuit_breaker import (
+    InstitutionalCircuitBreaker,
+    PreTradeDisciplineGate,
+    CircuitBreakerStatus,
+    DisciplineGateDecision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +135,19 @@ class NiftyDerivativesBot:
         self.risk_per_trade_pct = risk_per_trade_pct
         self.initial_capital = initial_capital
 
+        # Institutional Circuit Breaker & Pre-Trade Discipline Gate (ported from claude-trading-skills)
+        self.circuit_breaker = InstitutionalCircuitBreaker(
+            account_size=initial_capital,
+            max_daily_loss_pct=daily_loss_limit_pct,
+            weekly_drawdown_pct=5.0,
+            monthly_drawdown_pct=8.0,
+            losing_streak_threshold=2,
+            cooldown_seconds=86400.0,
+            max_position_debit=3500.0,
+            max_lot_size=self.NIFTY_LOT_SIZE,
+        )
+        self.pre_trade_gate = PreTradeDisciplineGate(circuit_breaker=self.circuit_breaker)
+
         self.auto_trade_enabled: bool = False
         self.state: BotState = BotState.IDLE
         self.circuit_breaker_triggered: bool = False
@@ -209,7 +228,11 @@ class NiftyDerivativesBot:
     def check_daily_loss_circuit_breaker(self) -> Tuple[bool, float, float]:
         """
         Computes current day's realized + unrealized P&L for the autonomous bot account.
-        If cumulative drawdown >= 2% of initial capital, fires circuit breaker.
+        Syncs closed trades with the InstitutionalCircuitBreaker and evaluates:
+        - Daily loss limit (2.0% = ₹200.00)
+        - Consecutive loss cooldown (2 losses -> 24h halt)
+        - Weekly drawdown limit (5.0% = ₹500.00)
+        - Monthly drawdown limit (8.0% = ₹800.00)
         Returns: (is_breached, daily_pnl, daily_drawdown_pct)
         """
         total_pnl = 0.0
@@ -223,17 +246,29 @@ class NiftyDerivativesBot:
             if pos.get("account_id") == self.ACCOUNT_ID:
                 total_pnl += pos.get("unrealizedPnL", 0.0)
 
-        max_allowed_loss = self.initial_capital * (self.daily_loss_limit_pct / 100.0)
+        # 3. Synchronize closed audits to InstitutionalCircuitBreaker
+        tracked_ids = {t.trade_id for t in self.circuit_breaker.trade_history}
+        for audit in getattr(self.paper_engine, "trade_audits", []):
+            if getattr(audit, "account_id", "") == self.ACCOUNT_ID:
+                trade_id = getattr(audit, "trade_id", None) or getattr(audit, "order_id", str(id(audit)))
+                if trade_id not in tracked_ids:
+                    self.circuit_breaker.record_trade_exit(
+                        trade_id=trade_id,
+                        symbol=getattr(audit, "symbol", "NIFTY 50"),
+                        realized_pnl=getattr(audit, "realized_pnl", 0.0),
+                        notes=getattr(audit, "exit_reason", "")
+                    )
+                    tracked_ids.add(trade_id)
 
-        if total_pnl <= -max_allowed_loss:
+        cb_status, reason = self.circuit_breaker.evaluate(current_day_pnl=total_pnl)
+        if cb_status != CircuitBreakerStatus.TRADING_ALLOWED:
             self.circuit_breaker_triggered = True
-            self.state = BotState.HALTED_DAILY_LOSS_BREACH
-            logger.warning(
-                f"[NIFTY BOT CIRCUIT BREAKER] Daily loss of ₹{abs(total_pnl):,.2f} "
-                f"breached limit of ₹{max_allowed_loss:,.2f} (2.0%). Halting autonomous execution."
-            )
+            if cb_status == CircuitBreakerStatus.HALTED_DAILY:
+                self.state = BotState.HALTED_DAILY_LOSS_BREACH
+            logger.warning(f"[NIFTY BOT CIRCUIT BREAKER] {reason}")
             return True, round(total_pnl, 2), round((total_pnl / self.initial_capital) * 100.0, 2)
 
+        self.circuit_breaker_triggered = False
         return False, round(total_pnl, 2), round((total_pnl / self.initial_capital) * 100.0, 2)
 
     # -------------------------------------------------------------------------
@@ -775,7 +810,24 @@ class NiftyDerivativesBot:
         # Check circuit breaker
         is_breached, daily_pnl, _ = self.check_daily_loss_circuit_breaker()
         if is_breached:
-            return {"status": "CIRCUIT_BREAKER_HALTED", "reason": f"Daily loss limit breached (₹{daily_pnl:,.2f})"}
+            return {"status": "CIRCUIT_BREAKER_HALTED", "reason": f"Circuit breaker active: {self.circuit_breaker.halt_reason}"}
+
+        # Pre-Trade Discipline Gate (ported from claude-trading-skills)
+        effective_stop = signal.stop_loss or (signal.spot_price - 100.0 if signal.spot_price > 0 else 20000.0)
+        max_qty = max((leg.quantity for leg in signal.legs), default=0)
+        gate_decision, gate_reason = self.pre_trade_gate.check_trade(
+            strategy_name=signal.strategy_name,
+            symbol=signal.underlying_symbol,
+            order_intent="ENTRY_READY",
+            entry_price=signal.legs[0].price if signal.legs else 0.0,
+            stop_price=effective_stop,
+            quantity=max_qty,
+            estimated_debit=signal.net_premium_or_debit if signal.net_premium_or_debit > 0 else 0.0,
+            is_in_written_plan=True,
+        )
+        if gate_decision != DisciplineGateDecision.GO:
+            logger.warning(f"[PRE-TRADE DISCIPLINE GATE VETO] {gate_reason}")
+            return {"status": "DISCIPLINE_GATE_VETO", "reason": gate_reason}
 
         # 1% capital risk limit per trade
         max_trade_risk = self.initial_capital * (self.risk_per_trade_pct / 100.0)
@@ -1015,4 +1067,5 @@ class NiftyDerivativesBot:
             "is_market_open": self.is_indian_market_hours(),
             "is_expiry_day": self.is_expiry_day(),
             "is_post_1pm_expiry": self.is_post_1pm_expiry(),
+            "circuit_breaker_telemetry": self.circuit_breaker.get_status_dict(),
         }

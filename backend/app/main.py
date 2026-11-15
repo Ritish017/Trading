@@ -2878,6 +2878,15 @@ async def get_nifty_bot_status():
     return nifty_derivatives_bot.get_bot_status()
 
 
+@app.get("/api/nifty-bot/circuit-breaker")
+async def get_nifty_bot_circuit_breaker():
+    """
+    Returns stateful institutional circuit breaker telemetry ported from claude-trading-skills:
+    daily loss limit (2%), losing streak cooldown (2 trades -> 24h), weekly (5%), and monthly (8%).
+    """
+    return nifty_derivatives_bot.circuit_breaker.get_status_dict()
+
+
 @app.post("/api/nifty-bot/scan")
 async def run_nifty_bot_scan(force_scan: bool = Query(default=True)):
     """

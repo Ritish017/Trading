@@ -66,5 +66,39 @@
       "RULE_102"
     ],
     "jarvis_notes": "High conviction momentum entry"
+  },
+  {
+    "entry_id": "mem_43dd318b",
+    "timestamp": 1794770149.5367389,
+    "symbol": "NIFTY 50",
+    "strategy_name": "BULL_CALL_DEBIT_SPREAD",
+    "regime": "LOW_IV_TRENDING",
+    "sentiment_score": 0.45,
+    "basis_velocity": 2.2,
+    "oi_pattern": "LONG_BUILDUP",
+    "entry_cost": 1200.0,
+    "exit_pnl": 650.0,
+    "is_winner": true,
+    "applied_rules": [
+      "RULE_102"
+    ],
+    "jarvis_notes": "High conviction momentum entry"
+  },
+  {
+    "entry_id": "mem_34d950af",
+    "timestamp": 1794770549.461497,
+    "symbol": "NIFTY 50",
+    "strategy_name": "BULL_CALL_DEBIT_SPREAD",
+    "regime": "LOW_IV_TRENDING",
+    "sentiment_score": 0.45,
+    "basis_velocity": 2.2,
+    "oi_pattern": "LONG_BUILDUP",
+    "entry_cost": 1200.0,
+    "exit_pnl": 650.0,
+    "is_winner": true,
+    "applied_rules": [
+      "RULE_102"
+    ],
+    "jarvis_notes": "High conviction momentum entry"
   }
 ]

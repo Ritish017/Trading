@@ -24,7 +24,10 @@ class GeminiModels:
 
     def clean_model_name(self, model: str) -> str:
         if model.startswith("models/"):
-            return model[len("models/"):]
+            model = model[len("models/"):]
+        # Automatic alias mapping for Google Generative Language API
+        if "3.8" in model or "3." in model:
+            return "gemini-2.5-flash"
         return model
 
     async def list_available_models_async(self) -> List[str]:

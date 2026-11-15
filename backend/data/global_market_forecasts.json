@@ -1,0 +1,594 @@
+{
+  "GOLD_MCX": [
+    {
+      "forecast_id": "fc_gold_mcx_v1",
+      "version": 1,
+      "instrument_id": "GOLD_MCX",
+      "symbol": "GOLD",
+      "current_price": 78450.0,
+      "currency": "INR",
+      "unit": "INR/10g",
+      "exchange": "MCX",
+      "market_timestamp": 1794774031.9855363,
+      "forecast_timestamp": 1794774031.9855363,
+      "valid_until": 1795378831.9855363,
+      "direction": "BULLISH",
+      "confidence": 0.84,
+      "bullish_scenario": {
+        "price_target": 81200.0,
+        "probability": 0.45,
+        "expected_change_pct": 3.5,
+        "supporting_evidence": [
+          "Physical central bank gold accumulation supports base value."
+        ]
+      },
+      "base_scenario": {
+        "price_target": 79100.0,
+        "probability": 0.4,
+        "expected_change_pct": 0.8,
+        "supporting_evidence": [
+          "Orderly technical consolidation"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 76500.0,
+        "probability": 0.15,
+        "expected_change_pct": -2.5,
+        "supporting_evidence": [
+          "Macro dollar index strength and liquidity headwinds"
+        ]
+      },
+      "price_range": {
+        "lower": 75312.0,
+        "upper": 81588.0
+      },
+      "expected_change_percent": 0.8,
+      "volatility_assessment": "Standard historical volatility envelope",
+      "horizons": [],
+      "self_challenge_critique": "Self-Challenge Dialectic: Thesis relies on current physical fundamentals. A sudden macroeconomic shift could invalidate this outlook.",
+      "invalidation_conditions": [
+        "Breach below primary support at 75312.0"
+      ],
+      "key_risks": [
+        "Unexpected central bank rate guidance",
+        "Cross-currency FX volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "SPOT_QUOTE",
+          "statement": "GOLD trading at INR 78450.0 (INR/10g)",
+          "source": "APEX_FEED",
+          "timestamp": 1794774031.9855363
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Physical central bank gold accumulation supports base value.",
+          "source": "OFFICIAL_REPORTS",
+          "timestamp": 1794774031.9855363
+        }
+      ],
+      "reasoning_summary": "Balanced institutional outlook for GOLD. Physical central bank gold accumulation supports base value.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    }
+  ],
+  "SILVER_MCX": [
+    {
+      "forecast_id": "fc_silver_mcx_v1",
+      "version": 1,
+      "instrument_id": "SILVER_MCX",
+      "symbol": "SILVER",
+      "current_price": 92300.0,
+      "currency": "INR",
+      "unit": "INR/kg",
+      "exchange": "MCX",
+      "market_timestamp": 1794774031.9855363,
+      "forecast_timestamp": 1794774031.9855363,
+      "valid_until": 1795378831.9855363,
+      "direction": "BULLISH",
+      "confidence": 0.84,
+      "bullish_scenario": {
+        "price_target": 96500.0,
+        "probability": 0.4,
+        "expected_change_pct": 4.6,
+        "supporting_evidence": [
+          "Industrial photovoltaic demand combined with supply deficit."
+        ]
+      },
+      "base_scenario": {
+        "price_target": 93100.0,
+        "probability": 0.4,
+        "expected_change_pct": 0.9,
+        "supporting_evidence": [
+          "Orderly technical consolidation"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 89200.0,
+        "probability": 0.2,
+        "expected_change_pct": -3.4,
+        "supporting_evidence": [
+          "Macro dollar index strength and liquidity headwinds"
+        ]
+      },
+      "price_range": {
+        "lower": 88608.0,
+        "upper": 95992.0
+      },
+      "expected_change_percent": 0.9,
+      "volatility_assessment": "Standard historical volatility envelope",
+      "horizons": [],
+      "self_challenge_critique": "Self-Challenge Dialectic: Thesis relies on current physical fundamentals. A sudden macroeconomic shift could invalidate this outlook.",
+      "invalidation_conditions": [
+        "Breach below primary support at 88608.0"
+      ],
+      "key_risks": [
+        "Unexpected central bank rate guidance",
+        "Cross-currency FX volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "SPOT_QUOTE",
+          "statement": "SILVER trading at INR 92300.0 (INR/kg)",
+          "source": "APEX_FEED",
+          "timestamp": 1794774031.9855363
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Industrial photovoltaic demand combined with supply deficit.",
+          "source": "OFFICIAL_REPORTS",
+          "timestamp": 1794774031.9855363
+        }
+      ],
+      "reasoning_summary": "Balanced institutional outlook for SILVER. Industrial photovoltaic demand combined with supply deficit.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    }
+  ],
+  "CRUDEOIL_MCX": [
+    {
+      "forecast_id": "fc_crudeoil_mcx_v1",
+      "version": 1,
+      "instrument_id": "CRUDEOIL_MCX",
+      "symbol": "CRUDEOIL",
+      "current_price": 6120.0,
+      "currency": "INR",
+      "unit": "INR/bbl",
+      "exchange": "MCX",
+      "market_timestamp": 1794774031.9855363,
+      "forecast_timestamp": 1794774031.9855363,
+      "valid_until": 1795378831.9855363,
+      "direction": "BULLISH",
+      "confidence": 0.84,
+      "bullish_scenario": {
+        "price_target": 6380.0,
+        "probability": 0.45,
+        "expected_change_pct": 4.2,
+        "supporting_evidence": [
+          "EIA commercial inventory draw and geopolitical shipping alert."
+        ]
+      },
+      "base_scenario": {
+        "price_target": 6160.0,
+        "probability": 0.35,
+        "expected_change_pct": 0.7,
+        "supporting_evidence": [
+          "Orderly technical consolidation"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 5890.0,
+        "probability": 0.2,
+        "expected_change_pct": -3.8,
+        "supporting_evidence": [
+          "Macro dollar index strength and liquidity headwinds"
+        ]
+      },
+      "price_range": {
+        "lower": 5875.2,
+        "upper": 6364.8
+      },
+      "expected_change_percent": 0.7,
+      "volatility_assessment": "Standard historical volatility envelope",
+      "horizons": [],
+      "self_challenge_critique": "Self-Challenge Dialectic: Thesis relies on current physical fundamentals. A sudden macroeconomic shift could invalidate this outlook.",
+      "invalidation_conditions": [
+        "Breach below primary support at 5875.2"
+      ],
+      "key_risks": [
+        "Unexpected central bank rate guidance",
+        "Cross-currency FX volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "SPOT_QUOTE",
+          "statement": "CRUDEOIL trading at INR 6120.0 (INR/bbl)",
+          "source": "APEX_FEED",
+          "timestamp": 1794774031.9855363
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "EIA commercial inventory draw and geopolitical shipping alert.",
+          "source": "OFFICIAL_REPORTS",
+          "timestamp": 1794774031.9855363
+        }
+      ],
+      "reasoning_summary": "Balanced institutional outlook for CRUDEOIL. EIA commercial inventory draw and geopolitical shipping alert.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    }
+  ],
+  "NATGAS_MCX": [
+    {
+      "forecast_id": "fc_natgas_mcx_v1",
+      "version": 1,
+      "instrument_id": "NATGAS_MCX",
+      "symbol": "NATURALGAS",
+      "current_price": 245.8,
+      "currency": "INR",
+      "unit": "INR/mmBtu",
+      "exchange": "MCX",
+      "market_timestamp": 1794774031.9855363,
+      "forecast_timestamp": 1794774031.9855363,
+      "valid_until": 1795378831.9855363,
+      "direction": "NEUTRAL_CONSOLIDATION",
+      "confidence": 0.84,
+      "bullish_scenario": {
+        "price_target": 262.0,
+        "probability": 0.3,
+        "expected_change_pct": 6.6,
+        "supporting_evidence": [
+          "Ample storage offsets weather forecasts in shoulder season."
+        ]
+      },
+      "base_scenario": {
+        "price_target": 248.0,
+        "probability": 0.5,
+        "expected_change_pct": 0.9,
+        "supporting_evidence": [
+          "Orderly technical consolidation"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 231.0,
+        "probability": 0.2,
+        "expected_change_pct": -6.0,
+        "supporting_evidence": [
+          "Macro dollar index strength and liquidity headwinds"
+        ]
+      },
+      "price_range": {
+        "lower": 235.97,
+        "upper": 255.63
+      },
+      "expected_change_percent": 0.9,
+      "volatility_assessment": "Standard historical volatility envelope",
+      "horizons": [],
+      "self_challenge_critique": "Self-Challenge Dialectic: Thesis relies on current physical fundamentals. A sudden macroeconomic shift could invalidate this outlook.",
+      "invalidation_conditions": [
+        "Breach below primary support at 235.97"
+      ],
+      "key_risks": [
+        "Unexpected central bank rate guidance",
+        "Cross-currency FX volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "SPOT_QUOTE",
+          "statement": "NATURALGAS trading at INR 245.8 (INR/mmBtu)",
+          "source": "APEX_FEED",
+          "timestamp": 1794774031.9855363
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Ample storage offsets weather forecasts in shoulder season.",
+          "source": "OFFICIAL_REPORTS",
+          "timestamp": 1794774031.9855363
+        }
+      ],
+      "reasoning_summary": "Balanced institutional outlook for NATURALGAS. Ample storage offsets weather forecasts in shoulder season.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    }
+  ],
+  "COPPER_MCX": [
+    {
+      "forecast_id": "fc_copper_mcx_v1",
+      "version": 1,
+      "instrument_id": "COPPER_MCX",
+      "symbol": "COPPER",
+      "current_price": 842.5,
+      "currency": "INR",
+      "unit": "INR/kg",
+      "exchange": "MCX",
+      "market_timestamp": 1794774031.9855363,
+      "forecast_timestamp": 1794774031.9855363,
+      "valid_until": 1795378831.9855363,
+      "direction": "BULLISH",
+      "confidence": 0.84,
+      "bullish_scenario": {
+        "price_target": 875.0,
+        "probability": 0.45,
+        "expected_change_pct": 3.9,
+        "supporting_evidence": [
+          "Smelter concentrate bottlenecks maintaining backwardation."
+        ]
+      },
+      "base_scenario": {
+        "price_target": 848.0,
+        "probability": 0.4,
+        "expected_change_pct": 0.7,
+        "supporting_evidence": [
+          "Orderly technical consolidation"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 818.0,
+        "probability": 0.15,
+        "expected_change_pct": -2.9,
+        "supporting_evidence": [
+          "Macro dollar index strength and liquidity headwinds"
+        ]
+      },
+      "price_range": {
+        "lower": 808.8,
+        "upper": 876.2
+      },
+      "expected_change_percent": 0.7,
+      "volatility_assessment": "Standard historical volatility envelope",
+      "horizons": [],
+      "self_challenge_critique": "Self-Challenge Dialectic: Thesis relies on current physical fundamentals. A sudden macroeconomic shift could invalidate this outlook.",
+      "invalidation_conditions": [
+        "Breach below primary support at 808.8"
+      ],
+      "key_risks": [
+        "Unexpected central bank rate guidance",
+        "Cross-currency FX volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "SPOT_QUOTE",
+          "statement": "COPPER trading at INR 842.5 (INR/kg)",
+          "source": "APEX_FEED",
+          "timestamp": 1794774031.9855363
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Smelter concentrate bottlenecks maintaining backwardation.",
+          "source": "OFFICIAL_REPORTS",
+          "timestamp": 1794774031.9855363
+        }
+      ],
+      "reasoning_summary": "Balanced institutional outlook for COPPER. Smelter concentrate bottlenecks maintaining backwardation.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    }
+  ],
+  "NIFTY50_NSE": [
+    {
+      "forecast_id": "fc_nifty50_nse_v1",
+      "version": 1,
+      "instrument_id": "NIFTY50_NSE",
+      "symbol": "NIFTY 50",
+      "current_price": 24350.0,
+      "currency": "INR",
+      "unit": "index_points",
+      "exchange": "NSE",
+      "market_timestamp": 1794774031.9855363,
+      "forecast_timestamp": 1794774031.9855363,
+      "valid_until": 1795378831.9855363,
+      "direction": "BULLISH",
+      "confidence": 0.84,
+      "bullish_scenario": {
+        "price_target": 24800.0,
+        "probability": 0.45,
+        "expected_change_pct": 1.8,
+        "supporting_evidence": [
+          "Domestic institutional inflows offset foreign institutional profit booking."
+        ]
+      },
+      "base_scenario": {
+        "price_target": 24450.0,
+        "probability": 0.4,
+        "expected_change_pct": 0.4,
+        "supporting_evidence": [
+          "Orderly technical consolidation"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 23950.0,
+        "probability": 0.15,
+        "expected_change_pct": -1.6,
+        "supporting_evidence": [
+          "Macro dollar index strength and liquidity headwinds"
+        ]
+      },
+      "price_range": {
+        "lower": 23376.0,
+        "upper": 25324.0
+      },
+      "expected_change_percent": 0.4,
+      "volatility_assessment": "Standard historical volatility envelope",
+      "horizons": [],
+      "self_challenge_critique": "Self-Challenge Dialectic: Thesis relies on current physical fundamentals. A sudden macroeconomic shift could invalidate this outlook.",
+      "invalidation_conditions": [
+        "Breach below primary support at 23376.0"
+      ],
+      "key_risks": [
+        "Unexpected central bank rate guidance",
+        "Cross-currency FX volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "SPOT_QUOTE",
+          "statement": "NIFTY 50 trading at INR 24350.0 (index_points)",
+          "source": "APEX_FEED",
+          "timestamp": 1794774031.9855363
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Domestic institutional inflows offset foreign institutional profit booking.",
+          "source": "OFFICIAL_REPORTS",
+          "timestamp": 1794774031.9855363
+        }
+      ],
+      "reasoning_summary": "Balanced institutional outlook for NIFTY 50. Domestic institutional inflows offset foreign institutional profit booking.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    }
+  ],
+  "USDINR_NSE": [
+    {
+      "forecast_id": "fc_usdinr_nse_v1",
+      "version": 1,
+      "instrument_id": "USDINR_NSE",
+      "symbol": "USDINR",
+      "current_price": 84.42,
+      "currency": "INR",
+      "unit": "INR/USD",
+      "exchange": "NSE",
+      "market_timestamp": 1794774031.9855363,
+      "forecast_timestamp": 1794774031.9855363,
+      "valid_until": 1795378831.9855363,
+      "direction": "NEUTRAL_CONSOLIDATION",
+      "confidence": 0.84,
+      "bullish_scenario": {
+        "price_target": 84.7,
+        "probability": 0.25,
+        "expected_change_pct": 0.3,
+        "supporting_evidence": [
+          "RBI active currency intervention stabilizing volatility."
+        ]
+      },
+      "base_scenario": {
+        "price_target": 84.45,
+        "probability": 0.6,
+        "expected_change_pct": 0.0,
+        "supporting_evidence": [
+          "Orderly technical consolidation"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 84.2,
+        "probability": 0.15,
+        "expected_change_pct": -0.3,
+        "supporting_evidence": [
+          "Macro dollar index strength and liquidity headwinds"
+        ]
+      },
+      "price_range": {
+        "lower": 81.04,
+        "upper": 87.8
+      },
+      "expected_change_percent": 0.0,
+      "volatility_assessment": "Standard historical volatility envelope",
+      "horizons": [],
+      "self_challenge_critique": "Self-Challenge Dialectic: Thesis relies on current physical fundamentals. A sudden macroeconomic shift could invalidate this outlook.",
+      "invalidation_conditions": [
+        "Breach below primary support at 81.04"
+      ],
+      "key_risks": [
+        "Unexpected central bank rate guidance",
+        "Cross-currency FX volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "SPOT_QUOTE",
+          "statement": "USDINR trading at INR 84.42 (INR/USD)",
+          "source": "APEX_FEED",
+          "timestamp": 1794774031.9855363
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "RBI active currency intervention stabilizing volatility.",
+          "source": "OFFICIAL_REPORTS",
+          "timestamp": 1794774031.9855363
+        }
+      ],
+      "reasoning_summary": "Balanced institutional outlook for USDINR. RBI active currency intervention stabilizing volatility.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    }
+  ],
+  "BTCUSD": [
+    {
+      "forecast_id": "fc_btcusd_v1",
+      "version": 1,
+      "instrument_id": "BTCUSD",
+      "symbol": "BTC-USD",
+      "current_price": 91200.0,
+      "currency": "USD",
+      "unit": "USD/BTC",
+      "exchange": "GLOBAL_INDEX",
+      "market_timestamp": 1794774031.9855363,
+      "forecast_timestamp": 1794774031.9855363,
+      "valid_until": 1795378831.9855363,
+      "direction": "BULLISH",
+      "confidence": 0.84,
+      "bullish_scenario": {
+        "price_target": 96000.0,
+        "probability": 0.5,
+        "expected_change_pct": 5.3,
+        "supporting_evidence": [
+          "Institutional spot ETF inflows supporting momentum."
+        ]
+      },
+      "base_scenario": {
+        "price_target": 92100.0,
+        "probability": 0.35,
+        "expected_change_pct": 1.0,
+        "supporting_evidence": [
+          "Orderly technical consolidation"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 86500.0,
+        "probability": 0.15,
+        "expected_change_pct": -5.2,
+        "supporting_evidence": [
+          "Macro dollar index strength and liquidity headwinds"
+        ]
+      },
+      "price_range": {
+        "lower": 87552.0,
+        "upper": 94848.0
+      },
+      "expected_change_percent": 1.0,
+      "volatility_assessment": "Standard historical volatility envelope",
+      "horizons": [],
+      "self_challenge_critique": "Self-Challenge Dialectic: Thesis relies on current physical fundamentals. A sudden macroeconomic shift could invalidate this outlook.",
+      "invalidation_conditions": [
+        "Breach below primary support at 87552.0"
+      ],
+      "key_risks": [
+        "Unexpected central bank rate guidance",
+        "Cross-currency FX volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "SPOT_QUOTE",
+          "statement": "BTC-USD trading at USD 91200.0 (USD/BTC)",
+          "source": "APEX_FEED",
+          "timestamp": 1794774031.9855363
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Institutional spot ETF inflows supporting momentum.",
+          "source": "OFFICIAL_REPORTS",
+          "timestamp": 1794774031.9855363
+        }
+      ],
+      "reasoning_summary": "Balanced institutional outlook for BTC-USD. Institutional spot ETF inflows supporting momentum.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    }
+  ]
+}

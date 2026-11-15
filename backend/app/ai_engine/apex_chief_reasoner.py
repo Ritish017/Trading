@@ -205,7 +205,7 @@ Output STRICTLY valid JSON with no markdown wrapping:
         response = await self.hybrid_ai.generate_completion_async(
             prompt=prompt,
             system_prompt=system_prompt,
-            timeout=20.0,
+            timeout=10.0,
         )
 
         # STEP 9: VALIDATE & NORMALIZE

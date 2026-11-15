@@ -8,6 +8,7 @@ import os
 import json
 import logging
 from typing import Optional, Dict, Any, List
+from backend.app.config import settings
 from backend.app.ai_engine.gemini_client import GeminiClient, GeminiResponse
 from backend.app.ai_engine.amd_tokenlab_client import AMDTokenLabClient, AMDTokenLabResponse
 
@@ -59,8 +60,10 @@ class HybridAIEngine:
         gemini_preferred_model: str = "gemini-3.8-flash",
         amd_preferred_model: str = "DeepSeek-V4-Flash",
     ):
-        self.gemini_client = GeminiClient(api_key=gemini_api_key)
-        self.amd_client = AMDTokenLabClient(api_key=amd_api_key, default_model=amd_preferred_model)
+        g_key = gemini_api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
+        a_key = amd_api_key or settings.amd_api_key or os.getenv("AMD_API_KEY", "")
+        self.gemini_client = GeminiClient(api_key=g_key)
+        self.amd_client = AMDTokenLabClient(api_key=a_key, default_model=amd_preferred_model)
         self.preferred_provider = preferred_provider
         self.gemini_preferred_model = gemini_preferred_model
         self.amd_preferred_model = amd_preferred_model

@@ -2982,8 +2982,8 @@ async def get_ai_models():
         "fast_model": "gemini-3.8-flash",
         "reasoning_model": "gemini-3.8-flash",
         "amd_model": "DeepSeek-V4-Flash",
-        "has_gemini_key": bool(os.getenv("GEMINI_API_KEY")),
-        "has_amd_key": bool(os.getenv("AMD_API_KEY")),
+        "has_gemini_key": bool(settings.gemini_api_key or os.getenv("GEMINI_API_KEY")),
+        "has_amd_key": bool(settings.amd_api_key or os.getenv("AMD_API_KEY")),
     }
 
 

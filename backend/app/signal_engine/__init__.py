@@ -14,6 +14,7 @@ from backend.app.signal_engine.models import (
     MultiTimeframeResult,
     PositionSizing,
     RejectionRecord,
+    ScanCoverageLedgerEntry,
     ScannerPipelineStats,
     ScannerResult,
     SignalDecision,
@@ -58,6 +59,7 @@ __all__ = [
     "MultiTimeframeResult",
     "PositionSizing",
     "RejectionRecord",
+    "ScanCoverageLedgerEntry",
     "ScannerPipelineStats",
     "ScannerResult",
     "SignalDecision",
@@ -101,8 +103,11 @@ __all__ = [
     "AssetType",
     "CostBreakdown",
     "FuturesEngine",
+    "FuturesDecisionEngine",
     "FuturesDecision",
+    "FuturesAction",
     "OptionsEngine",
+    "OptionsDecisionEngine",
     "OptionDecision",
     "OptionContract",
     "OptionAction",
@@ -134,10 +139,13 @@ from backend.app.signal_engine.transaction_cost import (
 )
 from backend.app.signal_engine.futures_engine import (
     FuturesEngine,
+    FuturesDecisionEngine,
     FuturesDecision,
+    FuturesAction,
 )
 from backend.app.signal_engine.options_engine import (
     OptionsEngine,
+    OptionsDecisionEngine,
     OptionDecision,
     OptionContract,
     OptionAction,

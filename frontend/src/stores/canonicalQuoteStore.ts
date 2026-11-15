@@ -111,7 +111,18 @@ class ClientCanonicalQuoteStore {
     if (ltp === null || ltp === undefined || ltp <= 0) return null;
 
     const symbol = tick.symbol;
-    const existing = this.quotes.get(symbol);
+    const existing = this.getQuote(symbol) || this.quotes.get(symbol);
+
+    let incomingTs = Number(tick.provider_timestamp || tick.timestamp || tick.last_trade_time || 0);
+    if (incomingTs > 1e11) {
+      incomingTs = Math.floor(incomingTs / 1000);
+    }
+
+    // Guard against out-of-order stale ticks (monotonic timestamp protection)
+    if (existing && existing.provider_timestamp > incomingTs && incomingTs > 0) {
+      return existing;
+    }
+
     const rawChange = tick.change !== undefined && tick.change !== null ? Number(tick.change) : null;
     let prevClose = tick.previous_close !== undefined && tick.previous_close !== null && Number(tick.previous_close) > 0
       ? Number(tick.previous_close)
@@ -160,10 +171,13 @@ class ClientCanonicalQuoteStore {
       last_rest_ltp: existing?.last_rest_ltp ?? null,
       last_rest_ts: existing?.last_rest_ts ?? null,
       last_ws_ltp: ltp,
-      last_ws_ts: incomingTs,
+      last_ws_ts: incomingTs > 0 ? incomingTs : Math.floor(Date.now() / 1000),
     };
 
     this.quotes.set(symbol, canonical);
+    const stripped = symbol.replace('.NS', '').replace('.BO', '');
+    this.quotes.set(stripped, canonical);
+    this.quotes.set(`${stripped}.NS`, canonical);
     this.notify();
     return canonical;
   }

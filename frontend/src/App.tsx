@@ -36,6 +36,7 @@ import { AICommentary, MarketEvent, MarketNarrative } from './types/intelligence
 import { PriceTracePanel } from './components/PriceTracePanel';
 import { canonicalQuoteStore } from './stores/canonicalQuoteStore';
 import { getISTMarketSessionInfo } from './utils/marketStatus';
+import { getAuthHeaders } from './utils/auth';
 import { 
   NSEStock, 
   MarketIndex, 
@@ -530,8 +531,13 @@ export default function App() {
 
   // Fetch initial Paper Trading State from Backend
   useEffect(() => {
-    fetch('/api/paper/positions')
-      .then((res) => res.json())
+    fetch('/api/paper/positions', {
+      headers: getAuthHeaders(),
+    })
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
       .then((data) => {
         if (data && Array.isArray(data.positions)) {
           setPaperPositions(data.positions);
@@ -668,7 +674,7 @@ export default function App() {
     try {
       const res = await fetch('/api/paper/order', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           symbol: targetStock.symbol,
           companyName: targetStock.name,
@@ -687,10 +693,15 @@ export default function App() {
           if (data.available_capital !== undefined) setPaperBalance(data.available_capital);
         } else if (data.status === 'REJECTED') {
           alert(`Order Rejected: ${data.reason}`);
+        } else {
+          alert(`Order Error: ${data.detail || data.reason || 'Unexpected order status'}`);
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to place paper order: ${errData.detail || 'Server returned HTTP ' + res.status}`);
       }
-    } catch {
-      // fallback
+    } catch (err: any) {
+      alert(`Network error placing paper order: ${err?.message || 'Connection failure'}`);
     }
   };
 
@@ -700,17 +711,24 @@ export default function App() {
     try {
       const res = await fetch(`/api/paper/close/${id}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ close_price: closePrice || pos.currentPrice }),
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.available_capital !== undefined) setPaperBalance(data.available_capital);
+        if (data.status === 'CLOSED' || data.status === 'PARTIALLY_CLOSED' || data.success !== false) {
+          if (data.available_capital !== undefined) setPaperBalance(data.available_capital);
+          setPaperPositions((prev) => prev.filter((p) => p.id !== id));
+        } else {
+          alert(`Failed to close position for ${pos.symbol}: ${data.reason || data.detail || 'Execution rejected'}`);
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to close position for ${pos.symbol}: ${errData.detail || 'Server returned HTTP ' + res.status}`);
       }
-    } catch {
-      // quiet
+    } catch (err: any) {
+      alert(`Network error closing position for ${pos.symbol}: ${err?.message || 'Connection failure'}`);
     }
-    setPaperPositions((prev) => prev.filter((p) => p.id !== id));
   };
 
   const handleAddCustomStock = async (sym: string) => {
@@ -822,6 +840,7 @@ export default function App() {
         breadth={marketBreadthData || INITIAL_MARKET_BREADTH}
         onOpenAIIntelligence={() => setActivePage('intelligence')}
         onOpenPaperTrading={() => setActivePage('portfolio')}
+        onOpenCloudDeploy={() => setActivePage('derivatives')}
       />
 
       {/* 3. Navigation Workspaces Tab Bar */}
@@ -887,6 +906,7 @@ export default function App() {
           onSearchChange={setSearchQuery}
           onAddCustomStock={handleAddCustomStock}
           optionSummary={optionChainData || INITIAL_OPTION_CHAIN}
+          onOpenPaperModal={() => setIsPaperModalOpen(true)}
         />
       )}
 

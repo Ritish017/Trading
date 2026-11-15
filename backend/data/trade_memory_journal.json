@@ -1,0 +1,70 @@
+[
+  {
+    "entry_id": "mem_831344dd",
+    "timestamp": 1794676722.5889275,
+    "symbol": "NIFTY 50",
+    "strategy_name": "BULL_CALL_DEBIT_SPREAD",
+    "regime": "LOW_IV_TRENDING",
+    "sentiment_score": 0.45,
+    "basis_velocity": 2.2,
+    "oi_pattern": "LONG_BUILDUP",
+    "entry_cost": 1200.0,
+    "exit_pnl": 650.0,
+    "is_winner": true,
+    "applied_rules": [
+      "RULE_102"
+    ],
+    "jarvis_notes": "High conviction momentum entry"
+  },
+  {
+    "entry_id": "mem_f0b99ae0",
+    "timestamp": 1794677073.0507793,
+    "symbol": "NIFTY 50",
+    "strategy_name": "BULL_CALL_DEBIT_SPREAD",
+    "regime": "LOW_IV_TRENDING",
+    "sentiment_score": 0.45,
+    "basis_velocity": 2.2,
+    "oi_pattern": "LONG_BUILDUP",
+    "entry_cost": 1200.0,
+    "exit_pnl": 650.0,
+    "is_winner": true,
+    "applied_rules": [
+      "RULE_102"
+    ],
+    "jarvis_notes": "High conviction momentum entry"
+  },
+  {
+    "entry_id": "mem_bf9c5bce",
+    "timestamp": 1794678461.4387558,
+    "symbol": "NIFTY 50",
+    "strategy_name": "BULL_CALL_DEBIT_SPREAD",
+    "regime": "LOW_IV_TRENDING",
+    "sentiment_score": 0.45,
+    "basis_velocity": 2.2,
+    "oi_pattern": "LONG_BUILDUP",
+    "entry_cost": 1200.0,
+    "exit_pnl": 650.0,
+    "is_winner": true,
+    "applied_rules": [
+      "RULE_102"
+    ],
+    "jarvis_notes": "High conviction momentum entry"
+  },
+  {
+    "entry_id": "mem_b0c74749",
+    "timestamp": 1794678541.6581001,
+    "symbol": "NIFTY 50",
+    "strategy_name": "BULL_CALL_DEBIT_SPREAD",
+    "regime": "LOW_IV_TRENDING",
+    "sentiment_score": 0.45,
+    "basis_velocity": 2.2,
+    "oi_pattern": "LONG_BUILDUP",
+    "entry_cost": 1200.0,
+    "exit_pnl": 650.0,
+    "is_winner": true,
+    "applied_rules": [
+      "RULE_102"
+    ],
+    "jarvis_notes": "High conviction momentum entry"
+  }
+]

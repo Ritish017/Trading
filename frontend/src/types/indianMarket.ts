@@ -81,16 +81,35 @@ export interface MarketBreadth {
   lowerCircuits: number;
 }
 
+export interface OptionLegData {
+  ltp: number;
+  oi: number;
+  volume: number;
+  iv?: number | null;
+  bid?: number;
+  ask?: number;
+  delta?: number;
+  theta?: number;
+}
+
+export interface OptionStrikeData {
+  strike: number;
+  call: OptionLegData;
+  put: OptionLegData;
+}
+
 export interface OptionChainSummary {
-  symbol: 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY';
+  symbol: string;
   spotPrice?: number | null;
   atmStrike?: number | null;
   pcr?: number | null;          // Put-Call Ratio
   maxPainStrike?: number | null;// Strike price with maximum pain
-  totalCallOI?: number | null;  // In Lakhs
-  totalPutOI?: number | null;   // In Lakhs
+  totalCallOI?: number | null;  // In Lakhs or units
+  totalPutOI?: number | null;   // In Lakhs or units
   impliedVolatility?: number | null;
   expiryDate?: string;
+  available_expiries?: string[];
+  strikes?: OptionStrikeData[];
 }
 
 export interface SEBIAnnouncement {

@@ -77,6 +77,7 @@ class StatefulMarketWorker:
         
         self.runner: Optional[LivePaperSessionRunner] = None
         self.is_running = False
+        self._startup_task: Optional[asyncio.Task] = None
         self._runner_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
 
@@ -93,97 +94,122 @@ class StatefulMarketWorker:
         logger.info(f"[WORKER STARTUP] Starting {self.worker_id} for session {self.target_date}...")
         self.worker_state = WorkerState.STARTING
 
-        # 1. Enforce safety & production invariants
-        LivePaperSafetyGuard.assert_paper_mode_enforced()
-        LivePaperSafetyGuard.verify_frozen_configuration()
-        settings.validate_production_invariants()
+        try:
+            # 1. Enforce safety & production invariants
+            LivePaperSafetyGuard.assert_paper_mode_enforced()
+            LivePaperSafetyGuard.verify_frozen_configuration()
+            settings.validate_production_invariants()
 
-        # 2. Initialize Database & run dialect-agnostic migrations
-        logger.info("[WORKER STARTUP] Initializing persistent database...")
-        await init_db()
-        db_health = await check_db_health()
-        if db_health.get("status") != "ONLINE":
-            err_msg = f"Database health check failed: {db_health}"
-            logger.critical(f"[WORKER FATAL] {err_msg}")
-            if settings.is_production:
+            # 2. Initialize Database & run dialect-agnostic migrations
+            logger.info("[WORKER STARTUP] Initializing persistent database...")
+            await init_db()
+            db_health = await check_db_health()
+            if db_health.get("status") != "ONLINE":
+                err_msg = f"Database health check failed: {db_health}"
+                logger.critical(f"[WORKER FATAL] {err_msg}")
+                if settings.is_production:
+                    raise RuntimeError(err_msg)
+
+            # 3. Execute mandatory startup preflight
+            logger.info("[WORKER STARTUP] Executing pre-market preflight verification...")
+            preflight_report = await self.preflight()
+            if preflight_report.get("overall_status") == "BLOCKED":
+                err_msg = f"Startup preflight checks failed with BLOCKED status: {preflight_report.get('summary')}"
+                logger.critical(f"[WORKER FATAL] {err_msg}")
                 raise RuntimeError(err_msg)
+            logger.info(f"[WORKER STARTUP] Preflight checks passed with status: {preflight_report.get('overall_status')}")
 
-        # 3. Execute mandatory startup preflight
-        logger.info("[WORKER STARTUP] Executing pre-market preflight verification...")
-        preflight_report = await self.preflight()
-        if preflight_report.get("overall_status") == "BLOCKED":
-            err_msg = f"Startup preflight checks failed with BLOCKED status: {preflight_report.get('summary')}"
-            logger.critical(f"[WORKER FATAL] {err_msg}")
-            raise RuntimeError(err_msg)
-        logger.info(f"[WORKER STARTUP] Preflight checks passed with status: {preflight_report.get('overall_status')}")
+            self.worker_state = WorkerState.CONNECTING
+            # 3. Register worker startup in database
+            async with AsyncSessionLocal() as s:
+                repo = WorkerRepository(s)
+                await repo.upsert_heartbeat(
+                    worker_id=self.worker_id,
+                    experiment_id=self.experiment_id,
+                    worker_status="STARTING",
+                    market_connection="CONNECTING",
+                    database_status="ONLINE",
+                    paper_mode=True,
+                    live_trading=False,
+                    data_quality="AUTHENTIC_LIVE" if not self.dry_run else "DRY_RUN_FIXTURE",
+                    details_json={"worker_instance_id": self.worker_instance_id},
+                )
 
-        self.worker_state = WorkerState.CONNECTING
-        # 3. Register worker startup in database
-        async with AsyncSessionLocal() as s:
-            repo = WorkerRepository(s)
-            await repo.upsert_heartbeat(
-                worker_id=self.worker_id,
+            # 4. Initialize LivePaperSessionRunner with unique worker_instance_id
+            self.runner = LivePaperSessionRunner(
                 experiment_id=self.experiment_id,
-                worker_status="STARTING",
-                market_connection="CONNECTING",
-                database_status="ONLINE",
-                paper_mode=True,
-                live_trading=False,
-                data_quality="AUTHENTIC_LIVE" if not self.dry_run else "DRY_RUN_FIXTURE",
-                details_json={"worker_instance_id": self.worker_instance_id},
+                session_date=self.target_date,
+                dry_run=self.dry_run,
+                log_dir=self.log_dir,
+                worker_instance_id=self.worker_instance_id,
             )
 
-        # 4. Initialize LivePaperSessionRunner with unique worker_instance_id
-        self.runner = LivePaperSessionRunner(
-            experiment_id=self.experiment_id,
-            session_date=self.target_date,
-            dry_run=self.dry_run,
-            log_dir=self.log_dir,
-            worker_instance_id=self.worker_instance_id,
-        )
+            # 5. Execute runner in background task
+            async def _run_safely():
+                try:
+                    await self.runner.start()
+                except Exception as e:
+                    logger.critical(f"[WORKER RUNNER CRASH] Runner crashed: {e}", exc_info=True)
 
-        # 5. Execute runner in background task
-        async def _run_safely():
-            try:
-                await self.runner.start()
-            except Exception as e:
-                logger.critical(f"[WORKER RUNNER CRASH] Runner crashed: {e}", exc_info=True)
+            self.is_running = True
+            self.worker_state = WorkerState.RUNNING
+            self._runner_task = asyncio.create_task(_run_safely())
 
-        self.is_running = True
-        self.worker_state = WorkerState.RUNNING
-        self._runner_task = asyncio.create_task(_run_safely())
+            # Update status to ONLINE
+            async with AsyncSessionLocal() as s:
+                repo = WorkerRepository(s)
+                await repo.upsert_heartbeat(
+                    worker_id=self.worker_id,
+                    experiment_id=self.experiment_id,
+                    worker_status="ONLINE",
+                    market_connection="CONNECTED" if not self.dry_run else "DRY_RUN_STANDBY",
+                    database_status="ONLINE",
+                    paper_mode=True,
+                    live_trading=False,
+                    details_json={"worker_instance_id": self.worker_instance_id},
+                )
 
-        # Update status to ONLINE
-        async with AsyncSessionLocal() as s:
-            repo = WorkerRepository(s)
-            await repo.upsert_heartbeat(
-                worker_id=self.worker_id,
-                experiment_id=self.experiment_id,
-                worker_status="ONLINE",
-                market_connection="CONNECTED" if not self.dry_run else "DRY_RUN_STANDBY",
-                database_status="ONLINE",
-                paper_mode=True,
-                live_trading=False,
-                details_json={"worker_instance_id": self.worker_instance_id},
-            )
-
-        logger.info(f"[WORKER ACTIVE] {self.worker_id} ({self.worker_instance_id}) is operating continuously.")
+            logger.info(f"[WORKER ACTIVE] {self.worker_id} ({self.worker_instance_id}) is operating continuously.")
+        except asyncio.CancelledError:
+            logger.info(f"[WORKER STARTUP] Startup was cancelled for {self.worker_id}.")
+            raise
 
     async def stop(self) -> None:
-        """Stops the worker gracefully and flushes evidence logs."""
-        if not self.is_running:
+        """Stops the worker gracefully, cancelling any in-flight startup or runner tasks."""
+        if self.worker_state == WorkerState.STOPPED:
+            logger.debug(f"[WORKER SHUTDOWN] {self.worker_id} is already STOPPED.")
             return
+
         logger.info(f"[WORKER SHUTDOWN] Shutting down {self.worker_id} ({self.worker_instance_id})...")
         self.worker_state = WorkerState.STOPPING
         self.is_running = False
 
+        # 1. Cancel and await startup background task if in flight
+        if self._startup_task and not self._startup_task.done():
+            logger.info(f"[WORKER SHUTDOWN] Cancelling startup task for {self.worker_id}...")
+            self._startup_task.cancel()
+            try:
+                await self._startup_task
+            except (asyncio.CancelledError, Exception) as e:
+                logger.debug(f"[WORKER SHUTDOWN] Startup task completed after cancellation: {e}")
+
+        # 2. Stop runner if instantiated
         if self.runner:
-            await self.runner.stop()
+            try:
+                await self.runner.stop()
+            except Exception as e:
+                logger.warning(f"[WORKER SHUTDOWN] Error stopping session runner: {e}")
 
+        # 3. Cancel and await runner background task
         if self._runner_task and not self._runner_task.done():
+            logger.info(f"[WORKER SHUTDOWN] Cancelling runner task for {self.worker_id}...")
             self._runner_task.cancel()
+            try:
+                await self._runner_task
+            except (asyncio.CancelledError, Exception) as e:
+                logger.debug(f"[WORKER SHUTDOWN] Runner task completed after cancellation: {e}")
 
-        # Update worker heartbeat status to STOPPED with retry
+        # 4. Update worker heartbeat status to STOPPED with retry
         for attempt in range(5):
             try:
                 await asyncio.sleep(0.05)
@@ -228,9 +254,12 @@ async def worker_lifespan(app: FastAPI):
     # Auto-start worker in background task so HTTP probe is immediately responsive
     auto_start = os.environ.get("WORKER_AUTO_START", "true").lower() in ("true", "1", "yes")
     if auto_start:
-        asyncio.create_task(worker_instance.start())
-    yield
-    await worker_instance.stop()
+        # Retain explicit reference on worker_instance to prevent Python 3.14 GC
+        worker_instance._startup_task = asyncio.create_task(worker_instance.start())
+    try:
+        yield
+    finally:
+        await worker_instance.stop()
 
 
 worker_app = FastAPI(
@@ -462,7 +491,7 @@ async def run_headless_worker():
 def run_worker():
     """CLI / container entrypoint to run the stateful worker."""
     port = int(os.environ.get("PORT", "8000"))
-    host = os.environ.get("HOST", "0.0.0.0")
+    host = os.environ.get("HOST", "127.0.0.1")
     headless = os.environ.get("WORKER_HEADLESS", "false").lower() in ("true", "1", "yes")
 
     if headless:

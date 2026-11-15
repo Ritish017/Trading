@@ -1,6 +1,7 @@
 import React from 'react';
 import { NSEWatchlist } from '../NSEWatchlist';
 import { OptionChainSummary } from '../OptionChainSummary';
+import { NiftyStrategicBotWidget } from '../NiftyStrategicBotWidget';
 import { NSEStock, OptionChainSummary as OptionChainType } from '../../types/indianMarket';
 import { Layers, Activity, TrendingUp, TrendingDown } from 'lucide-react';
 
@@ -14,6 +15,7 @@ interface DerivativesLabPageProps {
   onSearchChange: (q: string) => void;
   onAddCustomStock: (sym: string) => void;
   optionSummary?: OptionChainType;
+  onOpenPaperModal?: () => void;
 }
 
 export const DerivativesLabPage: React.FC<DerivativesLabPageProps> = ({
@@ -26,9 +28,11 @@ export const DerivativesLabPage: React.FC<DerivativesLabPageProps> = ({
   onSearchChange,
   onAddCustomStock,
   optionSummary,
+  onOpenPaperModal,
 }) => {
   const pcr = optionSummary?.pcr ?? 1.18;
   const isPcrBullish = pcr >= 1.0;
+  const fallbackMaxPain = selectedStock?.price ? Math.round(selectedStock.price / 50) * 50 : 24500;
 
   return (
     <div className="flex-1 p-3 grid grid-cols-1 md:grid-cols-12 gap-3 h-[calc(100vh-175px)] min-h-0">
@@ -78,18 +82,26 @@ export const DerivativesLabPage: React.FC<DerivativesLabPageProps> = ({
             <div className="flex flex-col items-end">
               <span className="text-[10px] text-stone-500 uppercase">Max Pain Strike</span>
               <span className="font-black text-amber-400">
-                ₹{optionSummary?.maxPainStrike?.toLocaleString() ?? 24500}
+                ₹{optionSummary?.maxPainStrike?.toLocaleString() ?? fallbackMaxPain.toLocaleString()}
               </span>
             </div>
           </div>
         </div>
 
+        {/* NIFTY 50 Autonomous Strategic Bot */}
+        <NiftyStrategicBotWidget />
+
         {/* Option Chain Component */}
         <div className="flex-1 min-h-[450px]">
           <OptionChainSummary
-            symbol={selectedStock?.symbol || 'NIFTY'}
+            symbol={selectedStock?.symbol || 'NIFTY 50'}
             price={selectedStock?.price || 24580.0}
             optionSummary={optionSummary}
+            onTradeOption={(_order) => {
+              if (onOpenPaperModal) {
+                onOpenPaperModal();
+              }
+            }}
           />
         </div>
       </div>

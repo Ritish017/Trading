@@ -122,6 +122,18 @@ class MarketDataService:
         logger.info("[MARKET DATA HUB] Operating in SIMULATED mode using DevMockProvider.")
         return True
 
+    async def disconnect(self) -> None:
+        """Gracefully disconnect active provider and mark service as disconnected."""
+        if self.active_provider and hasattr(self.active_provider, "disconnect"):
+            try:
+                await self.active_provider.disconnect()
+                logger.info(f"[MARKET DATA HUB] Active provider ({getattr(self.active_provider, 'provider_name', 'UNKNOWN')}) disconnected cleanly.")
+            except Exception as e:
+                logger.warning(f"[MARKET DATA HUB] Error disconnecting active provider: {e}")
+        self.is_live = False
+        self.status_code = "DISCONNECTED"
+        self.provider_mode = "UNAVAILABLE"
+
     async def connect_websocket(self, tick_callback: Callable[[NormalizedTick], Awaitable[None]]) -> bool:
         async def _internal_cb(tick: NormalizedTick):
             self._last_tick_time = tick.timestamp
@@ -247,7 +259,12 @@ class MarketDataService:
         self._candle_cache[cache_key] = adjusted_candles
         return adjusted_candles
 
-    async def get_option_chain(self, symbol: str) -> Dict[str, Any]:
+    async def get_option_chain(self, symbol: str, expiry: Optional[str] = None) -> Dict[str, Any]:
+        if hasattr(self.active_provider, "get_option_chain"):
+            import inspect
+            sig = inspect.signature(self.active_provider.get_option_chain)
+            if "expiry" in sig.parameters or len(sig.parameters) >= 2:
+                return await self.active_provider.get_option_chain(symbol, expiry=expiry)
         return await self.active_provider.get_option_chain(symbol)
 
     async def get_fii_dii(self) -> Dict[str, Any]:

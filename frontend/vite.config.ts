@@ -12,15 +12,25 @@ export default defineConfig(() => {
       },
     },
     server: {
-      port: 3000,
+      port: 5174,
       proxy: {
         '/api': {
-          target: 'http://localhost:8000',
+          target: 'http://127.0.0.1:8001',
           changeOrigin: true,
+          configure: (proxy, _options) => {
+            proxy.on('error', (_err, _req, _res) => {
+              // swallow proxy errors cleanly during server reload
+            });
+          },
         },
         '/ws': {
-          target: 'ws://localhost:8000',
+          target: 'ws://127.0.0.1:8001',
           ws: true,
+          configure: (proxy, _options) => {
+            proxy.on('error', (_err, _req, _res) => {
+              // swallow ws errors cleanly
+            });
+          },
         },
       },
       hmr: process.env.DISABLE_HMR !== 'true',

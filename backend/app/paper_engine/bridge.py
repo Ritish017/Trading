@@ -75,12 +75,35 @@ class PaperTradingBridge:
     Authoritative quantitative bridge from strategy evidence to paper execution.
     """
 
-    def __init__(self, initial_capital: float = 1000000.0):
+    def __init__(self, initial_capital: float = 1000000.0, engine: Optional[Any] = None):
         self.initial_capital = initial_capital
-        self.available_cash = initial_capital
+        if engine is not None:
+            self._engine = engine
+        else:
+            from backend.app.paper_trading.engine import PaperTradingEngine
+            self._engine = PaperTradingEngine(initial_capital=initial_capital)
         self.positions: Dict[str, PaperPosition] = {}
-        self.trade_audits: List[PaperTradeAudit] = []
         self.signals_history: List[PaperSignal] = []
+
+    @property
+    def engine(self):
+        return self._engine
+
+    @property
+    def available_cash(self) -> float:
+        return self._engine.capital
+
+    @available_cash.setter
+    def available_cash(self, val: float):
+        self._engine.capital = val
+
+    @property
+    def trade_audits(self) -> List[PaperTradeAudit]:
+        return self._engine.trade_audits
+
+    @trade_audits.setter
+    def trade_audits(self, val: List[PaperTradeAudit]):
+        self._engine.trade_audits = val
 
     def generate_signal_from_strategy(
         self,
@@ -196,6 +219,28 @@ class PaperTradingBridge:
 
         self.available_cash -= total_cost
         self.positions[pos_id] = pos
+
+        # Synchronize with engine
+        self._engine.positions[pos_id] = {
+            "id": pos_id,
+            "account_id": "primary_personal_account",
+            "symbol": signal.symbol,
+            "companyName": signal.symbol.split(".")[0],
+            "productType": "CNC",
+            "side": "BUY" if signal.side == OrderSide.BUY else "SELL",
+            "quantity": quantity,
+            "entryPrice": effective_entry_price,
+            "currentPrice": next_bar_open,
+            "unrealizedPnL": 0.0,
+            "unrealizedPnLPercent": 0.0,
+            "marginLocked": total_cost - frictions["total_fees"],
+            "targetPrice": signal.take_profit,
+            "stopLoss": signal.stop_loss,
+            "timestamp": next_bar_timestamp,
+            "frictions": frictions,
+            "signal_id": signal.signal_id,
+            "strategy_version": signal.strategy_version,
+        }
         return pos
 
     def update_positions_mark_to_market(
@@ -269,6 +314,34 @@ class PaperTradingBridge:
         proceeds = (effective_exit_price * pos.quantity) - exit_frictions["total_fees"]
         self.available_cash += proceeds
 
+        # Synchronize closure with engine
+        if pos_id in self._engine.positions:
+            del self._engine.positions[pos_id]
+        closed_rec = {
+            "id": f"TRD_{pos.position_id}",
+            "account_id": "primary_personal_account",
+            "pos_id": pos_id,
+            "symbol": pos.symbol,
+            "companyName": pos.symbol.split(".")[0],
+            "productType": "CNC",
+            "side": "BUY" if pos.side == OrderSide.BUY else "SELL",
+            "quantity": pos.quantity,
+            "entryPrice": pos.entry_price,
+            "exitPrice": effective_exit_price,
+            "grossPnL": round(gross_pnl, 2),
+            "realizedPnL": net_pnl,
+            "brokerage": exit_frictions["brokerage"],
+            "taxes": exit_frictions["total_fees"] - exit_frictions["brokerage"],
+            "exit_frictions": exit_frictions,
+            "exit_reason": exit_reason.value if hasattr(exit_reason, "value") else str(exit_reason),
+            "exit_type": "EXIT_STOP" if exit_reason == ExitReason.STOP_LOSS else ("EXIT_TARGET" if exit_reason == ExitReason.TAKE_PROFIT else "MANUAL"),
+            "signal_id": pos.signal.signal_id if pos.signal else None,
+            "strategy_version": pos.strategy_version,
+            "timestamp": pos.entry_timestamp,
+            "closedAt": exit_timestamp,
+        }
+        self._engine.closed_trades.append(closed_rec)
+
         audit = PaperTradeAudit(
             trade_id=f"TRD_{pos.position_id}",
             signal_id=pos.signal.signal_id if pos.signal else "UNKNOWN",
@@ -317,10 +390,17 @@ class PaperTradingBridge:
                 "max_consecutive_losses": 0,
                 "avg_holding_bars": 0,
                 "available_cash": round(self.available_cash, 2),
-                "open_positions_count": sum(1 for p in self.positions.values() if p.status == PositionStatus.OPEN),
+                "open_positions_count": max(len(self._engine.positions), sum(1 for p in self.positions.values() if p.status == PositionStatus.OPEN)),
             }
 
-        pnls = [t.net_pnl for t in closed_trades]
+        def _get_val(obj, key, default=0.0):
+            if hasattr(obj, key):
+                return getattr(obj, key)
+            elif isinstance(obj, dict):
+                return obj.get(key, default)
+            return default
+
+        pnls = [_get_val(t, "net_pnl", 0.0) for t in closed_trades]
         wins = [p for p in pnls if p > 0]
         losses = [abs(p) for p in pnls if p < 0]
 
@@ -339,21 +419,44 @@ class PaperTradingBridge:
                 curr_cw = 0
                 max_cl = max(max_cl, curr_cl)
 
+        gross_pnls = [_get_val(t, "gross_pnl", 0.0) for t in closed_trades]
+        fees_paids = [_get_val(t, "fees_paid", 0.0) for t in closed_trades]
+        slippage_paids = [_get_val(t, "slippage_paid", 0.0) for t in closed_trades]
+        bars = [_get_val(t, "holding_period_bars", 1) for t in closed_trades]
+
         return {
             "total_trades": n_trades,
-            "gross_pnl": round(sum(t.gross_pnl for t in closed_trades), 2),
+            "gross_pnl": round(sum(gross_pnls), 2),
             "net_pnl": round(sum(pnls), 2),
-            "fees_paid": round(sum(t.fees_paid for t in closed_trades), 2),
-            "slippage_paid": round(sum(t.slippage_paid for t in closed_trades), 2),
+            "fees_paid": round(sum(fees_paids), 2),
+            "slippage_paid": round(sum(slippage_paids), 2),
             "win_rate_pct": round(win_rate, 2),
             "profit_factor": round(profit_factor, 2),
             "max_consecutive_wins": max_cw,
             "max_consecutive_losses": max_cl,
-            "avg_holding_bars": round(float(np.mean([t.holding_period_bars for t in closed_trades])), 1),
+            "avg_holding_bars": round(float(np.mean(bars)), 1) if bars else 0,
             "available_cash": round(self.available_cash, 2),
-            "open_positions_count": sum(1 for p in self.positions.values() if p.status == PositionStatus.OPEN),
+            "open_positions_count": max(len(self._engine.positions), sum(1 for p in self.positions.values() if p.status == PositionStatus.OPEN)),
         }
 
 
-# Canonical Singleton
-paper_bridge = PaperTradingBridge()
+# Canonical Singleton bound to server engine (Lazy proxy to break circular imports)
+class _LazyPaperBridgeProxy:
+    _instance = None
+
+    def _get_inst(self):
+        if self._instance is None:
+            from backend.app.paper_trading.engine import paper_engine
+            self._instance = PaperTradingBridge(engine=paper_engine)
+        return self._instance
+
+    def __getattr__(self, name):
+        return getattr(self._get_inst(), name)
+
+    def __setattr__(self, name, value):
+        if name == "_instance":
+            super().__setattr__(name, value)
+        else:
+            setattr(self._get_inst(), name, value)
+
+paper_bridge = _LazyPaperBridgeProxy()

@@ -348,20 +348,27 @@ async def evaluate_candidate_signal(
     symbol = candidate.symbol
     primary_candles = candles_by_timeframe.get(config.primary_timeframe, [])
     all_candles = primary_candles
+    is_timeframe_degraded = False
+    fallback_timeframe: Optional[str] = None
 
     # Use the first available timeframe's candles if primary not available
     if not all_candles:
         for tf in config.mtf_timeframes:
             if candles_by_timeframe.get(tf):
                 all_candles = candles_by_timeframe[tf]
+                is_timeframe_degraded = True
+                fallback_timeframe = tf
                 break
 
     # 1. Feature Vector
     fv = _make_feature_vector(all_candles)
     ltp = _safe_float(quote.get("ltp")) or (fv.get("close"))
     if not ltp:
-        return _make_no_trade(symbol, "DATA_UNAVAILABLE", "No price data available"), \
-               _make_rejection(symbol, "DATA_VALIDATION", "HARD", "No price data available")
+        return _make_no_trade(
+            symbol, "DATA_UNAVAILABLE", "No price data available",
+            is_timeframe_degraded=is_timeframe_degraded,
+            fallback_timeframe=fallback_timeframe,
+        ), _make_rejection(symbol, "DATA_VALIDATION", "HARD", "No price data available")
 
     fv["ltp"] = ltp
 
@@ -400,11 +407,12 @@ async def evaluate_candidate_signal(
     strategy_votes: List[StrategyVote] = []
     try:
         active_prov = "PROVIDER"
+        active_tf = fallback_timeframe if is_timeframe_degraded else config.primary_timeframe
         observatory = evaluate_strategies_observatory(
             candles=all_candles,
             is_live_feed=False,
             strategy_ids=None,
-            timeframe=config.primary_timeframe,
+            timeframe=active_tf,
             provider=active_prov,
             symbol=symbol,
         )
@@ -434,6 +442,8 @@ async def evaluate_candidate_signal(
                 f"Insufficient strategy confluence. Label: {confluence_result.confluence_label}",
                 strategy_votes=strategy_votes,
                 confluence_result=confluence_result,
+                is_timeframe_degraded=is_timeframe_degraded,
+                fallback_timeframe=fallback_timeframe,
             ), _make_rejection(
                 symbol, "CONFLUENCE_INSUFFICIENT", "SOFT",
                 f"No dominant direction from strategies ({confluence_result.confluence_label})",
@@ -481,7 +491,7 @@ async def evaluate_candidate_signal(
 
     capital_required = position_sizing.capital_required if position_sizing else None
 
-    # 11. Hard Gate Validation
+    # 11. Hard Gate Validation (including Directional Geometry Hard Gate)
     gates_passed, hard_gates, failure_reason = validation_pipeline.run_hard_gates(
         symbol=symbol,
         candles=all_candles,
@@ -493,6 +503,8 @@ async def evaluate_candidate_signal(
         capital_required=capital_required,
         portfolio_state=portfolio_state,
         config=config,
+        direction=direction,
+        targets=targets,
     )
 
     if not gates_passed:
@@ -504,6 +516,8 @@ async def evaluate_candidate_signal(
             strategy_votes=strategy_votes,
             confluence_result=confluence_result,
             hard_gates=hard_gates,
+            is_timeframe_degraded=is_timeframe_degraded,
+            fallback_timeframe=fallback_timeframe,
         ), _make_rejection(
             symbol, gate_id, "HARD", failure_reason or "Hard gate failed",
             hard_gates=hard_gates,
@@ -554,6 +568,8 @@ async def evaluate_candidate_signal(
             f"Opportunity score {opportunity_score:.1f} below minimum {config.c_score_threshold:.1f}",
             strategy_votes=strategy_votes,
             confluence_result=confluence_result,
+            is_timeframe_degraded=is_timeframe_degraded,
+            fallback_timeframe=fallback_timeframe,
         ), _make_rejection(
             symbol, "SCORE_TOO_LOW", "SOFT",
             f"Score {opportunity_score:.1f} < {config.c_score_threshold:.1f}",
@@ -561,6 +577,10 @@ async def evaluate_candidate_signal(
 
     # 15. Build WHY reasons and invalidation conditions
     why_reasons = validation_pipeline.build_why_reasons(all_gates, strategy_votes, mtf_result, direction)
+    if is_timeframe_degraded:
+        why_reasons.append(
+            f"TIMEFRAME_DEGRADED: Evaluated using fallback timeframe '{fallback_timeframe}' instead of primary '{config.primary_timeframe}'"
+        )
     invalidation = _build_invalidation_conditions(symbol, direction, stop_result, ltp, regime)
 
     # 16. Build strategy consensus
@@ -571,18 +591,21 @@ async def evaluate_candidate_signal(
 
     # 18. Data provenance
     is_live = bool(quote.get("is_live", False))
-    provenance = (
-        DataProvenance.RAW_AUTHENTIC_DATA if is_live
-        else DataProvenance.SIMULATED
-    )
+    if is_timeframe_degraded:
+        provenance = DataProvenance.DEGRADED
+    elif is_live:
+        provenance = DataProvenance.RAW_AUTHENTIC_DATA
+    else:
+        provenance = DataProvenance.SIMULATED
 
     # 19. Compute entry zone (±0.3% of LTP by default)
     entry_zone_range = ltp * 0.003
     entry_zone_low = round(ltp - entry_zone_range, 2)
     entry_zone_high = round(ltp + entry_zone_range, 2)
 
-    # 20. Signal expiry
-    expiry_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3 * 900))  # 3 candles @ 15m
+    # 20. Signal expiry (dynamic calculation based on primary timeframe)
+    expiry_duration_sec = config.get_expiry_duration_seconds()
+    expiry_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + expiry_duration_sec))
 
     # 21. Transaction Cost Estimation
     cost_estimate = None
@@ -597,9 +620,20 @@ async def evaluate_candidate_signal(
     except Exception as e:
         logger.warning(f"Cost calculation warning for {symbol}: {e}")
 
-    # 22. Futures Analysis (if data provided)
+    # 22. Futures Analysis (if data provided or candidate is FUTURES)
+    cand_ac = getattr(candidate, "asset_class", None)
+    cand_ac_str = cand_ac.value.upper() if hasattr(cand_ac, "value") else str(cand_ac or "").upper()
+    is_futures_cand = cand_ac_str == "FUTURES"
+    is_options_cand = cand_ac_str == "OPTIONS"
+
     futures_decision = None
-    if futures_data:
+    if is_futures_cand:
+        if not futures_data:
+            return _make_no_trade(
+                symbol, "FUTURES_DATA_UNAVAILABLE", "No futures data provided for futures candidate",
+                strategy_votes=strategy_votes, confluence_result=confluence_result,
+                is_timeframe_degraded=is_timeframe_degraded, fallback_timeframe=fallback_timeframe,
+            ), _make_rejection(symbol, "FUTURES_DATA_UNAVAILABLE", "HARD", "Futures data unavailable")
         try:
             f_res = FuturesEngine.analyze(
                 underlying_symbol=symbol,
@@ -616,19 +650,53 @@ async def evaluate_candidate_signal(
                 target_pts=abs(targets[0].price - ltp) if targets else ltp * 0.03,
             )
             futures_decision = f_res.to_dict()
-            if candidate.asset_class == AssetClass.FUTURES:
-                if f_res.action == "BUY_FUTURE":
-                    signal_type = SignalType.BUY_FUTURE
-                elif f_res.action == "SELL_FUTURE":
-                    signal_type = SignalType.SELL_FUTURE
-                else:
-                    signal_type = SignalType.NO_TRADE
+            if not getattr(f_res, "is_valid", False) or f_res.action not in ("BUY_FUTURE", "SELL_FUTURE"):
+                return _make_no_trade(
+                    symbol, getattr(f_res, "rejection_reason", "FUTURES_NO_TRADE") or "FUTURES_NO_TRADE",
+                    getattr(f_res, "rationale", "Futures contract rejected") or "Futures contract rejected",
+                    strategy_votes=strategy_votes, confluence_result=confluence_result,
+                    is_timeframe_degraded=is_timeframe_degraded, fallback_timeframe=fallback_timeframe,
+                ), _make_rejection(symbol, "FUTURES_REJECTED", "HARD", getattr(f_res, "rationale", "Futures rejected") or "Futures rejected")
+            if f_res.action == "BUY_FUTURE":
+                signal_type = SignalType.BUY_FUTURE
+            elif f_res.action == "SELL_FUTURE":
+                signal_type = SignalType.SELL_FUTURE
+        except Exception as e:
+            logger.warning(f"Futures analysis error for {symbol}: {e}")
+            return _make_no_trade(
+                symbol, "FUTURES_EVALUATION_ERROR", f"Futures analysis failed: {e}",
+                strategy_votes=strategy_votes, confluence_result=confluence_result,
+                is_timeframe_degraded=is_timeframe_degraded, fallback_timeframe=fallback_timeframe,
+            ), _make_rejection(symbol, "FUTURES_EVALUATION_ERROR", "HARD", str(e))
+    elif futures_data:
+        try:
+            f_res = FuturesEngine.analyze(
+                underlying_symbol=symbol,
+                underlying_direction=direction,
+                underlying_price=ltp,
+                futures_price=float(futures_data.get("futures_price", ltp)),
+                dte=int(futures_data.get("dte", 15)),
+                volume=int(futures_data.get("volume", 50000)),
+                oi=int(futures_data.get("oi", 500000)),
+                oi_change_pct=float(futures_data.get("oi_change_pct", 0.0)),
+                lot_size=int(futures_data.get("lot_size", 250)),
+                margin_per_lot=float(futures_data.get("margin_per_lot", 150000.0)),
+                stop_loss_pts=abs(ltp - stop_result.price) if stop_result else ltp * 0.015,
+                target_pts=abs(targets[0].price - ltp) if targets else ltp * 0.03,
+            )
+            futures_decision = f_res.to_dict()
         except Exception as e:
             logger.warning(f"Futures analysis error for {symbol}: {e}")
 
-    # 23. Options Intelligence Analysis (if chain provided)
+    # 23. Options Intelligence Analysis (if chain provided or candidate is OPTIONS)
     options_decision = None
-    if option_chain:
+    if is_options_cand:
+        if not option_chain:
+            return _make_no_trade(
+                symbol, "OPTIONS_DATA_UNAVAILABLE", "No option chain provided for options candidate",
+                strategy_votes=strategy_votes, confluence_result=confluence_result,
+                is_timeframe_degraded=is_timeframe_degraded, fallback_timeframe=fallback_timeframe,
+            ), _make_rejection(symbol, "OPTIONS_DATA_UNAVAILABLE", "HARD", "Option chain unavailable")
         try:
             o_res = OptionsEngine.evaluate(
                 underlying_symbol=symbol,
@@ -639,21 +707,60 @@ async def evaluate_candidate_signal(
                 stop_loss_price=stop_result.price if stop_result else None,
             )
             options_decision = o_res.to_dict()
-            if candidate.asset_class == AssetClass.OPTIONS:
-                if o_res.action == "BUY_CALL":
-                    signal_type = SignalType.BUY_CALL
-                elif o_res.action == "BUY_PUT":
-                    signal_type = SignalType.BUY_PUT
-                elif o_res.action in ("BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"):
-                    signal_type = SignalType.OPTION_SPREAD
-                elif o_res.action == "SELL_CALL":
-                    signal_type = SignalType.SELL_CALL
-                elif o_res.action == "SELL_PUT":
-                    signal_type = SignalType.SELL_PUT
-                else:
-                    signal_type = SignalType.NO_TRADE
+            if not getattr(o_res, "is_valid", False) or str(o_res.action) in (
+                "OptionAction.NO_TRADE", "OptionAction.OPTIONS_DATA_INSUFFICIENT",
+                "NO_TRADE", "OPTIONS_DATA_INSUFFICIENT"
+            ):
+                return _make_no_trade(
+                    symbol, getattr(o_res, "rejection_reason", "OPTIONS_NO_TRADE") or "OPTIONS_NO_TRADE",
+                    getattr(o_res, "rationale", "Options contract rejected") or "Options contract rejected",
+                    strategy_votes=strategy_votes, confluence_result=confluence_result,
+                    is_timeframe_degraded=is_timeframe_degraded, fallback_timeframe=fallback_timeframe,
+                ), _make_rejection(symbol, "OPTIONS_REJECTED", "HARD", getattr(o_res, "rationale", "Options rejected") or "Options rejected")
+            action_str = o_res.action.value if hasattr(o_res.action, "value") else str(o_res.action)
+            if action_str == "BUY_CALL":
+                signal_type = SignalType.BUY_CALL
+            elif action_str == "BUY_PUT":
+                signal_type = SignalType.BUY_PUT
+            elif action_str in ("BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"):
+                signal_type = SignalType.OPTION_SPREAD
+            elif action_str == "SELL_CALL":
+                signal_type = SignalType.SELL_CALL
+            elif action_str == "SELL_PUT":
+                signal_type = SignalType.SELL_PUT
+            else:
+                return _make_no_trade(
+                    symbol, "OPTIONS_NO_TRADE", "Options action is not tradeable",
+                    strategy_votes=strategy_votes, confluence_result=confluence_result,
+                    is_timeframe_degraded=is_timeframe_degraded, fallback_timeframe=fallback_timeframe,
+                ), _make_rejection(symbol, "OPTIONS_REJECTED", "HARD", "Options action not tradeable")
         except Exception as e:
             logger.warning(f"Options evaluation error for {symbol}: {e}")
+            return _make_no_trade(
+                symbol, "OPTIONS_EVALUATION_ERROR", f"Options evaluation failed: {e}",
+                strategy_votes=strategy_votes, confluence_result=confluence_result,
+                is_timeframe_degraded=is_timeframe_degraded, fallback_timeframe=fallback_timeframe,
+            ), _make_rejection(symbol, "OPTIONS_EVALUATION_ERROR", "HARD", str(e))
+    elif option_chain:
+        try:
+            o_res = OptionsEngine.evaluate(
+                underlying_symbol=symbol,
+                underlying_direction=direction,
+                underlying_price=ltp,
+                option_chain=option_chain,
+                target_price=targets[0].price if targets else None,
+                stop_loss_price=stop_result.price if stop_result else None,
+            )
+            options_decision = o_res.to_dict()
+        except Exception as e:
+            logger.warning(f"Options evaluation error for {symbol}: {e}")
+
+    if signal_type == SignalType.NO_TRADE:
+        return _make_no_trade(
+            symbol, "DERIVATIVE_NO_TRADE", "Derivative evaluation returned NO_TRADE",
+            strategy_votes=strategy_votes, confluence_result=confluence_result,
+            is_timeframe_degraded=is_timeframe_degraded, fallback_timeframe=fallback_timeframe,
+        ), _make_rejection(symbol, "DERIVATIVE_NO_TRADE", "HARD", "Derivative evaluation returned NO_TRADE")
 
     # Build qualified signal
     cand_id = getattr(candidate, "candidate_id", None) or f"CAND_{symbol}_{int(time.time()*1000)}"
@@ -713,8 +820,10 @@ async def evaluate_candidate_signal(
                 provenance=provenance,
             )
         ],
+        is_timeframe_degraded=is_timeframe_degraded,
+        fallback_timeframe=fallback_timeframe,
         expiry=expiry_time,
-        expiry_condition=f"Valid for {config.signal_expiry_candles} candles on {config.primary_timeframe} timeframe",
+        expiry_condition=f"Valid for {config.signal_expiry_candles} candles on {config.primary_timeframe} timeframe ({expiry_duration_sec}s)",
         candles_used=len(all_candles),
         futures_decision=futures_decision,
         options_decision=options_decision,
@@ -731,6 +840,8 @@ def _make_no_trade(
     strategy_votes: Optional[List[StrategyVote]] = None,
     confluence_result: Optional[Any] = None,
     hard_gates: Optional[List[Any]] = None,
+    is_timeframe_degraded: bool = False,
+    fallback_timeframe: Optional[str] = None,
 ) -> SignalDecision:
     """Create a NO_TRADE signal with explicit rejection reasons."""
     return SignalDecision(
@@ -752,7 +863,9 @@ def _make_no_trade(
         confluence_result=confluence_result,
         validation_gates=hard_gates or [],
         rejection_reasons=[f"{reason_code}: {reason}"],
-        provenance=DataProvenance.UNAVAILABLE,
+        provenance=DataProvenance.DEGRADED if is_timeframe_degraded else DataProvenance.UNAVAILABLE,
+        is_timeframe_degraded=is_timeframe_degraded,
+        fallback_timeframe=fallback_timeframe,
     )
 
 

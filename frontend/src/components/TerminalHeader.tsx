@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Sparkles, Building2, Bell, BarChart2, ShieldCheck, Globe, Landmark } from 'lucide-react';
+import { Search, Sparkles, Building2, Bell, BarChart2, ShieldCheck, Globe, Landmark, Cloud } from 'lucide-react';
 import { FIIDIINetFlow, MarketBreadth } from '../types/indianMarket';
 
 interface TerminalHeaderProps {
@@ -9,6 +9,7 @@ interface TerminalHeaderProps {
   breadth?: MarketBreadth;
   onOpenAIIntelligence: () => void;
   onOpenPaperTrading: () => void;
+  onOpenCloudDeploy?: () => void;
 }
 
 export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
@@ -18,6 +19,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   breadth,
   onOpenAIIntelligence,
   onOpenPaperTrading,
+  onOpenCloudDeploy,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -111,6 +113,16 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         >
           <Sparkles className="w-4 h-4 animate-pulse text-amber-200 shrink-0" />
           <span className="hidden sm:inline">Gemini AI Market Intel</span>
+        </button>
+
+        {/* InstaBox Cloud 24/7 Button */}
+        <button
+          onClick={onOpenCloudDeploy}
+          className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-sky-500/10 border border-sky-500/40 hover:bg-sky-500/20 text-sky-400 font-bold text-xs transition-all cursor-pointer shadow-lg shadow-sky-500/10"
+          title="Deploy to InstaBox microVM for 24/7 cloud execution"
+        >
+          <Cloud className="w-4 h-4 text-sky-400 shrink-0" />
+          <span className="hidden sm:inline">InstaBox Cloud 24/7</span>
         </button>
 
         {/* Paper Order Terminal Button */}

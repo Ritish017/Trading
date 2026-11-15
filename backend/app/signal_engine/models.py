@@ -270,6 +270,10 @@ class SignalDecision(BaseModel):
     timeframe: str = "15m"
     state: SignalState = SignalState.CANDIDATE
 
+    # Degradation Tracking (Feature 11 / Requirement R2)
+    is_timeframe_degraded: bool = False
+    fallback_timeframe: Optional[str] = None
+
     # Version Freeze Identity
     strategy_version: str = "2026.1.0-FROZEN"
     signal_engine_version: str = "2026.1.0-CERTIFIED"
@@ -400,8 +404,20 @@ class CandidateRecord(BaseModel):
     rvol: Optional[float] = None  # Relative volume
 
 
+class ScanCoverageLedgerEntry(BaseModel):
+    """Authoritative per-instrument scan coverage ledger entry (Requirement R2 / Feature 14)."""
+    symbol: str
+    status: str  # QUALIFIED | WATCHLIST | REJECTED | UNAVAILABLE | SKIPPED
+    gate_failed: Optional[str] = None
+    reason: Optional[str] = None
+    evaluated_at: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+
+
 class ScannerPipelineStats(BaseModel):
-    """Pipeline statistics showing how many instruments were evaluated at each stage."""
+    """
+    Pipeline statistics showing how many instruments were evaluated at each stage.
+    Maintains full backward compatibility while supporting authoritative R2 attrition metrics.
+    """
     universe_size: int = 0
     data_valid: int = 0
     initial_screened: int = 0
@@ -415,6 +431,32 @@ class ScannerPipelineStats(BaseModel):
     scan_duration_ms: float = 0.0
     scan_timestamp: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
 
+    # Authoritative R2 Coverage Ledger Fields
+    requested: int = 0
+    eligible: int = 0
+    evaluated: int = 0
+    unavailable: int = 0
+    skipped: int = 0
+    rejected: int = 0
+    evaluation_timestamp: Optional[str] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        # Synchronize requested <-> universe_size
+        if self.requested == 0 and self.universe_size > 0:
+            self.requested = self.universe_size
+        elif self.universe_size == 0 and self.requested > 0:
+            self.universe_size = self.requested
+
+        # Synchronize eligible <-> initial_screened
+        if self.eligible == 0 and self.initial_screened > 0:
+            self.eligible = self.initial_screened
+        elif self.initial_screened == 0 and self.eligible > 0:
+            self.initial_screened = self.eligible
+
+        # Synchronize evaluation_timestamp <-> scan_timestamp
+        if self.evaluation_timestamp is None:
+            self.evaluation_timestamp = self.scan_timestamp
+
 
 class ScannerResult(BaseModel):
     """Complete result from the market-wide opportunity scanner."""
@@ -422,6 +464,7 @@ class ScannerResult(BaseModel):
     qualified_signals: List[SignalDecision] = Field(default_factory=list)
     watchlist_signals: List[SignalDecision] = Field(default_factory=list)
     rejected_records: List[RejectionRecord] = Field(default_factory=list)
+    coverage_ledger: List[ScanCoverageLedgerEntry] = Field(default_factory=list)
     market_regime: str = "UNKNOWN"
     market_regime_confidence: float = 0.0
     scanner_universe: str = "NIFTY50"
@@ -501,6 +544,47 @@ class SignalEngineConfig(BaseModel):
     # Signal Lifecycle
     signal_expiry_candles: int = Field(default=3, description="Signal expires after this many primary-timeframe candles")
     deduplicate_signals: bool = Field(default=True, description="Prevent duplicate signals for same setup")
+
+    TIMEFRAME_SECONDS: Dict[str, int] = {
+        "1m": 60,
+        "3m": 180,
+        "5m": 300,
+        "15m": 900,
+        "30m": 1800,
+        "1h": 3600,
+        "1d": 86400,
+        "1D": 86400,
+    }
+
+    @property
+    def max_open_positions(self) -> int:
+        return self.max_positions
+
+    def get_expiry_duration_seconds(self) -> int:
+        """
+        Calculate dynamic signal expiry duration in seconds based on primary_timeframe
+        and signal_expiry_candles (Requirement R2 / Feature 12).
+        """
+        tf = str(self.primary_timeframe).strip()
+        candle_sec = self.TIMEFRAME_SECONDS.get(tf)
+        if candle_sec is None:
+            candle_sec = self.TIMEFRAME_SECONDS.get(tf.lower())
+        if candle_sec is None:
+            tf_lower = tf.lower()
+            try:
+                if len(tf_lower) <= 1:
+                    candle_sec = 900
+                elif tf_lower.endswith("m"):
+                    candle_sec = int(tf_lower[:-1]) * 60
+                elif tf_lower.endswith("h"):
+                    candle_sec = int(tf_lower[:-1]) * 3600
+                elif tf_lower.endswith("d"):
+                    candle_sec = int(tf_lower[:-1]) * 86400
+                else:
+                    candle_sec = 900
+            except (ValueError, TypeError):
+                candle_sec = 900
+        return int(self.signal_expiry_candles * candle_sec)
 
 
 # ---------------------------------------------------------------------------

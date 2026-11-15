@@ -120,6 +120,7 @@ class PaperOrderModel(Base):
     configuration_hash = Column(String(100), nullable=True)
     decision_reason = Column(Text, nullable=True)
     rejection_reason = Column(String(255), nullable=True)
+    idempotency_key = Column(String(128), nullable=True, index=True)
     filled_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -140,6 +141,11 @@ class PaperPositionModel(Base):
     margin_locked = Column(Float, nullable=False, default=0.0)
     realized_pnl = Column(Float, default=0.0)
     unrealized_pnl = Column(Float, default=0.0)
+    signal_id = Column(String(100), nullable=True, index=True)
+    candidate_id = Column(String(100), nullable=True)
+    strategy_version = Column(String(50), nullable=True)
+    configuration_hash = Column(String(100), nullable=True)
+    decision_reason = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 class PaperFillModel(Base):
@@ -180,8 +186,33 @@ class PaperClosedTradeModel(Base):
     brokerage = Column(Float, default=20.0)
     taxes = Column(Float, default=0.0)
     realized_pnl = Column(Float, nullable=False)
+    signal_id = Column(String(100), nullable=True, index=True)
+    candidate_id = Column(String(100), nullable=True, index=True)
+    strategy_version = Column(String(50), nullable=True)
+    configuration_hash = Column(String(100), nullable=True)
+    exit_reason = Column(String(50), nullable=False, default="MANUAL")
+    exit_type = Column(String(50), nullable=True, default="MANUAL")
+    stt = Column(Float, default=0.0)
+    exchange_charges = Column(Float, default=0.0)
+    sebi_charges = Column(Float, default=0.0)
+    gst = Column(Float, default=0.0)
+    stamp_duty = Column(Float, default=0.0)
+    slippage = Column(Float, default=0.0)
+    total_frictions = Column(Float, default=0.0)
+    calculation_evidence_json = Column(JSON, nullable=True)
     entry_time = Column(Float, nullable=True)
     closed_at = Column(Float, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class PaperIdempotencyModel(Base):
+    __tablename__ = "paper_idempotency_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    idempotency_key = Column(String(128), unique=True, nullable=False, index=True)
+    account_id = Column(String(100), nullable=False, index=True)
+    order_id = Column(String(100), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="FILLED")
+    response_json = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 # Research Durable Domain Models

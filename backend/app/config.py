@@ -8,8 +8,17 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
     
-    # API Keys
+    # API Keys & AI Providers
     gemini_api_key: Optional[str] = None
+    instabox_api_key: Optional[str] = None
+    gemini_flash_model: str = "gemini-3.8-flash"
+    gemini_pro_model: str = "gemini-3.8-flash"
+    
+    # AMD Token Lab Configuration
+    amd_api_key: Optional[str] = None
+    amd_base_url: str = "https://api.tokenlab.amd.com/v1"
+    amd_model: str = "DeepSeek-V4-Flash"
+    ai_provider: str = "hybrid"  # "hybrid", "gemini", "amd"
     
     # Environment & Deployment Configuration
     apex_env: Optional[str] = None
@@ -18,7 +27,7 @@ class Settings(BaseSettings):
     paper_trading: bool = True
     live_trading: bool = False
     real_trading_enabled: bool = False
-    default_paper_capital: float = 1000000.0
+    default_paper_capital: float = 10000.0
 
     # Broker & Upstox Market Data Settings
     active_broker_provider: str = "UPSTOX" # UPSTOX, FYERS, DHAN, MOCK

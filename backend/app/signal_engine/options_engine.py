@@ -233,18 +233,73 @@ class OptionsEngine:
     @classmethod
     def evaluate(
         cls,
-        symbol: str,
-        underlying_direction: str,  # "LONG" | "SHORT" | "NO_TRADE"
-        spot_price: float,
-        option_chain: Optional[List[Dict[str, Any]]],
-        days_to_expiry: int,
+        symbol: Optional[str] = None,
+        underlying_direction: str = "NO_TRADE",  # "LONG" | "SHORT" | "NO_TRADE"
+        spot_price: float = 0.0,
+        option_chain: Optional[Any] = None,
+        chain: Optional[Any] = None,
+        days_to_expiry: Optional[int] = None,
+        capital: Optional[float] = None,
+        underlying_symbol: Optional[str] = None,
+        underlying_price: Optional[float] = None,
         iv_percentile: Optional[float] = None,  # 0 to 100
         lot_size: int = 50,
         underlying_target_pct: float = 2.0,
+        target_price: Optional[float] = None,
+        stop_loss_price: Optional[float] = None,
+        **kwargs,
     ) -> OptionDecision:
         """
         Evaluate full option chain to select either a naked option or vertical spread.
+        Fails closed with OPTIONS_DATA_INSUFFICIENT if option chain is missing or empty.
         """
+        symbol = symbol or underlying_symbol or "UNKNOWN"
+        spot_price = spot_price if spot_price > 0 else (underlying_price if underlying_price is not None else 0.0)
+        raw_chain = chain if chain is not None else option_chain
+        days_to_expiry = days_to_expiry if days_to_expiry is not None else 14
+
+        # Guard: spot price validity (Fail-Closed)
+        if spot_price <= 0:
+            return OptionDecision(
+                action=OptionAction.OPTIONS_DATA_INSUFFICIENT,
+                symbol=symbol,
+                underlying_direction=underlying_direction,
+                spot_price=spot_price,
+                structure="UNAVAILABLE",
+                legs=[],
+                net_premium=0.0,
+                max_loss=0.0,
+                max_gain=0.0,
+                breakeven=0.0,
+                risk_reward_ratio=0.0,
+                days_to_expiry=days_to_expiry,
+                iv_percentile=iv_percentile,
+                is_valid=False,
+                rejection_reason="INVALID_SPOT_PRICE",
+                rationale="Spot price must be strictly positive.",
+            )
+
+        # Guard: option chain presence (Fail-Closed)
+        if raw_chain is None or len(raw_chain) == 0:
+            return OptionDecision(
+                action=OptionAction.OPTIONS_DATA_INSUFFICIENT,
+                symbol=symbol,
+                underlying_direction=underlying_direction,
+                spot_price=spot_price,
+                structure="UNAVAILABLE",
+                legs=[],
+                net_premium=0.0,
+                max_loss=0.0,
+                max_gain=0.0,
+                breakeven=0.0,
+                risk_reward_ratio=0.0,
+                days_to_expiry=days_to_expiry,
+                iv_percentile=iv_percentile,
+                is_valid=False,
+                rejection_reason="OPTION_CHAIN_DATA_UNAVAILABLE",
+                rationale="No authentic option chain contracts received for symbol.",
+            )
+
         # Guard: direction
         if underlying_direction not in ("LONG", "SHORT"):
             return OptionDecision(
@@ -264,27 +319,6 @@ class OptionsEngine:
                 is_valid=False,
                 rejection_reason="UNDERLYING_DIRECTION_NEUTRAL",
                 rationale="Underlying signal does not present an actionable directional edge.",
-            )
-
-        # Guard: option chain presence
-        if not option_chain or len(option_chain) == 0:
-            return OptionDecision(
-                action=OptionAction.OPTIONS_DATA_INSUFFICIENT,
-                symbol=symbol,
-                underlying_direction=underlying_direction,
-                spot_price=spot_price,
-                structure="UNAVAILABLE",
-                legs=[],
-                net_premium=0.0,
-                max_loss=0.0,
-                max_gain=0.0,
-                breakeven=0.0,
-                risk_reward_ratio=0.0,
-                days_to_expiry=days_to_expiry,
-                iv_percentile=iv_percentile,
-                is_valid=False,
-                rejection_reason="OPTION_CHAIN_DATA_UNAVAILABLE",
-                rationale="No authentic option chain contracts received for symbol.",
             )
 
         if days_to_expiry < 2:
@@ -311,27 +345,53 @@ class OptionsEngine:
         contracts: List[OptionContract] = []
         target_type = OptionType.CALL if underlying_direction == "LONG" else OptionType.PUT
 
-        for raw in option_chain:
+        for raw in raw_chain:
             try:
-                strike = float(raw.get("strike", 0.0))
-                opt_type_str = str(raw.get("option_type", "")).upper()
-                opt_type = OptionType.CALL if "C" in opt_type_str else OptionType.PUT
+                if isinstance(raw, OptionContract):
+                    strike = float(raw.strike)
+                    opt_type = raw.option_type if isinstance(raw.option_type, OptionType) else (
+                        OptionType.CALL if "C" in str(raw.option_type).upper() else OptionType.PUT
+                    )
+                    bid = float(raw.bid)
+                    ask = float(raw.ask)
+                    ltp = float(raw.last_price or ((bid + ask) / 2.0 if (bid + ask) > 0 else 0.0))
+                    vol = int(raw.volume)
+                    oi = int(raw.oi)
+                    oi_chg = int(raw.oi_change)
+                    iv = float(raw.iv)
+                    expiry_val = str(raw.expiry)
+                elif isinstance(raw, dict):
+                    strike = float(raw.get("strike", 0.0))
+                    opt_type_str = str(raw.get("option_type", "")).upper()
+                    opt_type = OptionType.CALL if "C" in opt_type_str else OptionType.PUT
+                    bid = float(raw.get("bid", 0.0))
+                    ask = float(raw.get("ask", 0.0))
+                    ltp = float(raw.get("last_price") or raw.get("ltp") or ((bid + ask) / 2.0 if (bid + ask) > 0 else 0.0))
+                    vol = int(raw.get("volume", 0))
+                    oi = int(raw.get("oi", 0))
+                    oi_chg = int(raw.get("oi_change", 0))
+                    iv = float(raw.get("iv", 0.20))
+                    expiry_val = str(raw.get("expiry", ""))
+                else:
+                    continue
+
+                if strike <= 0:
+                    continue
 
                 if opt_type != target_type:
                     continue
 
-                bid = float(raw.get("bid", 0.0))
-                ask = float(raw.get("ask", 0.0))
-                ltp = float(raw.get("last_price") or raw.get("ltp") or ((bid + ask) / 2.0 if (bid + ask) > 0 else 0.0))
-                vol = int(raw.get("volume", 0))
-                oi = int(raw.get("oi", 0))
-                oi_chg = int(raw.get("oi_change", 0))
-                iv = float(raw.get("iv", 0.20))
                 if iv > 5.0:  # If IV passed as percentage e.g. 20.5
                     iv = iv / 100.0
 
-                mid = (bid + ask) / 2.0 if (bid + ask) > 0 else ltp
-                spread_pct = ((ask - bid) / mid * 100.0) if mid > 0 and ask >= bid else 0.0
+                # Spread calculation — fail closed (999.0%) on missing bid/ask
+                if bid <= 0.0 and ask <= 0.0:
+                    spread_pct = 999.0
+                elif (bid + ask) > 0:
+                    mid = (bid + ask) / 2.0
+                    spread_pct = ((ask - bid) / mid * 100.0) if ask >= bid else 999.0
+                else:
+                    spread_pct = 999.0
 
                 # Compute Greeks
                 greeks = calculate_black_scholes_greeks(
@@ -345,7 +405,7 @@ class OptionsEngine:
                 contracts.append(OptionContract(
                     strike=strike,
                     option_type=opt_type,
-                    expiry=str(raw.get("expiry", "")),
+                    expiry=expiry_val,
                     bid=bid,
                     ask=ask,
                     last_price=ltp,
@@ -385,7 +445,8 @@ class OptionsEngine:
         # Filter by liquidity
         liquid_contracts = [
             c for c in contracts
-            if c.volume >= cls.MIN_VOLUME
+            if c.strike > 0
+            and c.volume >= cls.MIN_VOLUME
             and c.oi >= cls.MIN_OI
             and c.bid_ask_spread_pct <= cls.MAX_BID_ASK_SPREAD_PCT
             and c.last_price > 0
@@ -587,3 +648,10 @@ class OptionsEngine:
             rejection_reason="SPREAD_CRITERIA_UNMET",
             rationale="Could not construct favorable risk-reward spread structure.",
         )
+
+
+# ---------------------------------------------------------------------------
+# Backward Compatibility & E2E Test Compatibility
+# ---------------------------------------------------------------------------
+
+OptionsDecisionEngine = OptionsEngine

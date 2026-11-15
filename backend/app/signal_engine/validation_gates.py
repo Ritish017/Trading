@@ -44,6 +44,8 @@ from backend.app.signal_engine.models import (
     RejectionRecord,
     SignalEngineConfig,
     DataProvenance,
+    StopLossResult,
+    TargetLevel,
 )
 
 logger = logging.getLogger(__name__)
@@ -355,6 +357,139 @@ def gate_stop_determinable(
     )
 
 
+def gate_directional_geometry(
+    direction: str,
+    stop_result: Optional[StopLossResult],
+    entry_price: Optional[float],
+    targets: List[TargetLevel],
+) -> ValidationGate:
+    """
+    HARD GATE: Directional Geometry Validation (Requirement R2 / Feature 13)
+    Enforces strict mathematical bounds:
+    - LONG:  stop_loss < entry_price < target_1 < target_2 < target_3 ...
+    - SHORT: ... < target_3 < target_2 < target_1 < entry_price < stop_loss
+    Fails closed with ValidationGateResult.FAIL on violations.
+    """
+    gate_id = "DIRECTIONAL_GEOMETRY"
+    gate_name = "Directional Geometry Validation"
+
+    if entry_price is None or entry_price <= 0:
+        return _gate(
+            gate_id, gate_name, "HARD",
+            ValidationGateResult.FAIL,
+            reason="Entry price is unavailable or non-positive for geometry validation",
+        )
+
+    if stop_result is None:
+        return _gate(
+            gate_id, gate_name, "HARD",
+            ValidationGateResult.FAIL,
+            reason="Stop loss is unavailable for directional geometry validation",
+        )
+
+    stop_price = _safe_float(
+        stop_result.price if hasattr(stop_result, "price")
+        else (stop_result.get("price") if isinstance(stop_result, dict) else stop_result)
+    )
+    if stop_price is None or stop_price <= 0:
+        return _gate(
+            gate_id, gate_name, "HARD",
+            ValidationGateResult.FAIL,
+            reason="Stop loss price is invalid or non-positive for geometry validation",
+        )
+
+    target_prices: List[float] = []
+    if targets:
+        for t in targets:
+            tp = _safe_float(t.price if hasattr(t, "price") else (t.get("price") if isinstance(t, dict) else t))
+            if tp is not None:
+                if tp <= 0:
+                    return _gate(
+                        gate_id, gate_name, "HARD",
+                        ValidationGateResult.FAIL,
+                        reason=f"Target price (₹{tp:.2f}) must be strictly positive",
+                        actual_value=tp,
+                        threshold_value=0.0,
+                    )
+                target_prices.append(tp)
+
+    if direction == "LONG":
+        # Requirement: stop < entry < targets
+        if stop_price >= entry_price:
+            return _gate(
+                gate_id, gate_name, "HARD",
+                ValidationGateResult.FAIL,
+                reason=f"Invalid LONG trade geometry: stop loss (₹{stop_price:.2f}) must be strictly below entry (₹{entry_price:.2f})",
+                actual_value=stop_price,
+                threshold_value=entry_price,
+            )
+        if target_prices:
+            if target_prices[0] <= entry_price:
+                return _gate(
+                    gate_id, gate_name, "HARD",
+                    ValidationGateResult.FAIL,
+                    reason=f"Invalid LONG trade geometry: target 1 (₹{target_prices[0]:.2f}) must be strictly above entry (₹{entry_price:.2f})",
+                    actual_value=target_prices[0],
+                    threshold_value=entry_price,
+                )
+            for i in range(len(target_prices) - 1):
+                if target_prices[i + 1] <= target_prices[i]:
+                    return _gate(
+                        gate_id, gate_name, "HARD",
+                        ValidationGateResult.FAIL,
+                        reason=(
+                            f"Invalid LONG trade geometry: target {i+2} (₹{target_prices[i+1]:.2f}) "
+                            f"must be strictly above target {i+1} (₹{target_prices[i]:.2f})"
+                        ),
+                        actual_value=target_prices[i + 1],
+                        threshold_value=target_prices[i],
+                    )
+
+    elif direction == "SHORT":
+        # Requirement: targets < entry < stop
+        if stop_price <= entry_price:
+            return _gate(
+                gate_id, gate_name, "HARD",
+                ValidationGateResult.FAIL,
+                reason=f"Invalid SHORT trade geometry: stop loss (₹{stop_price:.2f}) must be strictly above entry (₹{entry_price:.2f})",
+                actual_value=stop_price,
+                threshold_value=entry_price,
+            )
+        if target_prices:
+            if target_prices[0] >= entry_price:
+                return _gate(
+                    gate_id, gate_name, "HARD",
+                    ValidationGateResult.FAIL,
+                    reason=f"Invalid SHORT trade geometry: target 1 (₹{target_prices[0]:.2f}) must be strictly below entry (₹{entry_price:.2f})",
+                    actual_value=target_prices[0],
+                    threshold_value=entry_price,
+                )
+            for i in range(len(target_prices) - 1):
+                if target_prices[i + 1] >= target_prices[i]:
+                    return _gate(
+                        gate_id, gate_name, "HARD",
+                        ValidationGateResult.FAIL,
+                        reason=(
+                            f"Invalid SHORT trade geometry: target {i+2} (₹{target_prices[i+1]:.2f}) "
+                            f"must be strictly below target {i+1} (₹{target_prices[i]:.2f})"
+                        ),
+                        actual_value=target_prices[i + 1],
+                        threshold_value=target_prices[i],
+                    )
+    else:
+        return _gate(
+            gate_id, gate_name, "HARD",
+            ValidationGateResult.FAIL,
+            reason=f"Invalid signal direction '{direction}' for geometry validation",
+        )
+
+    return _gate(
+        gate_id, gate_name, "HARD",
+        ValidationGateResult.PASS,
+        evidence=f"Direction {direction} geometry validated: stop ₹{stop_price:.2f}, entry ₹{entry_price:.2f}, targets {[round(p, 2) for p in target_prices]}",
+    )
+
+
 def gate_risk_reward(
     risk_reward: Optional[float],
     config: SignalEngineConfig,
@@ -395,17 +530,42 @@ def gate_risk_reward(
 
 
 def gate_portfolio_risk(
-    symbol: str,
-    capital_required: Optional[float],
-    portfolio_state: Optional[Dict[str, Any]],
-    config: SignalEngineConfig,
+    *args,
+    **kwargs,
 ) -> ValidationGate:
     """
     HARD GATE 7: Portfolio Risk Gate
-    Checks available capital, max positions, daily loss limit, concentration.
+    Supports dual/polymorphic signatures:
+      - gate_portfolio_risk(portfolio_state, config)
+      - gate_portfolio_risk(symbol, capital_required, portfolio_state, config)
+    Checks available capital, max open positions, daily loss limit, concentration.
     """
     gate_id = "PORTFOLIO_RISK"
     gate_name = "Portfolio Risk Gate"
+
+    symbol: str = ""
+    capital_required: Optional[float] = None
+    portfolio_state: Optional[Dict[str, Any]] = None
+    config: Optional[SignalEngineConfig] = None
+
+    if len(args) == 2:
+        portfolio_state, config = args
+    elif len(args) == 4:
+        symbol, capital_required, portfolio_state, config = args
+    elif len(args) == 1:
+        portfolio_state = args[0]
+        config = kwargs.get("config")
+    elif len(args) == 3:
+        symbol, capital_required, portfolio_state = args
+        config = kwargs.get("config")
+    else:
+        symbol = kwargs.get("symbol", "")
+        capital_required = kwargs.get("capital_required")
+        portfolio_state = kwargs.get("portfolio_state")
+        config = kwargs.get("config")
+
+    if config is None:
+        return _gate(gate_id, gate_name, "HARD", ValidationGateResult.PASS)
 
     if portfolio_state is None:
         # If no portfolio state available, pass with warning
@@ -415,18 +575,42 @@ def gate_portfolio_risk(
             evidence="Portfolio state unavailable — position risk not validated",
         )
 
+    # Extract open position count: check "open_positions_count" OR "open_positions" OR "positions"
+    raw_positions = portfolio_state.get("open_positions")
+    raw_count = portfolio_state.get("open_positions_count")
+    if raw_count is not None:
+        try:
+            open_positions = int(raw_count)
+        except (ValueError, TypeError):
+            open_positions = 0
+    elif raw_positions is not None:
+        if isinstance(raw_positions, (list, tuple, dict, set)):
+            open_positions = len(raw_positions)
+        else:
+            try:
+                open_positions = int(raw_positions)
+            except (ValueError, TypeError):
+                open_positions = 0
+    elif "positions" in portfolio_state and isinstance(portfolio_state["positions"], (list, tuple, dict, set)):
+        open_positions = len(portfolio_state["positions"])
+    else:
+        open_positions = 0
+
+    max_positions_limit = getattr(config, "max_open_positions", None)
+    if max_positions_limit is None:
+        max_positions_limit = getattr(config, "max_positions", 5)
+
     available_capital = _safe_float(portfolio_state.get("available_capital")) or config.capital
-    open_positions = portfolio_state.get("open_positions", 0)
     daily_pnl_pct = _safe_float(portfolio_state.get("daily_pnl_pct")) or 0.0
 
     # Check max positions
-    if open_positions >= config.max_positions:
+    if open_positions >= max_positions_limit:
         return _gate(
             gate_id, gate_name, "HARD",
             ValidationGateResult.FAIL,
-            reason=f"Maximum concurrent positions reached ({open_positions}/{config.max_positions})",
+            reason=f"Maximum open positions reached: Maximum open positions ({open_positions}) reached (limit {max_positions_limit})",
             actual_value=open_positions,
-            threshold_value=config.max_positions,
+            threshold_value=max_positions_limit,
         )
 
     # Check daily loss limit (if losing >3% today, halt new entries)
@@ -458,7 +642,7 @@ def gate_portfolio_risk(
         ValidationGateResult.PASS,
         evidence=(
             f"Capital: ₹{available_capital:,.0f} available, "
-            f"{open_positions}/{config.max_positions} positions open"
+            f"{open_positions}/{max_positions_limit} positions open"
         ),
     )
 
@@ -678,6 +862,8 @@ class ValidationPipeline:
         capital_required: Optional[float],
         portfolio_state: Optional[Dict[str, Any]],
         config: SignalEngineConfig,
+        direction: Optional[str] = None,
+        targets: Optional[List[Any]] = None,
     ) -> Tuple[bool, List[ValidationGate], Optional[str]]:
         """
         Run all HARD GATES.
@@ -715,6 +901,13 @@ class ValidationPipeline:
         gates.append(g)
         if g.result == ValidationGateResult.FAIL:
             return False, gates, g.reason
+
+        # Gate 5b: Directional Geometry Validation (Feature 13 / R2)
+        if direction:
+            g = gate_directional_geometry(direction, stop_result, entry_price, targets or [])
+            gates.append(g)
+            if g.result == ValidationGateResult.FAIL:
+                return False, gates, g.reason
 
         # Gate 6: Risk/Reward
         g = gate_risk_reward(risk_reward, config)

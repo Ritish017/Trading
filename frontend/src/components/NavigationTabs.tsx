@@ -63,10 +63,10 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
     },
     {
       id: 'derivatives' as ActivePage,
-      label: 'Option Chain & F&O',
+      label: 'Option Chain & Bot',
       icon: Layers,
-      badge: 'PCR & OI',
-      badgeColor: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+      badge: 'InstaBox 24/7',
+      badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/40 font-bold',
       color: 'text-sky-400',
     },
     {

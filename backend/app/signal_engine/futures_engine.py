@@ -26,6 +26,7 @@ class FuturesAction(str, Enum):
     BUY_FUTURE = "BUY_FUTURE"
     SELL_FUTURE = "SELL_FUTURE"
     NO_TRADE = "NO_TRADE"
+    FUTURES_DATA_INSUFFICIENT = "FUTURES_DATA_INSUFFICIENT"
 
 
 class OpenInterestPattern(str, Enum):
@@ -107,25 +108,49 @@ class FuturesEngine:
     @classmethod
     def analyze(
         cls,
-        symbol: str,
-        underlying_direction: str,  # "LONG" | "SHORT" | "NO_TRADE"
-        spot_price: float,
-        futures_price: float,
-        days_to_expiry: int,
-        oi: int,
-        volume: int,
-        lot_size: int,
-        underlying_stop: float,
-        underlying_target_1: float,
-        underlying_target_2: float,
+        symbol: Optional[str] = None,
+        underlying_direction: str = "LONG",  # "LONG" | "SHORT" | "NO_TRADE"
+        spot_price: float = 0.0,
+        futures_price: float = 0.0,
+        days_to_expiry: int = 14,
+        oi: int = 0,
+        volume: int = 0,
+        lot_size: int = 50,
+        underlying_stop: Optional[float] = None,
+        underlying_target_1: Optional[float] = None,
+        underlying_target_2: Optional[float] = None,
         oi_change_pct: float = 0.0,
         available_capital: float = 1000000.0,
         margin_per_lot: Optional[float] = None,
         max_capital_allocation_pct: float = 25.0,
+        underlying_symbol: Optional[str] = None,
+        underlying_price: Optional[float] = None,
+        dte: Optional[int] = None,
+        stop_loss_pts: Optional[float] = None,
+        target_pts: Optional[float] = None,
+        **kwargs,
     ) -> FuturesDecision:
         """
         Synthesize underlying opportunity and futures microstructure into a FuturesDecision.
         """
+        symbol = symbol or underlying_symbol or "UNKNOWN"
+        spot_price = spot_price if spot_price > 0 else (underlying_price if underlying_price is not None else 0.0)
+        futures_price = futures_price if futures_price > 0 else spot_price
+        days_to_expiry = days_to_expiry if days_to_expiry is not None else (dte if dte is not None else 14)
+
+        if underlying_stop is None and stop_loss_pts is not None:
+            underlying_stop = (spot_price - stop_loss_pts) if underlying_direction == "LONG" else (spot_price + stop_loss_pts)
+        elif underlying_stop is None:
+            underlying_stop = spot_price * 0.98 if underlying_direction == "LONG" else spot_price * 1.02
+
+        if underlying_target_1 is None and target_pts is not None:
+            underlying_target_1 = (spot_price + target_pts) if underlying_direction == "LONG" else (spot_price - target_pts)
+        elif underlying_target_1 is None:
+            underlying_target_1 = spot_price * 1.03 if underlying_direction == "LONG" else spot_price * 0.97
+
+        if underlying_target_2 is None:
+            underlying_target_2 = underlying_target_1 * 1.02 if underlying_direction == "LONG" else underlying_target_1 * 0.98
+
         if underlying_direction not in ("LONG", "SHORT"):
             return FuturesDecision(
                 action=FuturesAction.NO_TRADE,
@@ -531,3 +556,72 @@ class FuturesEngine:
             rejection_reason=None,
             rationale=rationale,
         )
+
+    @classmethod
+    def evaluate(
+        cls,
+        symbol: Optional[str] = None,
+        spot_price: float = 0.0,
+        futures_price: float = 0.0,
+        days_to_expiry: int = 14,
+        oi: int = 0,
+        oi_change_pct: float = 0.0,
+        volume: int = 0,
+        lot_size: int = 50,
+        capital: float = 1000000.0,
+        underlying_direction: str = "LONG",
+        stop_loss_spot: Optional[float] = None,
+        underlying_stop: Optional[float] = None,
+        target_spot: Optional[float] = None,
+        underlying_target_1: Optional[float] = None,
+        underlying_target_2: Optional[float] = None,
+        underlying_symbol: Optional[str] = None,
+        underlying_price: Optional[float] = None,
+        dte: Optional[int] = None,
+        available_capital: Optional[float] = None,
+        **kwargs,
+    ) -> FuturesDecision:
+        sym = symbol or underlying_symbol or "UNKNOWN"
+        spot = spot_price if spot_price > 0 else (underlying_price if underlying_price is not None else 0.0)
+        fut_px = futures_price if futures_price > 0 else spot
+        dte_days = days_to_expiry if days_to_expiry is not None else (dte if dte is not None else 14)
+        cap = capital if capital is not None else (available_capital if available_capital is not None else 1000000.0)
+
+        resolved_stop = stop_loss_spot if stop_loss_spot is not None else (
+            underlying_stop or (spot * 0.98 if underlying_direction == "LONG" else spot * 1.02)
+        )
+        resolved_t1 = target_spot if target_spot is not None else (
+            underlying_target_1 or (spot * 1.03 if underlying_direction == "LONG" else spot * 0.97)
+        )
+        resolved_t2 = underlying_target_2 or (
+            resolved_t1 * 1.02 if underlying_direction == "LONG" else resolved_t1 * 0.98
+        )
+
+        decision = cls.analyze(
+            symbol=sym,
+            underlying_direction=underlying_direction,
+            spot_price=spot,
+            futures_price=fut_px,
+            days_to_expiry=dte_days,
+            oi=oi,
+            volume=volume,
+            lot_size=lot_size,
+            underlying_stop=resolved_stop,
+            underlying_target_1=resolved_t1,
+            underlying_target_2=resolved_t2,
+            oi_change_pct=oi_change_pct,
+            available_capital=cap,
+            **kwargs,
+        )
+        if decision.rejection_reason == "LOW_FUTURES_LIQUIDITY":
+            volume_lots = volume // max(1, lot_size)
+            if volume_lots < cls.MIN_VOLUME_LOTS:
+                decision.rejection_reason = f"LOW_FUTURES_LIQUIDITY: Insufficient volume ({volume_lots} lots < min {cls.MIN_VOLUME_LOTS})"
+        return decision
+
+
+# ---------------------------------------------------------------------------
+# Backward Compatibility & E2E Test Compatibility
+# ---------------------------------------------------------------------------
+
+FuturesDecisionEngine = FuturesEngine

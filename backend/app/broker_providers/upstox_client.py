@@ -35,6 +35,8 @@ class UpstoxRESTClient:
         self.token = token
         self.base_url = base_url.rstrip("/")
         self.client: Optional[httpx.AsyncClient] = None
+        self._expiry_cache: Dict[str, Tuple[float, List[str]]] = {}
+        self._chain_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
     def _get_headers(self) -> Dict[str, str]:
         return {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
@@ -503,42 +505,175 @@ class UpstoxRESTClient:
         inst_key = get_instrument_key(symbol)
         if not inst_key:
             return {"status": "UNAVAILABLE", "source": "UPSTOX", "reason": "UNKNOWN_INSTRUMENT_KEY", "symbol": symbol, "strikes": []}
-        endpoint = f"/v2/option/chain?instrument_key={inst_key}"
-        if expiry_date:
-            endpoint += f"&expiry_date={expiry_date}"
+
+        now = time.time()
+        cache_key = f"{inst_key}:{expiry_date or 'DEFAULT'}"
+        if cache_key in self._chain_cache:
+            c_time, c_data = self._chain_cache[cache_key]
+            if now - c_time < 15.0:
+                return c_data
+
+        # 1. Resolve available expiries (cached for 10 minutes)
+        available_expiries = []
+        if inst_key in self._expiry_cache and (now - self._expiry_cache[inst_key][0] < 600.0):
+            available_expiries = self._expiry_cache[inst_key][1]
+        else:
+            try:
+                contract_res = await self._request("GET", f"/v2/option/contract?instrument_key={inst_key}")
+                contract_data = contract_res.get("data", [])
+                if contract_data:
+                    from datetime import date
+                    today_str = date.today().isoformat()
+                    valid_expiries = sorted(list(set(
+                        c["expiry"] for c in contract_data
+                        if c.get("expiry") and c["expiry"] >= today_str
+                    )))
+                    available_expiries = valid_expiries
+                    self._expiry_cache[inst_key] = (now, valid_expiries)
+            except Exception as ex:
+                logger.warning("[UPSTOX REST] Failed to auto-resolve expiry date for %s: %s", symbol, ex)
+
+        if not expiry_date and available_expiries:
+            expiry_date = available_expiries[0]
+
+        if not expiry_date:
+            return {
+                "status": "UNAVAILABLE",
+                "source": "UPSTOX",
+                "reason": "NO_ACTIVE_EXPIRIES_FOUND",
+                "symbol": symbol,
+                "spotPrice": None,
+                "atmStrike": None,
+                "pcr": None,
+                "maxPainStrike": None,
+                "totalCallOI": None,
+                "totalPutOI": None,
+                "impliedVolatility": None,
+                "expiryDate": "UNAVAILABLE",
+                "available_expiries": [],
+                "strikes": [],
+            }
+
+        endpoint = f"/v2/option/chain?instrument_key={inst_key}&expiry_date={expiry_date}"
         try:
             chain_data = (await self._request("GET", endpoint)).get("data", [])
         except Exception as e:
             logger.warning("[UPSTOX REST] Option chain unavailable for %s: %s", symbol, e)
             chain_data = []
+
         if not chain_data:
-            return {"status": "UNAVAILABLE", "source": "UPSTOX", "reason": "OPTION_CHAIN_DATA_UNAVAILABLE", "symbol": symbol, "spotPrice": None, "atmStrike": None, "pcr": None, "maxPainStrike": None, "totalCallOI": None, "totalPutOI": None, "impliedVolatility": None, "expiryDate": expiry_date or "UNAVAILABLE", "strikes": []}
+            return {
+                "status": "UNAVAILABLE",
+                "source": "UPSTOX",
+                "reason": "OPTION_CHAIN_DATA_UNAVAILABLE",
+                "symbol": symbol,
+                "spotPrice": None,
+                "atmStrike": None,
+                "pcr": None,
+                "maxPainStrike": None,
+                "totalCallOI": None,
+                "totalPutOI": None,
+                "impliedVolatility": None,
+                "expiryDate": expiry_date,
+                "available_expiries": available_expiries,
+                "strikes": [],
+            }
+
         total_call_oi = total_put_oi = 0
         strikes_payload, iv_list = [], []
+        spot_price = None
+
         for item in chain_data:
             strike_price = float(item.get("strike_price", 0.0))
+            if spot_price is None and item.get("underlying_spot_price"):
+                spot_price = float(item["underlying_spot_price"])
+
             call_data = item.get("call_options", {}).get("market_data", {})
+            call_greeks = item.get("call_options", {}).get("option_greeks", {})
             put_data = item.get("put_options", {}).get("market_data", {})
-            c_oi, p_oi = int(call_data.get("oi", 0) or 0), int(put_data.get("oi", 0) or 0)
-            total_call_oi += c_oi; total_put_oi += p_oi
-            c_iv = float(call_data.get("iv")) if call_data.get("iv") is not None else None
-            p_iv = float(put_data.get("iv")) if put_data.get("iv") is not None else None
-            if c_iv and c_iv > 0: iv_list.append(c_iv)
-            if p_iv and p_iv > 0: iv_list.append(p_iv)
-            strikes_payload.append({"strike": strike_price, "call": {"ltp": float(call_data.get("ltp", 0.0) or 0.0), "oi": c_oi, "volume": int(call_data.get("volume", 0) or 0), "iv": c_iv}, "put": {"ltp": float(put_data.get("ltp", 0.0) or 0.0), "oi": p_oi, "volume": int(put_data.get("volume", 0) or 0), "iv": p_iv}})
-        spot_price = None
-        try: spot_price = (await self.get_full_quote(symbol)).get("ltp")
-        except Exception: pass
-        atm = round(spot_price / 50.0) * 50 if spot_price else (strikes_payload[len(strikes_payload)//2]["strike"] if strikes_payload else None)
-        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else None
+            put_greeks = item.get("put_options", {}).get("option_greeks", {})
+
+            c_oi = int(call_data.get("oi", 0) or 0)
+            p_oi = int(put_data.get("oi", 0) or 0)
+            total_call_oi += c_oi
+            total_put_oi += p_oi
+
+            c_iv = float(call_greeks.get("iv") or call_data.get("iv") or 0.0)
+            p_iv = float(put_greeks.get("iv") or put_data.get("iv") or 0.0)
+            if c_iv > 0:
+                iv_list.append(c_iv)
+            if p_iv > 0:
+                iv_list.append(p_iv)
+
+            strikes_payload.append({
+                "strike": strike_price,
+                "call": {
+                    "ltp": float(call_data.get("ltp", 0.0) or 0.0),
+                    "oi": c_oi,
+                    "volume": int(call_data.get("volume", 0) or 0),
+                    "iv": round(c_iv, 2) if c_iv > 0 else None,
+                    "bid": float(call_data.get("bid_price", 0.0) or 0.0),
+                    "ask": float(call_data.get("ask_price", 0.0) or 0.0),
+                    "delta": float(call_greeks.get("delta", 0.0) or 0.0),
+                    "theta": float(call_greeks.get("theta", 0.0) or 0.0),
+                },
+                "put": {
+                    "ltp": float(put_data.get("ltp", 0.0) or 0.0),
+                    "oi": p_oi,
+                    "volume": int(put_data.get("volume", 0) or 0),
+                    "iv": round(p_iv, 2) if p_iv > 0 else None,
+                    "bid": float(put_data.get("bid_price", 0.0) or 0.0),
+                    "ask": float(put_data.get("ask_price", 0.0) or 0.0),
+                    "delta": float(put_greeks.get("delta", 0.0) or 0.0),
+                    "theta": float(put_greeks.get("theta", 0.0) or 0.0),
+                }
+            })
+
+        # Sort strikes ascending
+        strikes_payload.sort(key=lambda s: s["strike"])
+
+        if spot_price is None:
+            try:
+                spot_price = (await self.get_full_quote(symbol)).get("ltp")
+            except Exception:
+                pass
+
+        if spot_price and spot_price > 0:
+            step = 50.0 if "NIFTY" in symbol.upper() else 20.0
+            atm = round(spot_price / step) * step
+        else:
+            atm = strikes_payload[len(strikes_payload)//2]["strike"] if strikes_payload else None
+
+        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 1.0
+
         max_pain = None
         if strikes_payload:
             min_loss = float("inf")
             for target in strikes_payload:
-                loss = 0.0; t_strike = target["strike"]
+                loss = 0.0
+                t_strike = target["strike"]
                 for item in strikes_payload:
                     s = item["strike"]
                     loss += max(0.0, t_strike - s) * item["call"]["oi"]
                     loss += max(0.0, s - t_strike) * item["put"]["oi"]
-                if loss < min_loss: min_loss, max_pain = loss, t_strike
-        return {"status": "AVAILABLE", "symbol": symbol, "spotPrice": spot_price, "atmStrike": atm, "pcr": pcr, "maxPainStrike": max_pain, "totalCallOI": total_call_oi, "totalPutOI": total_put_oi, "impliedVolatility": round(sum(iv_list)/len(iv_list), 2) if iv_list else None, "expiryDate": expiry_date or "NEAR", "strikes": strikes_payload, "source": "UPSTOX", "is_live": True}
+                if loss < min_loss:
+                    min_loss, max_pain = loss, t_strike
+
+        result = {
+            "status": "AVAILABLE",
+            "symbol": symbol,
+            "spotPrice": spot_price,
+            "atmStrike": atm,
+            "pcr": pcr,
+            "maxPainStrike": max_pain,
+            "totalCallOI": total_call_oi,
+            "totalPutOI": total_put_oi,
+            "impliedVolatility": round(sum(iv_list) / len(iv_list), 2) if iv_list else 15.0,
+            "expiryDate": expiry_date or "NEAR",
+            "available_expiries": available_expiries,
+            "strikes": strikes_payload,
+            "source": "UPSTOX",
+            "is_live": True,
+        }
+        self._chain_cache[cache_key] = (now, result)
+        return result

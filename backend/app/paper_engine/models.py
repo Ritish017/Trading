@@ -101,6 +101,11 @@ class PaperTradeAudit:
     regime_at_entry: str = "NORMAL"
     confluence_at_entry: str = "NEUTRAL"
     regime_at_exit: str = "NORMAL"
+    r_multiple: float = 0.0
+
+    @property
+    def rule_evidence(self) -> List[str]:
+        return self.exit_evidence if self.exit_evidence else self.entry_evidence
 
 
 @dataclass

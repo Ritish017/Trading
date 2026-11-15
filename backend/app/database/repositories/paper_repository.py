@@ -10,6 +10,7 @@ from backend.app.database.models import (
     PaperPositionModel,
     PaperFillModel,
     PaperClosedTradeModel,
+    PaperIdempotencyModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class PaperRepository:
             order.signal_engine_version = order_dict.get("signal_engine_version", getattr(order, "signal_engine_version", None))
             order.configuration_hash = order_dict.get("configuration_hash", getattr(order, "configuration_hash", None))
             order.decision_reason = order_dict.get("decision_reason", getattr(order, "decision_reason", None))
+            order.idempotency_key = order_dict.get("idempotency_key", getattr(order, "idempotency_key", None))
         else:
             order = PaperOrderModel(
                 order_id=order_id,
@@ -89,6 +91,7 @@ class PaperRepository:
                 signal_engine_version=order_dict.get("signal_engine_version"),
                 configuration_hash=order_dict.get("configuration_hash"),
                 decision_reason=order_dict.get("decision_reason"),
+                idempotency_key=order_dict.get("idempotency_key"),
             )
             self.session.add(order)
         await self.session.commit()
@@ -129,6 +132,11 @@ class PaperRepository:
             pos.margin_locked = float(pos_dict.get("marginLocked", pos.margin_locked))
             pos.realized_pnl = float(pos_dict.get("realizedPnL", pos.realized_pnl))
             pos.unrealized_pnl = float(pos_dict.get("unrealizedPnL", pos.unrealized_pnl))
+            pos.signal_id = pos_dict.get("signal_id", getattr(pos, "signal_id", None))
+            pos.candidate_id = pos_dict.get("candidate_id", getattr(pos, "candidate_id", None))
+            pos.strategy_version = pos_dict.get("strategy_version", getattr(pos, "strategy_version", None))
+            pos.configuration_hash = pos_dict.get("configuration_hash", getattr(pos, "configuration_hash", None))
+            pos.decision_reason = pos_dict.get("decision_reason", getattr(pos, "decision_reason", None))
         else:
             pos = PaperPositionModel(
                 position_id=pos_id,
@@ -144,6 +152,11 @@ class PaperRepository:
                 margin_locked=float(pos_dict.get("marginLocked", 0.0)),
                 realized_pnl=float(pos_dict.get("realizedPnL", 0.0)),
                 unrealized_pnl=float(pos_dict.get("unrealizedPnL", 0.0)),
+                signal_id=pos_dict.get("signal_id"),
+                candidate_id=pos_dict.get("candidate_id"),
+                strategy_version=pos_dict.get("strategy_version"),
+                configuration_hash=pos_dict.get("configuration_hash"),
+                decision_reason=pos_dict.get("decision_reason"),
             )
             self.session.add(pos)
         await self.session.commit()
@@ -154,6 +167,7 @@ class PaperRepository:
         await self.session.commit()
 
     async def record_closed_trade(self, trade_dict: Dict[str, Any], account_id: str = "primary_personal_account") -> None:
+        frictions = trade_dict.get("exit_frictions", {})
         trade = PaperClosedTradeModel(
             trade_id=trade_dict.get("id") or f"TRD_{int(time.time()*1000)}",
             account_id=account_id,
@@ -163,10 +177,24 @@ class PaperRepository:
             quantity=int(trade_dict.get("quantity", 1)),
             entry_price=float(trade_dict.get("entryPrice", 0.0)),
             exit_price=float(trade_dict.get("exitPrice", 0.0)),
-            gross_pnl=float(trade_dict.get("realizedPnL", 0.0)),
+            gross_pnl=float(trade_dict.get("grossPnL", trade_dict.get("realizedPnL", 0.0))),
             brokerage=float(trade_dict.get("brokerage", 20.0)),
             taxes=float(trade_dict.get("taxes", 0.0)),
             realized_pnl=float(trade_dict.get("realizedPnL", 0.0)),
+            signal_id=trade_dict.get("signal_id"),
+            candidate_id=trade_dict.get("candidate_id"),
+            strategy_version=trade_dict.get("strategy_version"),
+            configuration_hash=trade_dict.get("configuration_hash"),
+            exit_reason=trade_dict.get("exit_reason", "MANUAL"),
+            exit_type=trade_dict.get("exit_type", "MANUAL"),
+            stt=float(frictions.get("stt", trade_dict.get("stt", 0.0))),
+            exchange_charges=float(frictions.get("exchange_charges", trade_dict.get("exchange_charges", 0.0))),
+            sebi_charges=float(frictions.get("sebi_charges", trade_dict.get("sebi_charges", 0.0))),
+            gst=float(frictions.get("gst", trade_dict.get("gst", 0.0))),
+            stamp_duty=float(frictions.get("stamp_duty", trade_dict.get("stamp_duty", 0.0))),
+            slippage=float(frictions.get("slippage", trade_dict.get("slippage", 0.0))),
+            total_frictions=float(frictions.get("total_friction", trade_dict.get("total_frictions", 0.0))),
+            calculation_evidence_json=trade_dict.get("calculation_evidence_json"),
             entry_time=float(trade_dict.get("timestamp", time.time())),
             closed_at=float(trade_dict.get("closedAt", time.time())),
         )
@@ -180,14 +208,18 @@ class PaperRepository:
         position_dict: Optional[Dict[str, Any]],
         capital: float,
         account_id: str = "primary_personal_account",
+        idempotency_key: Optional[str] = None,
+        order_result: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Executes order, fill, position, and capital update within a single atomic ACID transaction.
+        Also persists idempotency key if provided.
         If ANY step fails, the entire transaction is rolled back: COMPLETE SUCCESS OR COMPLETE ROLLBACK.
         """
         try:
             # 1. Record / Update Order
             order_id = order_dict.get("id") or order_dict.get("order_id") or f"ORD_{int(time.time()*1000)}"
+            effective_idem_key = idempotency_key or order_dict.get("idempotency_key")
             stmt = select(PaperOrderModel).where(PaperOrderModel.order_id == order_id)
             result = await self.session.execute(stmt)
             order = result.scalar_one_or_none()
@@ -213,6 +245,8 @@ class PaperRepository:
                 order.signal_engine_version = order_dict.get("signal_engine_version", getattr(order, "signal_engine_version", None))
                 order.configuration_hash = order_dict.get("configuration_hash", getattr(order, "configuration_hash", None))
                 order.decision_reason = order_dict.get("decision_reason", getattr(order, "decision_reason", None))
+                if effective_idem_key:
+                    order.idempotency_key = effective_idem_key
             else:
                 order = PaperOrderModel(
                     order_id=order_id,
@@ -236,6 +270,7 @@ class PaperRepository:
                     signal_engine_version=order_dict.get("signal_engine_version"),
                     configuration_hash=order_dict.get("configuration_hash"),
                     decision_reason=order_dict.get("decision_reason"),
+                    idempotency_key=effective_idem_key,
                 )
                 self.session.add(order)
 
@@ -276,6 +311,11 @@ class PaperRepository:
                     pos.margin_locked = float(position_dict.get("marginLocked", pos.margin_locked))
                     pos.realized_pnl = float(position_dict.get("realizedPnL", pos.realized_pnl))
                     pos.unrealized_pnl = float(position_dict.get("unrealizedPnL", pos.unrealized_pnl))
+                    pos.signal_id = position_dict.get("signal_id", getattr(pos, "signal_id", None))
+                    pos.candidate_id = position_dict.get("candidate_id", getattr(pos, "candidate_id", None))
+                    pos.strategy_version = position_dict.get("strategy_version", getattr(pos, "strategy_version", None))
+                    pos.configuration_hash = position_dict.get("configuration_hash", getattr(pos, "configuration_hash", None))
+                    pos.decision_reason = position_dict.get("decision_reason", getattr(pos, "decision_reason", None))
                 else:
                     pos = PaperPositionModel(
                         position_id=pos_id,
@@ -291,6 +331,11 @@ class PaperRepository:
                         margin_locked=float(position_dict.get("marginLocked", 0.0)),
                         realized_pnl=float(position_dict.get("realizedPnL", 0.0)),
                         unrealized_pnl=float(position_dict.get("unrealizedPnL", 0.0)),
+                        signal_id=position_dict.get("signal_id"),
+                        candidate_id=position_dict.get("candidate_id"),
+                        strategy_version=position_dict.get("strategy_version"),
+                        configuration_hash=position_dict.get("configuration_hash"),
+                        decision_reason=position_dict.get("decision_reason"),
                     )
                     self.session.add(pos)
 
@@ -308,6 +353,31 @@ class PaperRepository:
                 )
                 self.session.add(account)
 
+            # 5. Save Idempotency Key (Feature 17)
+            if effective_idem_key:
+                idem_payload = order_result or {
+                    "status": order.status,
+                    "order_id": order_id,
+                    "position": position_dict,
+                    "fill": fill_dict,
+                    "available_capital": capital,
+                }
+                idem_stmt = select(PaperIdempotencyModel).where(PaperIdempotencyModel.idempotency_key == effective_idem_key)
+                idem_res = await self.session.execute(idem_stmt)
+                existing_idem = idem_res.scalar_one_or_none()
+                if existing_idem:
+                    existing_idem.response_json = idem_payload
+                    existing_idem.status = idem_payload.get("status", "FILLED")
+                else:
+                    idem_rec = PaperIdempotencyModel(
+                        idempotency_key=effective_idem_key,
+                        account_id=account_id,
+                        order_id=order_id,
+                        status=idem_payload.get("status", "FILLED"),
+                        response_json=idem_payload,
+                    )
+                    self.session.add(idem_rec)
+
             # Commit all operations atomically
             await self.session.commit()
         except Exception:
@@ -322,14 +392,15 @@ class PaperRepository:
         account_id: str = "primary_personal_account",
     ) -> None:
         """
-        Closes position, logs closed trade, and updates capital inside a single atomic transaction.
+        Closes position, logs closed trade with full forensic evidence, and updates capital inside a single atomic transaction.
         """
         try:
             # 1. Remove open position
             del_stmt = delete(PaperPositionModel).where(PaperPositionModel.position_id == pos_id)
             await self.session.execute(del_stmt)
 
-            # 2. Record closed trade
+            # 2. Record closed trade with enriched forensic evidence
+            frictions = closed_trade_dict.get("exit_frictions", {})
             trade = PaperClosedTradeModel(
                 trade_id=closed_trade_dict.get("id") or f"TRD_{int(time.time()*1000)}",
                 account_id=account_id,
@@ -339,10 +410,24 @@ class PaperRepository:
                 quantity=int(closed_trade_dict.get("quantity", 1)),
                 entry_price=float(closed_trade_dict.get("entryPrice", 0.0)),
                 exit_price=float(closed_trade_dict.get("exitPrice", 0.0)),
-                gross_pnl=float(closed_trade_dict.get("realizedPnL", 0.0)),
+                gross_pnl=float(closed_trade_dict.get("grossPnL", closed_trade_dict.get("realizedPnL", 0.0))),
                 brokerage=float(closed_trade_dict.get("brokerage", 20.0)),
                 taxes=float(closed_trade_dict.get("taxes", 0.0)),
                 realized_pnl=float(closed_trade_dict.get("realizedPnL", 0.0)),
+                signal_id=closed_trade_dict.get("signal_id"),
+                candidate_id=closed_trade_dict.get("candidate_id"),
+                strategy_version=closed_trade_dict.get("strategy_version"),
+                configuration_hash=closed_trade_dict.get("configuration_hash"),
+                exit_reason=closed_trade_dict.get("exit_reason", "MANUAL"),
+                exit_type=closed_trade_dict.get("exit_type", "MANUAL"),
+                stt=float(frictions.get("stt", closed_trade_dict.get("stt", 0.0))),
+                exchange_charges=float(frictions.get("exchange_charges", closed_trade_dict.get("exchange_charges", 0.0))),
+                sebi_charges=float(frictions.get("sebi_charges", closed_trade_dict.get("sebi_charges", 0.0))),
+                gst=float(frictions.get("gst", closed_trade_dict.get("gst", 0.0))),
+                stamp_duty=float(frictions.get("stamp_duty", closed_trade_dict.get("stamp_duty", 0.0))),
+                slippage=float(frictions.get("slippage", closed_trade_dict.get("slippage", 0.0))),
+                total_frictions=float(frictions.get("total_friction", closed_trade_dict.get("total_frictions", 0.0))),
+                calculation_evidence_json=closed_trade_dict.get("calculation_evidence_json"),
                 entry_time=float(closed_trade_dict.get("timestamp", time.time())),
                 closed_at=float(closed_trade_dict.get("closedAt", time.time())),
             )
@@ -359,6 +444,13 @@ class PaperRepository:
         except Exception:
             await self.session.rollback()
             raise
+
+    async def load_idempotency_cache(self, account_id: str = "primary_personal_account") -> Dict[str, Dict[str, Any]]:
+        """Loads all persisted idempotency keys and cached response payloads for an account."""
+        stmt = select(PaperIdempotencyModel).where(PaperIdempotencyModel.account_id == account_id)
+        res = await self.session.execute(stmt)
+        records = res.scalars().all()
+        return {r.idempotency_key: r.response_json for r in records}
 
     async def load_portfolio_state(self, account_id: str = "primary_personal_account", default_capital: float = 1000000.0) -> Tuple[float, Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
         """Loads persistent portfolio state from relational database."""
@@ -387,6 +479,11 @@ class PaperRepository:
                 "unrealizedPnL": p.unrealized_pnl,
                 "realizedPnL": p.realized_pnl,
                 "unrealizedPnLPercent": round((p.current_price - p.entry_price) / p.entry_price * 100.0, 2) if p.entry_price > 0 else 0.0,
+                "signal_id": p.signal_id,
+                "candidate_id": p.candidate_id,
+                "strategy_version": p.strategy_version,
+                "configuration_hash": p.configuration_hash,
+                "decision_reason": p.decision_reason,
                 "timestamp": p.updated_at.timestamp() if p.updated_at else time.time()
             }
 
@@ -406,9 +503,24 @@ class PaperRepository:
                 "quantity": t.quantity,
                 "entryPrice": t.entry_price,
                 "exitPrice": t.exit_price,
+                "grossPnL": t.gross_pnl,
                 "realizedPnL": t.realized_pnl,
                 "brokerage": t.brokerage,
                 "taxes": t.taxes,
+                "signal_id": t.signal_id,
+                "candidate_id": t.candidate_id,
+                "strategy_version": t.strategy_version,
+                "configuration_hash": t.configuration_hash,
+                "exit_reason": t.exit_reason,
+                "exit_type": t.exit_type,
+                "stt": t.stt,
+                "exchange_charges": t.exchange_charges,
+                "sebi_charges": t.sebi_charges,
+                "gst": t.gst,
+                "stamp_duty": t.stamp_duty,
+                "slippage": t.slippage,
+                "total_frictions": t.total_frictions,
+                "calculation_evidence_json": t.calculation_evidence_json,
                 "closedAt": t.closed_at,
                 "timestamp": t.entry_time or t.closed_at
             })
@@ -435,6 +547,10 @@ class PaperRepository:
         # Delete fills
         await self.session.execute(
             delete(PaperFillModel).where(PaperFillModel.account_id == account_id)
+        )
+        # Delete idempotency keys
+        await self.session.execute(
+            delete(PaperIdempotencyModel).where(PaperIdempotencyModel.account_id == account_id)
         )
         await self.session.commit()
         logger.info(f"[DB PAPER] Reset account {account_id} to capital ₹{new_capital} in database.")

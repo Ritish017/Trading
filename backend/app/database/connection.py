@@ -128,6 +128,54 @@ async def init_db():
                     await conn.execute(text("ALTER TABLE paper_orders ADD COLUMN configuration_hash VARCHAR(100)"))
                 if "decision_reason" not in cols:
                     await conn.execute(text("ALTER TABLE paper_orders ADD COLUMN decision_reason TEXT"))
+                if "idempotency_key" not in cols:
+                    await conn.execute(text("ALTER TABLE paper_orders ADD COLUMN idempotency_key VARCHAR(128)"))
+
+            # Check paper_positions columns
+            cols_pos = await get_table_columns(conn, "paper_positions")
+            if cols_pos:
+                if "signal_id" not in cols_pos:
+                    await conn.execute(text("ALTER TABLE paper_positions ADD COLUMN signal_id VARCHAR(100)"))
+                if "candidate_id" not in cols_pos:
+                    await conn.execute(text("ALTER TABLE paper_positions ADD COLUMN candidate_id VARCHAR(100)"))
+                if "strategy_version" not in cols_pos:
+                    await conn.execute(text("ALTER TABLE paper_positions ADD COLUMN strategy_version VARCHAR(50)"))
+                if "configuration_hash" not in cols_pos:
+                    await conn.execute(text("ALTER TABLE paper_positions ADD COLUMN configuration_hash VARCHAR(100)"))
+                if "decision_reason" not in cols_pos:
+                    await conn.execute(text("ALTER TABLE paper_positions ADD COLUMN decision_reason TEXT"))
+
+            # Check paper_closed_trades columns
+            cols_closed = await get_table_columns(conn, "paper_closed_trades")
+            if cols_closed:
+                if "signal_id" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN signal_id VARCHAR(100)"))
+                if "candidate_id" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN candidate_id VARCHAR(100)"))
+                if "strategy_version" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN strategy_version VARCHAR(50)"))
+                if "configuration_hash" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN configuration_hash VARCHAR(100)"))
+                if "exit_reason" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN exit_reason VARCHAR(50) DEFAULT 'MANUAL'"))
+                if "exit_type" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN exit_type VARCHAR(50) DEFAULT 'MANUAL'"))
+                if "stt" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN stt FLOAT DEFAULT 0.0"))
+                if "exchange_charges" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN exchange_charges FLOAT DEFAULT 0.0"))
+                if "sebi_charges" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN sebi_charges FLOAT DEFAULT 0.0"))
+                if "gst" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN gst FLOAT DEFAULT 0.0"))
+                if "stamp_duty" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN stamp_duty FLOAT DEFAULT 0.0"))
+                if "slippage" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN slippage FLOAT DEFAULT 0.0"))
+                if "total_frictions" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN total_frictions FLOAT DEFAULT 0.0"))
+                if "calculation_evidence_json" not in cols_closed:
+                    await conn.execute(text("ALTER TABLE paper_closed_trades ADD COLUMN calculation_evidence_json JSON"))
 
             # 2. Check paper_fills columns
             cols_fills = await get_table_columns(conn, "paper_fills")

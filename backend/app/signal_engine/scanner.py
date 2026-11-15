@@ -34,6 +34,7 @@ from backend.app.signal_engine.models import (
     CandidateRecord,
     DataProvenance,
     RejectionRecord,
+    ScanCoverageLedgerEntry,
     ScannerPipelineStats,
     ScannerResult,
     SignalDecision,
@@ -89,10 +90,14 @@ class OpportunityScanner:
                 logger.info("Scanner cooldown — returning cached result")
                 return cached
 
-        stats = ScannerPipelineStats(universe_size=len(config.universe))
+        stats = ScannerPipelineStats(
+            universe_size=len(config.universe),
+            requested=len(config.universe),
+        )
         qualified_signals: List[SignalDecision] = []
         watchlist_signals: List[SignalDecision] = []
         rejected_records: List[RejectionRecord] = []
+        coverage_ledger: List[ScanCoverageLedgerEntry] = []
 
         # Determine market session
         is_market_open = self._check_market_open(market_data_service)
@@ -130,27 +135,52 @@ class OpportunityScanner:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for result in results:
+        for symbol, result in zip(config.universe, results):
             if isinstance(result, Exception):
-                logger.warning(f"Scanner evaluation error: {result}")
-                rejected_records.append(RejectionRecord(
-                    symbol="UNKNOWN",
-                    gate_failed="EVALUATION_ERROR",
+                logger.warning(f"Scanner evaluation error for {symbol}: {result}")
+                rej = RejectionRecord(
+                    symbol=symbol,
+                    gate_failed="DATA_ACQUISITION",
                     gate_type="HARD",
+                    reason=str(result),
+                )
+                rejected_records.append(rej)
+                stats.unavailable += 1
+                coverage_ledger.append(ScanCoverageLedgerEntry(
+                    symbol=symbol,
+                    status="UNAVAILABLE",
+                    gate_failed="DATA_ACQUISITION",
                     reason=str(result),
                 ))
                 continue
 
             if result is None:
+                stats.unavailable += 1
+                coverage_ledger.append(ScanCoverageLedgerEntry(
+                    symbol=symbol,
+                    status="UNAVAILABLE",
+                    gate_failed="DATA_ACQUISITION",
+                    reason="Evaluation returned no result",
+                ))
                 continue
 
             signal, rejection = result
             if signal and signal.direction != SignalDirection.NO_TRADE:
                 if signal.quality_grade == SignalQualityGrade.NO_TRADE:
                     watchlist_signals.append(signal)
+                    coverage_ledger.append(ScanCoverageLedgerEntry(
+                        symbol=symbol,
+                        status="WATCHLIST",
+                        reason=signal.why_reasons[0] if getattr(signal, "why_reasons", None) else "Watchlist setup",
+                    ))
                 else:
                     qualified_signals.append(signal)
                     signal_store.upsert_signal(signal)
+                    coverage_ledger.append(ScanCoverageLedgerEntry(
+                        symbol=symbol,
+                        status="QUALIFIED",
+                        reason=signal.why_reasons[0] if getattr(signal, "why_reasons", None) else "Qualified setup",
+                    ))
 
                 obs_dict = {
                     "candidate_id": getattr(signal, "candidate_id", None) or f"CAND_{signal.symbol}_{int(time.time()*1000)}",
@@ -187,6 +217,22 @@ class OpportunityScanner:
                 rejected_records.append(rejection)
                 signal_store.add_rejection(rejection)
 
+                if rejection.gate_failed == "DATA_ACQUISITION":
+                    ledger_status = "UNAVAILABLE"
+                elif rejection.gate_failed == "INITIAL_SCREEN":
+                    ledger_status = "SKIPPED"
+                else:
+                    ledger_status = "REJECTED"
+                    stats.rejected += 1
+
+                if not (signal and signal.direction != SignalDirection.NO_TRADE):
+                    coverage_ledger.append(ScanCoverageLedgerEntry(
+                        symbol=symbol,
+                        status=ledger_status,
+                        gate_failed=rejection.gate_failed,
+                        reason=rejection.reason,
+                    ))
+
                 rej_obs = {
                     "candidate_id": getattr(rejection, "candidate_id", None) or f"CAND_{rejection.symbol}_{int(time.time()*1000)}",
                     "symbol": rejection.symbol,
@@ -202,18 +248,35 @@ class OpportunityScanner:
                 }
                 signal_store.add_candidate_observation(rej_obs)
 
+            elif signal and signal.direction == SignalDirection.NO_TRADE:
+                stats.rejected += 1
+                coverage_ledger.append(ScanCoverageLedgerEntry(
+                    symbol=symbol,
+                    status="REJECTED",
+                    gate_failed="NO_TRADE",
+                    reason=signal.rejection_reasons[0] if getattr(signal, "rejection_reasons", None) else "Setup rejected",
+                ))
+
         # Sort by score descending
         qualified_signals.sort(key=lambda s: s.opportunity_score, reverse=True)
 
         # Update final stats
         stats.qualified = len(qualified_signals)
         stats.scan_duration_ms = round((time.time() - scan_start) * 1000, 1)
+        stats.evaluation_timestamp = stats.scan_timestamp
+
+        # Authoritative attrition reconciliation: requested == unavailable + skipped + evaluated
+        stats.requested = len(config.universe)
+        accounted = stats.unavailable + stats.skipped + stats.evaluated
+        if stats.requested > accounted:
+            stats.unavailable += (stats.requested - accounted)
 
         scan_result = ScannerResult(
             pipeline_stats=stats,
             qualified_signals=qualified_signals,
             watchlist_signals=watchlist_signals[:10],  # Top 10 watchlist
             rejected_records=rejected_records[:50],    # Last 50 rejections
+            coverage_ledger=coverage_ledger,
             market_regime=market_regime,
             market_regime_confidence=regime_confidence,
             scanner_universe=f"NSE Liquid ({len(config.universe)} symbols)",
@@ -246,6 +309,7 @@ class OpportunityScanner:
         Wrapped in semaphore to control concurrency.
         """
         async with self._semaphore:
+            symbol_evaluated = False
             try:
                 # Acquire data
                 quote, candles_by_tf = await self._fetch_symbol_data(
@@ -253,6 +317,7 @@ class OpportunityScanner:
                 )
 
                 if not quote or not candles_by_tf:
+                    stats.unavailable += 1
                     return None, RejectionRecord(
                         symbol=symbol,
                         gate_failed="DATA_ACQUISITION",
@@ -265,6 +330,7 @@ class OpportunityScanner:
                 # Basic screening (pre-pipeline performance optimization)
                 passed, screen_reason = self._initial_screen(symbol, quote, candles_by_tf, config)
                 if not passed:
+                    stats.skipped += 1
                     return None, RejectionRecord(
                         symbol=symbol,
                         gate_failed="INITIAL_SCREEN",
@@ -273,6 +339,9 @@ class OpportunityScanner:
                     )
 
                 stats.initial_screened += 1
+                stats.eligible += 1
+                stats.evaluated += 1
+                symbol_evaluated = True
 
                 # Build candidate
                 candidate = CandidateRecord(
@@ -298,12 +367,21 @@ class OpportunityScanner:
 
             except Exception as e:
                 logger.warning(f"Evaluation error for {symbol}: {e}")
-                return None, RejectionRecord(
-                    symbol=symbol,
-                    gate_failed="PIPELINE_ERROR",
-                    gate_type="HARD",
-                    reason=f"Evaluation exception: {str(e)[:200]}",
-                )
+                if not symbol_evaluated:
+                    stats.unavailable += 1
+                    return None, RejectionRecord(
+                        symbol=symbol,
+                        gate_failed="DATA_ACQUISITION",
+                        gate_type="HARD",
+                        reason=f"Evaluation exception: {str(e)[:200]}",
+                    )
+                else:
+                    return None, RejectionRecord(
+                        symbol=symbol,
+                        gate_failed="PIPELINE_ERROR",
+                        gate_type="HARD",
+                        reason=f"Evaluation exception: {str(e)[:200]}",
+                    )
 
     async def _fetch_symbol_data(
         self,

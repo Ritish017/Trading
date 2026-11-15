@@ -237,3 +237,304 @@ def test_cross_account_authorization_isolation(client, monkeypatch):
         json={"capital": 600000.0, "account_id": "account_A"}
     )
     assert res.status_code == 200
+
+
+# ===========================================================================
+# Endpoint Authentication Hardening Tests (Milestone 1 R1/R5)
+# ===========================================================================
+
+from backend.app.signal_engine.signal_store import signal_store as apex_signal_store
+from backend.app.signal_engine.models import (
+    SignalDecision,
+    SignalDirection,
+    SignalState,
+    SignalQualityGrade,
+    StopLossResult,
+    TargetLevel,
+    PositionSizing,
+)
+
+
+def test_unauthenticated_paper_positions_rejected(client, monkeypatch):
+    """FAIL-CLOSED: Unauthenticated GET /api/paper/positions must return 401."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+    res = client.get("/api/paper/positions")
+    assert res.status_code == 401
+    assert "Invalid or missing API authentication token" in res.json()["detail"]
+
+
+def test_authenticated_paper_positions_succeeds(client, monkeypatch):
+    """GET /api/paper/positions with valid X-API-Key returns portfolio summary."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+    res = client.get(
+        "/api/paper/positions",
+        headers={"X-API-Key": "secret-test-token-xyz"}
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "positions" in data
+    assert "available_capital" in data
+    assert "capital" in data
+
+
+def test_cross_account_positions_query_rejected(client, monkeypatch):
+    """Cross-account GET /api/paper/positions?account_id=... must return 403."""
+    monkeypatch.setattr(settings, "api_auth_token", "token_a:account_a,token_b:account_b")
+    res = client.get(
+        "/api/paper/positions?account_id=account_b",
+        headers={"X-API-Key": "token_a"}
+    )
+    assert res.status_code == 403
+    assert "is not authorized" in res.json()["detail"]
+
+
+def test_unauthenticated_signal_paper_trade_rejected(client, monkeypatch):
+    """Anonymous POST /api/signals/{id}/paper-trade must return 401."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+    res = client.post(
+        "/api/signals/test_sig_001/paper-trade",
+        json={"signal_id": "test_sig_001"}
+    )
+    assert res.status_code == 401
+
+
+def test_signal_paper_trade_cross_account_rejected(client, monkeypatch):
+    """Account A cannot execute a signal trade for Account B (403 Forbidden)."""
+    monkeypatch.setattr(settings, "api_auth_token", "token_a:account_a,token_b:account_b")
+
+    sig = SignalDecision(
+        signal_id="sig_auth_cross",
+        symbol="SBIN.NS",
+        direction=SignalDirection.LONG,
+        state=SignalState.QUALIFIED,
+        quality_grade=SignalQualityGrade.A,
+        entry=800.0,
+        stop_loss=StopLossResult(price=780.0, method="ATR"),
+        targets=[TargetLevel(price=840.0, level=1, method="RR", method_description="1:2 RR")],
+        position_size=PositionSizing(
+            method="FIXED_RISK",
+            capital=1000000.0,
+            risk_per_trade_pct=1.0,
+            max_risk_amount=10000.0,
+            entry_price=800.0,
+            stop_price=780.0,
+            risk_per_share=20.0,
+            quantity=10,
+            capital_required=8000.0,
+            maximum_loss=200.0,
+        ),
+    )
+    apex_signal_store.upsert_signal(sig)
+
+    res = client.post(
+        "/api/signals/sig_auth_cross/paper-trade",
+        headers={"X-API-Key": "token_a"},
+        json={"signal_id": "sig_auth_cross", "account_id": "account_b"}
+    )
+    assert res.status_code == 403
+    assert "is not authorized" in res.json()["detail"]
+
+
+def test_signal_paper_trade_unqualified_rejected(client, monkeypatch):
+    """Signals not in QUALIFIED state must be rejected with 400."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+
+    sig = SignalDecision(
+        signal_id="sig_unqualified",
+        symbol="INFY.NS",
+        direction=SignalDirection.LONG,
+        state=SignalState.CANDIDATE,  # Not QUALIFIED!
+        quality_grade=SignalQualityGrade.A,
+        entry=1800.0,
+        stop_loss=StopLossResult(price=1750.0, method="ATR"),
+    )
+    apex_signal_store.upsert_signal(sig)
+
+    res = client.post(
+        "/api/signals/sig_unqualified/paper-trade",
+        headers={"X-API-Key": "secret-test-token-xyz"},
+        json={"signal_id": "sig_unqualified"}
+    )
+    assert res.status_code == 400
+    assert "Only QUALIFIED signals can be executed" in res.json()["detail"]
+
+
+def test_signal_paper_trade_expired_rejected(client, monkeypatch):
+    """Expired signals must be rejected with 400."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+
+    sig = SignalDecision(
+        signal_id="sig_expired",
+        symbol="RELIANCE.NS",
+        direction=SignalDirection.LONG,
+        state=SignalState.QUALIFIED,
+        quality_grade=SignalQualityGrade.A,
+        entry=2800.0,
+        stop_loss=StopLossResult(price=2750.0, method="ATR"),
+        expiry="2020-01-01T00:00:00Z",  # Expired in past
+    )
+    apex_signal_store.upsert_signal(sig)
+
+    res = client.post(
+        "/api/signals/sig_expired/paper-trade",
+        headers={"X-API-Key": "secret-test-token-xyz"},
+        json={"signal_id": "sig_expired"}
+    )
+    assert res.status_code == 400
+    assert "expired" in res.json()["detail"].lower()
+
+
+def test_signal_paper_trade_malformed_timestamp_rejected(client, monkeypatch):
+    """FAIL-CLOSED: Malformed expiry timestamps must be rejected with 400."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+
+    for malformed in ["not-a-valid-timestamp", "2026-99-99T99:99:99", "abc123xyz"]:
+        sig = SignalDecision(
+            signal_id=f"sig_malformed_{abs(hash(malformed))}",
+            symbol="RELIANCE.NS",
+            direction=SignalDirection.LONG,
+            state=SignalState.QUALIFIED,
+            quality_grade=SignalQualityGrade.A,
+            entry=2800.0,
+            stop_loss=StopLossResult(price=2750.0, method="ATR"),
+            expiry=malformed,
+        )
+        apex_signal_store.upsert_signal(sig)
+
+        res = client.post(
+            f"/api/signals/{sig.signal_id}/paper-trade",
+            headers={"X-API-Key": "secret-test-token-xyz"},
+            json={"signal_id": sig.signal_id}
+        )
+        assert res.status_code == 400
+        assert "invalid or expired signal timestamp" in res.json()["detail"].lower()
+
+
+def test_signal_paper_trade_naive_past_timestamp_rejected(client, monkeypatch):
+    """FAIL-CLOSED: Offset-naive past timestamp must be parsed and rejected with 400."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+
+    sig = SignalDecision(
+        signal_id="sig_naive_past",
+        symbol="RELIANCE.NS",
+        direction=SignalDirection.LONG,
+        state=SignalState.QUALIFIED,
+        quality_grade=SignalQualityGrade.A,
+        entry=2800.0,
+        stop_loss=StopLossResult(price=2750.0, method="ATR"),
+        expiry="2020-01-01 12:00:00",
+    )
+    apex_signal_store.upsert_signal(sig)
+
+    res = client.post(
+        "/api/signals/sig_naive_past/paper-trade",
+        headers={"X-API-Key": "secret-test-token-xyz"},
+        json={"signal_id": "sig_naive_past"}
+    )
+    assert res.status_code == 400
+    assert "invalid or expired signal timestamp" in res.json()["detail"].lower()
+
+
+def test_signal_paper_trade_aware_utc_past_timestamp_rejected(client, monkeypatch):
+    """FAIL-CLOSED: Offset-aware UTC past timestamps must be rejected with 400."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+
+    for aware_past in ["2020-01-01T12:00:00Z", "2020-01-01T12:00:00+00:00"]:
+        sig = SignalDecision(
+            signal_id=f"sig_aware_past_{abs(hash(aware_past))}",
+            symbol="RELIANCE.NS",
+            direction=SignalDirection.LONG,
+            state=SignalState.QUALIFIED,
+            quality_grade=SignalQualityGrade.A,
+            entry=2800.0,
+            stop_loss=StopLossResult(price=2750.0, method="ATR"),
+            expiry=aware_past,
+        )
+        apex_signal_store.upsert_signal(sig)
+
+        res = client.post(
+            f"/api/signals/{sig.signal_id}/paper-trade",
+            headers={"X-API-Key": "secret-test-token-xyz"},
+            json={"signal_id": sig.signal_id}
+        )
+        assert res.status_code == 400
+        assert "invalid or expired signal timestamp" in res.json()["detail"].lower()
+
+
+def test_signal_paper_trade_future_valid_timestamp_accepted(client, monkeypatch):
+    """Signals with valid future expiry timestamp pass validation and fill order."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+
+    sig = SignalDecision(
+        signal_id="sig_future_valid",
+        symbol="TCS.NS",
+        direction=SignalDirection.LONG,
+        state=SignalState.QUALIFIED,
+        quality_grade=SignalQualityGrade.A,
+        entry=3800.0,
+        stop_loss=StopLossResult(price=3700.0, method="ATR"),
+        targets=[TargetLevel(price=4000.0, level=1, method="RR", method_description="1:2 RR")],
+        position_size=PositionSizing(
+            method="FIXED_RISK",
+            capital=1000000.0,
+            risk_per_trade_pct=1.0,
+            max_risk_amount=10000.0,
+            entry_price=3800.0,
+            stop_price=3700.0,
+            risk_per_share=100.0,
+            quantity=5,
+            capital_required=19000.0,
+            maximum_loss=500.0,
+        ),
+        expiry="2035-01-01T12:00:00Z",
+    )
+    apex_signal_store.upsert_signal(sig)
+
+    res = client.post(
+        "/api/signals/sig_future_valid/paper-trade",
+        headers={"X-API-Key": "secret-test-token-xyz"},
+        json={"signal_id": "sig_future_valid"}
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["order_result"]["status"] == "FILLED"
+
+
+def test_authenticated_signal_paper_trade_succeeds(client, monkeypatch):
+    """Valid QUALIFIED signal executed by authenticated caller fills order."""
+    monkeypatch.setattr(settings, "api_auth_token", "secret-test-token-xyz")
+
+    sig = SignalDecision(
+        signal_id="sig_valid_exec",
+        symbol="TCS.NS",
+        direction=SignalDirection.LONG,
+        state=SignalState.QUALIFIED,
+        quality_grade=SignalQualityGrade.A,
+        entry=3800.0,
+        stop_loss=StopLossResult(price=3700.0, method="ATR"),
+        targets=[TargetLevel(price=4000.0, level=1, method="RR", method_description="1:2 RR")],
+        position_size=PositionSizing(
+            method="FIXED_RISK",
+            capital=1000000.0,
+            risk_per_trade_pct=1.0,
+            max_risk_amount=10000.0,
+            entry_price=3800.0,
+            stop_price=3700.0,
+            risk_per_share=100.0,
+            quantity=5,
+            capital_required=19000.0,
+            maximum_loss=500.0,
+        ),
+    )
+    apex_signal_store.upsert_signal(sig)
+
+    res = client.post(
+        "/api/signals/sig_valid_exec/paper-trade",
+        headers={"X-API-Key": "secret-test-token-xyz"},
+        json={"signal_id": "sig_valid_exec"}
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["order_result"]["status"] == "FILLED"
+    assert data["signal"]["state"] == "TRIGGERED"
+

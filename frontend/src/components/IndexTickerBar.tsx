@@ -76,18 +76,7 @@ export const IndexTickerBar: React.FC<IndexTickerBarProps> = ({ indices = [], fe
           const data = await res.json();
           if (data && data.worker_status && data.worker_status !== 'NOT_STARTED') {
             setWorkerData(data);
-            return;
           }
-        }
-        // Direct probe fallback if serverless proxy is cold or not started
-        try {
-          const probeRes = await fetch('https://apex-market-worker-probe.onrender.com/api/worker/status', { mode: 'cors' });
-          if (probeRes.ok) {
-            const probeData = await probeRes.json();
-            setWorkerData(probeData);
-          }
-        } catch {
-          // quiet if probe offline
         }
       } catch {
         // quiet in dev or offline

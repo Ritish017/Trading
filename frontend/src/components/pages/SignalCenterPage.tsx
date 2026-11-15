@@ -8,6 +8,8 @@ import {
   Cpu, Sparkles, GitBranch, ListFilter, Star, Award, X
 } from 'lucide-react';
 
+import { getAuthHeaders } from '../../utils/auth';
+
 const API = '';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -843,19 +845,27 @@ const SignalCenterPage: React.FC = () => {
     try {
       const res = await fetch(`${API}/api/signals/${signal.signal_id}/paper-trade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': 'apex_default_dev_key' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ signal_id: signal.signal_id }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setPaperTradeStatus(`✓ ${signal.direction} ${signal.symbol.replace('.NS', '')} — Paper order placed`);
+        const orderResult = data.order_result;
+        if (orderResult?.status === 'FILLED') {
+          const fillPrice = orderResult.fill?.price ?? orderResult.fill_price ?? signal.entry;
+          setPaperTradeStatus(`✓ ${signal.direction} ${signal.symbol.replace('.NS', '')} — Filled at ₹${Number(fillPrice).toFixed(2)}`);
+        } else if (orderResult?.status === 'REJECTED') {
+          setPaperTradeStatus(`✗ Order Rejected: ${orderResult.reason || 'Risk limit exceeded'}`);
+        } else {
+          setPaperTradeStatus(`⚠ Order Status: ${orderResult?.status || 'Unknown'}`);
+        }
         setTimeout(() => setPaperTradeStatus(null), 4000);
       } else {
-        setPaperTradeStatus(`✗ ${data.detail || 'Paper trade failed'}`);
+        setPaperTradeStatus(`✗ ${data.detail || data.reason || `Paper trade failed (${res.status})`}`);
         setTimeout(() => setPaperTradeStatus(null), 4000);
       }
-    } catch (err) {
-      setPaperTradeStatus('✗ Paper trade request failed');
+    } catch (err: any) {
+      setPaperTradeStatus(`✗ Paper trade error: ${err?.message || 'Network failure'}`);
       setTimeout(() => setPaperTradeStatus(null), 4000);
     }
   }, []);

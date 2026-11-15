@@ -69,13 +69,38 @@ strategy_agent = StrategyResearchAgent(api_key=settings.gemini_api_key)
 strategy_copilot_agent = StrategyCopilotAgent(api_key=settings.gemini_api_key)
 chief_market_analyst = ChiefMarketAnalyst(api_key=settings.gemini_api_key)
 
+from backend.app.ai_engine.news_engine import NewsSentimentEngine
+from backend.app.signal_engine.nifty_derivatives_bot import NiftyDerivativesBot
+
+news_sentiment_engine = NewsSentimentEngine(api_key=settings.gemini_api_key)
+nifty_derivatives_bot = NiftyDerivativesBot(
+    market_data_service=market_data_service,
+    paper_engine=paper_engine,
+    news_engine=news_sentiment_engine,
+    daily_loss_limit_pct=2.0,
+    risk_per_trade_pct=1.0,
+    initial_capital=settings.default_paper_capital,
+)
+bot_scan_task: Optional[asyncio.Task] = None
+
 active_ws_connections: Set[WebSocket] = set()
 
 async def on_normalized_tick_received(tick: NormalizedTick):
     """Callback triggered whenever a normalized tick is received from MarketDataService."""
     updated_candles = candle_aggregator.process_tick(tick)
-    # Update paper trading mark-to-market
-    paper_engine.update_market_price(tick.symbol, tick.ltp)
+    # Authoritative tick processing and automated exit evaluation (Feature 18 & 19)
+    exit_events = paper_engine.process_market_tick(
+        symbol=tick.symbol,
+        ltp=tick.ltp,
+        high=getattr(tick, "high", None),
+        low=getattr(tick, "low", None),
+        open_price=getattr(tick, "open", None),
+    )
+    for ev in exit_events:
+        try:
+            await paper_engine.sync_close_to_db(ev.pos_id, ev.trade, ev.account_id)
+        except Exception as e:
+            logger.warning(f"[DB PAPER] Failed to persist automated exit: {e}")
 
     payload = {
         "type": "TICK",
@@ -111,25 +136,71 @@ async def ensure_initialized():
             logger.warning(f"market_data_service.initialize non-fatal error: {e}")
         _initialized = True
 
+async def _nifty_bot_autonomous_loop():
+    logger.info("[NIFTY BOT] Autonomous background scanner loop initiated.")
+    while True:
+        try:
+            await asyncio.sleep(60)
+            if nifty_derivatives_bot.auto_trade_enabled:
+                await nifty_derivatives_bot.scan_and_evaluate(force_scan=False)
+        except asyncio.CancelledError:
+            logger.info("[NIFTY BOT] Autonomous background scanner cancelled.")
+            break
+        except Exception as e:
+            logger.warning(f"[NIFTY BOT] Autonomous loop non-fatal error: {e}")
+
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
+    global bot_scan_task
     logger.info(f"Starting APEX Quant Lab Backend in {settings.environment} mode.")
-    await ensure_initialized()
     try:
-        default_symbols = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "NIFTY 50", "BANKNIFTY", "INDIA VIX"]
-        await market_data_service.subscribe(default_symbols)
-        # Avoid hanging on websockets in short-lived serverless invocations
-        if not os.environ.get("VERCEL"):
-            await market_data_service.connect_websocket(on_normalized_tick_received)
-    except Exception as e:
-        logger.warning(f"WebSocket background feed non-fatal warning: {e}")
-    yield
-    logger.info("Shutting down APEX Quant Lab Backend...")
-    if hasattr(market_data_service.active_provider, "disconnect"):
+        await ensure_initialized()
         try:
-            await market_data_service.active_provider.disconnect()
-        except Exception:
-            pass
+            default_symbols = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "NIFTY 50", "BANKNIFTY", "INDIA VIX"]
+            await market_data_service.subscribe(default_symbols)
+            # Avoid hanging on websockets in short-lived serverless invocations
+            if not os.environ.get("VERCEL"):
+                await market_data_service.connect_websocket(on_normalized_tick_received)
+        except Exception as e:
+            logger.warning(f"WebSocket background feed non-fatal warning: {e}")
+
+        # Start autonomous NIFTY derivatives background scanner
+        bot_scan_task = asyncio.create_task(_nifty_bot_autonomous_loop())
+
+        yield
+    finally:
+        logger.info("Shutting down APEX Quant Lab Backend...")
+        # 1. Cancel autonomous bot background task
+        if bot_scan_task and not bot_scan_task.done():
+            bot_scan_task.cancel()
+            try:
+                await bot_scan_task
+            except asyncio.CancelledError:
+                pass
+
+        # 2. Gracefully close all active client WebSockets
+        if active_ws_connections:
+            logger.info(f"Closing {len(active_ws_connections)} active client WebSocket(s)...")
+            for ws in list(active_ws_connections):
+                try:
+                    await ws.close(code=1001, reason="Server shutting down")
+                except Exception:
+                    pass
+            active_ws_connections.clear()
+
+        # 3. Guarantee provider & feed disconnection
+        if hasattr(market_data_service, "disconnect"):
+            try:
+                await market_data_service.disconnect()
+                logger.info("MarketDataService disconnected cleanly.")
+            except Exception as e:
+                logger.warning(f"Error disconnecting MarketDataService: {e}")
+        elif hasattr(market_data_service.active_provider, "disconnect"):
+            try:
+                await market_data_service.active_provider.disconnect()
+                logger.info("Active MarketDataProvider disconnected cleanly.")
+            except Exception as e:
+                logger.warning(f"Error disconnecting active provider: {e}")
 
 app.router.lifespan_context = app_lifespan
 
@@ -170,14 +241,14 @@ async def worker_health():
         repo = WorkerRepository(s)
         st = await repo.get_worker_status("apex-market-worker")
         
-        # If database has no heartbeat or is stale, attempt fallback read from live Render worker probe
+        # If database has no heartbeat or is stale, attempt fallback read from local loopback worker probe if configured
         if st.get("worker_status") in ("NOT_STARTED", "UNKNOWN") or st.get("is_stale", True):
-            render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
-            if render_worker_url:
+            local_worker_url = os.environ.get("LOCAL_WORKER_URL")
+            if local_worker_url and any(h in local_worker_url for h in ("127.0.0.1", "localhost")):
                 try:
                     import httpx
-                    async with httpx.AsyncClient(timeout=3.0) as client:
-                        resp = await client.get(f"{render_worker_url.rstrip('/')}/health/worker")
+                    async with httpx.AsyncClient(timeout=2.0) as client:
+                        resp = await client.get(f"{local_worker_url.rstrip('/')}/health/worker")
                         if resp.status_code == 200:
                             return resp.json()
                 except Exception:
@@ -209,14 +280,14 @@ async def get_worker_status():
         repo = WorkerRepository(s)
         st = await repo.get_worker_status("apex-market-worker")
         
-        # If database has no heartbeat or is stale, attempt fallback read from live Render worker probe
+        # If database has no heartbeat or is stale, attempt fallback read from local loopback worker probe if configured
         if st.get("worker_status") in ("NOT_STARTED", "UNKNOWN") or st.get("is_stale", True):
-            render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
-            if render_worker_url:
+            local_worker_url = os.environ.get("LOCAL_WORKER_URL")
+            if local_worker_url and any(h in local_worker_url for h in ("127.0.0.1", "localhost")):
                 try:
                     import httpx
-                    async with httpx.AsyncClient(timeout=3.0) as client:
-                        resp = await client.get(f"{render_worker_url.rstrip('/')}/api/worker/status")
+                    async with httpx.AsyncClient(timeout=2.0) as client:
+                        resp = await client.get(f"{local_worker_url.rstrip('/')}/api/worker/status")
                         if resp.status_code == 200:
                             return resp.json()
                 except Exception:
@@ -240,14 +311,14 @@ async def get_session_report(session_date: Optional[str] = None):
     except Exception as e:
         logger.warning(f"[API] DB session report query notice: {e}")
 
-    # Fallback read from live Render worker probe if database returned nothing
-    render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
-    if render_worker_url:
+    # Fallback read from local loopback worker probe if configured and database returned nothing
+    local_worker_url = os.environ.get("LOCAL_WORKER_URL")
+    if local_worker_url and any(h in local_worker_url for h in ("127.0.0.1", "localhost")):
         try:
             import httpx
             params = {"session_date": session_date} if session_date else {}
-            async with httpx.AsyncClient(timeout=4.0) as client:
-                resp = await client.get(f"{render_worker_url.rstrip('/')}/api/session/report", params=params)
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{local_worker_url.rstrip('/')}/api/session/report", params=params)
                 if resp.status_code == 200:
                     return resp.json()
         except Exception:
@@ -310,13 +381,13 @@ async def get_session_checkpoints(session_date: Optional[str] = None):
     except Exception as e:
         logger.warning(f"[API] DB checkpoints query notice: {e}")
 
-    render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
-    if render_worker_url:
+    local_worker_url = os.environ.get("LOCAL_WORKER_URL")
+    if local_worker_url and any(h in local_worker_url for h in ("127.0.0.1", "localhost")):
         try:
             import httpx
             params = {"session_date": session_date} if session_date else {}
-            async with httpx.AsyncClient(timeout=4.0) as client:
-                resp = await client.get(f"{render_worker_url.rstrip('/')}/api/session/checkpoints", params=params)
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{local_worker_url.rstrip('/')}/api/session/checkpoints", params=params)
                 if resp.status_code == 200:
                     return resp.json()
         except Exception:
@@ -359,8 +430,8 @@ async def get_audit_events(
     except Exception as e:
         logger.warning(f"[API] DB audit events query notice: {e}")
 
-    render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
-    if render_worker_url:
+    local_worker_url = os.environ.get("LOCAL_WORKER_URL")
+    if local_worker_url and any(h in local_worker_url for h in ("127.0.0.1", "localhost")):
         try:
             import httpx
             params = {"limit": limit, "offset": offset}
@@ -370,8 +441,8 @@ async def get_audit_events(
                 params["event_type"] = event_type
             if symbol:
                 params["symbol"] = symbol
-            async with httpx.AsyncClient(timeout=4.0) as client:
-                resp = await client.get(f"{render_worker_url.rstrip('/')}/api/audit/events", params=params)
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{local_worker_url.rstrip('/')}/api/audit/events", params=params)
                 if resp.status_code == 200:
                     return resp.json()
         except Exception:
@@ -383,12 +454,12 @@ async def get_audit_events(
 @app.get("/api/session/status")
 async def get_session_status():
     """Returns 100% cloud autonomy session state, clock progress, and certification status."""
-    render_worker_url = os.environ.get("RENDER_WORKER_URL", "https://apex-market-worker-probe.onrender.com")
-    if render_worker_url:
+    local_worker_url = os.environ.get("LOCAL_WORKER_URL")
+    if local_worker_url and any(h in local_worker_url for h in ("127.0.0.1", "localhost")):
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(f"{render_worker_url.rstrip('/')}/api/session/status")
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{local_worker_url.rstrip('/')}/api/session/status")
                 if resp.status_code == 200:
                     return resp.json()
         except Exception:
@@ -594,8 +665,8 @@ async def get_market_data_diagnostic():
     }
 
 @app.get("/api/market/option-chain/{symbol}")
-async def get_option_chain(symbol: str):
-    return await market_data_service.get_option_chain(symbol)
+async def get_option_chain(symbol: str, expiry: Optional[str] = Query(default=None)):
+    return await market_data_service.get_option_chain(symbol, expiry=expiry)
 
 @app.get("/api/market/fii-dii")
 async def get_fii_dii():
@@ -967,20 +1038,31 @@ async def place_paper_order(order: PaperOrderRequest, auth: AccountContext = Dep
     target_account = order.account_id or auth.account_id
     res = paper_engine.execute_order(order, account_id=target_account)
     if res.get("status") == "FILLED":
-        await paper_engine.sync_order_to_db(order.model_dump(), res["position"], target_account)
+        await paper_engine.sync_order_to_db(order.model_dump(), res["position"], target_account, order_result=res)
     trader_profile_mgr.record_trade(order.model_dump())
     return res
 
+@app.post("/api/paper/validate-order")
+async def validate_paper_order(order: PaperOrderRequest, auth: AccountContext = Depends(verify_api_key)):
+    """Pre-flight validation endpoint for order geometry, risk gates, and signals."""
+    authorize_account_access(auth, order.account_id)
+    target_account = order.account_id or auth.account_id
+    valid, reason = paper_engine.validate_order_pre_submission(order, account_id=target_account)
+    return {"valid": valid, "reason": reason}
+
 @app.get("/api/paper/positions")
-async def get_paper_positions(account_id: Optional[str] = None, auth: Optional[AccountContext] = Depends(verify_api_key_optional)):
-    """Returns the canonical unified paper trading portfolio."""
-    if account_id:
-        if not auth:
-            raise HTTPException(status_code=401, detail="Authentication required to view specific account positions.")
-        authorize_account_access(auth, account_id)
-    summary = paper_engine.get_portfolio_summary(account_id=account_id or (auth.account_id if auth else None))
-    if not summary.get("performance", {}).get("total_trades"):
-        summary["performance"] = paper_bridge.get_performance_summary()
+async def get_paper_positions(
+    account_id: Optional[str] = None,
+    auth: AccountContext = Depends(verify_api_key),
+):
+    """
+    Returns the canonical unified paper trading portfolio for the authenticated account.
+    Enforces fail-closed authentication: unauthenticated callers are rejected with 401.
+    Enforces account isolation: callers cannot inspect other accounts' positions (403).
+    """
+    target_account = account_id or auth.account_id
+    authorize_account_access(auth, target_account)
+    summary = paper_engine.get_portfolio_summary(account_id=target_account)
     return summary
 
 @app.post("/api/paper/close/{pos_id}")
@@ -1841,6 +1923,7 @@ async def challenge_fundamental_thesis(symbol: str, req: FundamentalCopilotReque
 # ---------------------------------------------------------------------------
 # Phase 8: Paper Trading Bridge & Data Health Endpoints
 # ---------------------------------------------------------------------------
+from dataclasses import asdict, is_dataclass
 from backend.app.paper_engine.models import ResearchLifecycleState, ExitReason
 from backend.app.paper_engine.bridge import paper_bridge
 from backend.app.paper_engine.drift_engine import ModelDriftDetector
@@ -1860,7 +1943,17 @@ async def get_paper_performance():
 @app.get("/api/paper/audits")
 async def get_paper_trade_audits():
     """Returns complete forensic audit logs for closed paper trades."""
-    return {"audits": [asdict(a) for a in paper_bridge.trade_audits]}
+    res = []
+    for a in paper_bridge.trade_audits:
+        if is_dataclass(a):
+            res.append(asdict(a))
+        elif isinstance(a, dict):
+            res.append(a)
+        elif hasattr(a, "dict"):
+            res.append(a.dict())
+        else:
+            res.append(vars(a))
+    return {"audits": res}
 
 
 class PaperTransitionRequest(BaseModel):
@@ -1892,7 +1985,10 @@ async def list_research_candidates():
 @app.get("/api/paper/drift/{strategy_id}")
 async def get_model_drift_report(strategy_id: str):
     """Evaluates statistical and friction drift between backtest and paper execution."""
-    audits = [a for a in paper_bridge.trade_audits if a.strategy_id == strategy_id]
+    audits = [
+        a for a in paper_bridge.trade_audits
+        if (getattr(a, "strategy_id", None) or (a.get("strategy_id") if isinstance(a, dict) else None)) == strategy_id
+    ]
     report = ModelDriftDetector.evaluate_drift(
         strategy_id=strategy_id,
         backtest_metrics={"win_rate_pct": 55.0, "sharpe_ratio": 1.4, "avg_slippage": 40.0},
@@ -2455,28 +2551,100 @@ async def paper_trade_from_signal(
     auth: AccountContext = Depends(verify_api_key),
 ):
     """
-    Converts a qualified signal into a paper trade order.
-    Uses the signal's computed entry price, stop, and quantity from position sizing.
+    Converts a qualified signal into an authoritative paper trade order.
+    Uses the signal's computed entry price, stop, targets, and sizing.
     Passes through the risk engine before executing.
 
-    Requires authentication. The signal must be in QUALIFIED state.
+    Requires authentication. The signal must be in QUALIFIED state and unexpired.
     """
+    if req.signal_id and req.signal_id != signal_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mismatched signal_id between path ('{signal_id}') and body ('{req.signal_id}')."
+        )
+
     signal = apex_signal_store.get_signal_by_id(signal_id)
     if not signal:
         raise HTTPException(status_code=404, detail=f"Signal {signal_id} not found")
 
+    # 1. State Validation: Only QUALIFIED signals can be converted into orders
+    sig_state = getattr(signal.state, "value", signal.state)
+    if sig_state != "QUALIFIED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot paper trade signal in '{sig_state}' state. Only QUALIFIED signals can be executed."
+        )
+
+    # 2. Quality Grade Validation
     q_grade = getattr(signal.quality_grade, "value", signal.quality_grade)
     if q_grade in ("NO TRADE", "NO_TRADE"):
         raise HTTPException(status_code=400, detail="Cannot paper trade a NO TRADE signal")
 
+    # 3. Expiration Timestamp Validation
+    if signal.expiry:
+        try:
+            from datetime import datetime, timezone
+            if isinstance(signal.expiry, datetime):
+                expiry_dt = signal.expiry
+            else:
+                expiry_raw = str(signal.expiry).strip()
+                if expiry_raw.endswith("Z"):
+                    expiry_raw = expiry_raw[:-1] + "+00:00"
+                try:
+                    expiry_dt = datetime.fromisoformat(expiry_raw)
+                except ValueError:
+                    # Attempt numeric unix epoch timestamp
+                    expiry_dt = datetime.fromtimestamp(float(expiry_raw), tz=timezone.utc)
+
+            if expiry_dt.tzinfo is None:
+                expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+            else:
+                expiry_dt = expiry_dt.astimezone(timezone.utc)
+
+            if datetime.now(timezone.utc) > expiry_dt:
+                signal.state = "EXPIRED"
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid or expired signal timestamp"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Invalid signal expiry timestamp '{signal.expiry}': {e}")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or expired signal timestamp"
+            )
+
+    # 4. Entry and Stop Loss Presence
     if not signal.entry or not signal.stop_loss:
         raise HTTPException(status_code=400, detail="Signal missing entry price or stop loss")
 
+    # 5. Directional Geometry Validation
+    sig_dir = getattr(signal.direction, "value", signal.direction)
+    stop_price = getattr(signal.stop_loss, "price", None)
+    if stop_price is None:
+        try:
+            stop_price = float(signal.stop_loss)
+        except (ValueError, TypeError):
+            stop_price = signal.entry
+
+    if sig_dir == "LONG" and stop_price >= signal.entry:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid LONG trade geometry: stop loss (₹{stop_price}) must be below entry (₹{signal.entry})"
+        )
+    elif sig_dir == "SHORT" and stop_price <= signal.entry:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid SHORT trade geometry: stop loss (₹{stop_price}) must be above entry (₹{signal.entry})"
+        )
+
+    # 6. Tenant and Account Authorization
     target_account = req.account_id or auth.account_id
     authorize_account_access(auth, target_account)
 
-    # Build paper order from signal
-    sig_dir = getattr(signal.direction, "value", signal.direction)
+    # 7. Order Construction
     side = "BUY" if sig_dir == "LONG" else "SELL"
     quantity = req.quantity_override or (
         signal.position_size.quantity if signal.position_size else 1
@@ -2485,12 +2653,12 @@ async def paper_trade_from_signal(
     order_req = PaperOrderRequest(
         symbol=signal.symbol,
         companyName=signal.symbol,
-        productType="MIS",  # Intraday for signal trades
+        productType="MIS",  # Intraday for systematic signal trades
         side=side,
         quantity=quantity,
         price=signal.entry,
         targetPrice=signal.targets[0].price if signal.targets else None,
-        stopLoss=signal.stop_loss.price,
+        stopLoss=stop_price,
         order_type="MARKET",
         exchange=signal.exchange,
         source=f"SIGNAL_{signal_id[:8]}",
@@ -2498,10 +2666,10 @@ async def paper_trade_from_signal(
         idempotency_key=f"signal_{signal_id}",
     )
 
+    # 8. Execution through Authoritative Paper Engine
     res = paper_engine.execute_order(order_req, account_id=target_account)
     if res.get("status") == "FILLED":
         await paper_engine.sync_order_to_db(order_req.model_dump(), res["position"], target_account)
-        # Update signal state
         signal.state = "TRIGGERED"
 
     return {
@@ -2691,6 +2859,194 @@ async def get_signal_detail(signal_id: str):
     if not signal:
         raise HTTPException(status_code=404, detail=f"Signal {signal_id} not found")
     return signal.dict()
+
+
+# ---------------------------------------------------------------------------
+# NIFTY 50 Autonomous Derivatives Bot & News Sentiment Endpoints
+# ---------------------------------------------------------------------------
+
+class NiftyBotToggleRequest(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/nifty-bot/status")
+async def get_nifty_bot_status():
+    """
+    Returns real-time state, active strategy, regime, Greeks, sentiment score,
+    circuit breaker status, and active open positions for the NIFTY derivatives bot.
+    """
+    return nifty_derivatives_bot.get_bot_status()
+
+
+@app.post("/api/nifty-bot/scan")
+async def run_nifty_bot_scan(force_scan: bool = Query(default=True)):
+    """
+    Triggers an on-demand quantitative scan and potential paper execution cycle
+    across spot, futures basis, options Greeks, and news catalysts.
+    """
+    return await nifty_derivatives_bot.scan_and_evaluate(force_scan=force_scan)
+
+
+@app.post("/api/nifty-bot/toggle")
+async def toggle_nifty_bot(req: NiftyBotToggleRequest):
+    """
+    Arms or disarms autonomous market-hours execution for the NIFTY bot.
+    """
+    new_state = nifty_derivatives_bot.toggle_auto_trade(req.enabled)
+    return {
+        "auto_trade_enabled": new_state,
+        "bot_state": nifty_derivatives_bot.state.value,
+        "is_market_open": nifty_derivatives_bot.is_indian_market_hours(),
+    }
+
+
+@app.get("/api/news/sentiment")
+async def get_market_news_sentiment(force_refresh: bool = Query(default=False)):
+    """
+    Fetches real-time Indian financial news (ET, Moneycontrol, Livemint)
+    and returns Gemini Flash NLP sentiment scoring with macro catalyst classification.
+    """
+    return await news_sentiment_engine.get_market_sentiment(force_refresh=force_refresh)
+
+
+@app.get("/api/news/headlines")
+async def get_market_news_headlines():
+    """
+    Scrapes live RSS headlines directly from Economic Times, Moneycontrol, and Livemint.
+    """
+    headlines = await news_sentiment_engine.fetch_rss_headlines()
+    return {
+        "count": len(headlines),
+        "headlines": headlines,
+    }
+
+
+class GeminiKeyRequest(BaseModel):
+    api_key: Optional[str] = None
+    amd_api_key: Optional[str] = None
+    provider_preference: Optional[str] = None
+
+
+class InstaBoxDeployRequest(BaseModel):
+    api_key: Optional[str] = None
+    machine_name: str = "apex-quant-lab"
+    gemini_api_key: Optional[str] = None
+    amd_api_key: Optional[str] = None
+
+
+@app.get("/api/nifty-bot/rules")
+async def get_nifty_bot_rules():
+    """Returns dynamic trading rules synthesized by J.A.R.V.I.S."""
+    rules = [r.model_dump() for r in nifty_derivatives_bot.rule_engine.rules.values()]
+    return {
+        "count": len(rules),
+        "active_count": len(nifty_derivatives_bot.rule_engine.get_active_rules()),
+        "rules": rules,
+    }
+
+
+@app.post("/api/nifty-bot/rules/evolve")
+async def evolve_nifty_bot_rules():
+    """Triggers J.A.R.V.I.S. reflection & rule synthesis via Gemini Pro."""
+    result = await nifty_derivatives_bot.rule_engine.evolve_rules_with_gemini()
+    return result
+
+
+@app.post("/api/nifty-bot/rules/toggle/{rule_id}")
+async def toggle_nifty_bot_rule(rule_id: str):
+    """Enables or pauses a specific dynamic trading rule."""
+    rule = nifty_derivatives_bot.rule_engine.toggle_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {"rule_id": rule_id, "status": rule.status, "rule": rule.model_dump()}
+
+
+@app.get("/api/nifty-bot/journal")
+async def get_nifty_bot_journal():
+    """Returns J.A.R.V.I.S. persistent trade memory journal."""
+    entries = [e.model_dump() for e in nifty_derivatives_bot.rule_engine.journal]
+    return {
+        "count": len(entries),
+        "journal": entries,
+    }
+
+
+@app.get("/api/ai/models")
+async def get_ai_models():
+    """Discovers and returns all available models and telemetry across Gemini and AMD Token Lab."""
+    from backend.app.ai_engine.hybrid_ai import hybrid_ai
+    telemetry = await hybrid_ai.get_system_telemetry()
+    return {
+        "status": "SUCCESS",
+        "telemetry": telemetry,
+        "fast_model": "gemini-3.8-flash",
+        "reasoning_model": "gemini-3.8-flash",
+        "amd_model": "DeepSeek-V4-Flash",
+        "has_gemini_key": bool(os.getenv("GEMINI_API_KEY")),
+        "has_amd_key": bool(os.getenv("AMD_API_KEY")),
+    }
+
+
+@app.post("/api/ai/set-key")
+async def set_ai_key(req: GeminiKeyRequest):
+    """Dynamically updates Gemini and AMD Token Lab credentials and provider routing."""
+    updated = []
+    if req.api_key and req.api_key.strip():
+        key = req.api_key.strip()
+        os.environ["GEMINI_API_KEY"] = key
+        news_sentiment_engine.api_key = key
+        from backend.app.ai_engine.gemini_client import genai
+        news_sentiment_engine.client = genai.Client(api_key=key)
+        nifty_derivatives_bot.rule_engine.gemini_client.update_api_key(key)
+        from backend.app.ai_engine.hybrid_ai import hybrid_ai
+        hybrid_ai.gemini_client.update_api_key(key)
+        updated.append("GEMINI_API_KEY")
+
+    if req.amd_api_key and req.amd_api_key.strip():
+        amd_key = req.amd_api_key.strip()
+        os.environ["AMD_API_KEY"] = amd_key
+        from backend.app.ai_engine.hybrid_ai import hybrid_ai
+        hybrid_ai.amd_client.api_key = amd_key
+        updated.append("AMD_API_KEY")
+
+    if req.provider_preference:
+        from backend.app.ai_engine.hybrid_ai import hybrid_ai
+        hybrid_ai.preferred_provider = req.provider_preference
+        updated.append(f"Routing preference: {req.provider_preference}")
+
+    return {
+        "status": "SUCCESS",
+        "updated": updated,
+        "message": f"AI Engine credentials updated: {', '.join(updated) if updated else 'No changes'}.",
+    }
+
+
+@app.get("/api/instabox/status")
+async def get_instabox_status():
+    """Checks InstaBox cloud connectivity and lists machines."""
+    from backend.app.cloud.instabox_deployer import InstaBoxDeployer
+    deployer = InstaBoxDeployer()
+    auth = await deployer.verify_auth()
+    machines = await deployer.list_machines() if auth.get("authenticated") else []
+    return {
+        "has_api_key": bool(deployer.api_key),
+        "auth": auth,
+        "machines": machines,
+    }
+
+
+@app.post("/api/instabox/deploy")
+async def deploy_to_instabox(req: InstaBoxDeployRequest):
+    """Deploys APEX Quant Lab to InstaBox microVM for 24/7 cloud execution."""
+    from backend.app.cloud.instabox_deployer import InstaBoxDeployer
+    deployer = InstaBoxDeployer(api_key=req.api_key)
+    res = await deployer.deploy_apex_system(
+        machine_name=req.machine_name,
+        gemini_api_key=req.gemini_api_key or os.getenv("GEMINI_API_KEY"),
+        amd_api_key=req.amd_api_key or os.getenv("AMD_API_KEY"),
+        upstox_token=settings.get_upstox_token,
+    )
+    return res
 
 
 @app.websocket("/ws/ticks")

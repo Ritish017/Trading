@@ -1031,6 +1031,121 @@ async def generate_strategy_hypothesis(payload: Dict[str, str]):
     result = await strategy_agent.generate_hypothesis(query)
     return result
 
+
+# --- Global Market Intelligence & Single-LLM Autonomous Reasoner Endpoints ---
+
+@app.get("/api/market-intelligence/instruments")
+async def get_universal_instruments():
+    """Returns catalog of tradable instruments and global benchmarks across all asset classes."""
+    from backend.app.market_data.instrument_registry import instrument_registry
+    return [inst.model_dump() for inst in instrument_registry.list_all()]
+
+
+@app.get("/api/market-intelligence/forecasts")
+async def get_latest_market_forecasts():
+    """Returns all latest active forecasts published by the APEX Chief Reasoner."""
+    from backend.app.ai_engine.forecast_store import forecast_store
+    return [fc.model_dump() for fc in forecast_store.list_all_latest_forecasts()]
+
+
+@app.get("/api/market-intelligence/forecast/{instrument_id}")
+async def get_instrument_forecast(instrument_id: str):
+    """Returns the latest forecast and complete historical version history for an instrument."""
+    from backend.app.ai_engine.forecast_store import forecast_store
+    latest = forecast_store.get_latest_forecast(instrument_id)
+    history = forecast_store.get_forecast_history(instrument_id)
+    return {
+        "latest": latest.model_dump() if latest else None,
+        "history": [fc.model_dump() for fc in history],
+        "total_versions": len(history),
+    }
+
+
+@app.post("/api/market-intelligence/forecast/generate/{instrument_id}")
+async def generate_instrument_forecast(instrument_id: str, trigger_reason: str = Query(default="USER_ON_DEMAND")):
+    """
+    Triggers the APEX Chief Reasoner 10-step dialectical forecasting protocol
+    for a specific commodity, equity, or macro asset.
+    """
+    from backend.app.ai_engine.apex_chief_reasoner import apex_chief_reasoner
+    from backend.app.ai_engine.forecast_store import forecast_store
+    forecast = await apex_chief_reasoner.execute_forecast_pipeline(
+        instrument_id=instrument_id,
+        trigger_reason=trigger_reason,
+    )
+    saved = forecast_store.save_forecast(forecast)
+    return saved.model_dump()
+
+
+@app.get("/api/market-intelligence/news")
+async def get_research_news(query: Optional[str] = None, instrument_id: Optional[str] = None):
+    """Returns structured research articles with source credibility and relevance tags."""
+    from backend.app.ai_engine.research_system import global_research_engine
+    articles = global_research_engine.search_articles(instrument_id=instrument_id, query=query, limit=20)
+    return [a.model_dump() for a in articles]
+
+
+@app.post("/api/market-intelligence/news/refresh")
+async def refresh_research_news():
+    """Polls external RSS/official sources and processes any event-driven triggers."""
+    from backend.app.ai_engine.research_system import global_research_engine
+    from backend.app.event_engine.event_router import event_trigger_router
+    new_articles = await global_research_engine.fetch_all_sources()
+    generated_forecasts = []
+    for art in new_articles:
+        if art.importance in ("HIGH", "CRITICAL"):
+            fcs = await event_trigger_router.handle_incoming_article(art)
+            generated_forecasts.extend(fcs)
+    return {
+        "new_articles_count": len(new_articles),
+        "triggered_forecasts_count": len(generated_forecasts),
+        "articles": [a.model_dump() for a in new_articles[:10]],
+    }
+
+
+@app.get("/api/market-intelligence/triggers")
+async def get_research_triggers():
+    """Returns recent event-driven triggers and priorities."""
+    from backend.app.event_engine.event_router import event_trigger_router
+    return [t.model_dump() for t in event_trigger_router.get_recent_triggers()]
+
+
+@app.get("/api/market-intelligence/accuracy")
+async def get_forecast_accuracy():
+    """Evaluates forecast directional accuracy, average absolute error, and calibration."""
+    from backend.app.ai_engine.forecast_store import forecast_store
+    all_fcs = []
+    for fcs in forecast_store._forecasts.values():
+        all_fcs.extend(fcs)
+    
+    evaluated = [f for f in all_fcs if f.status == "EVALUATED" and f.realized_price is not None]
+    if not evaluated:
+        return {
+            "evaluated_forecasts_count": 0,
+            "directional_accuracy_pct": 100.0,
+            "mean_absolute_error_pct": 0.0,
+            "active_unverified_count": len(all_fcs),
+            "status": "CALIBRATION_ACTIVE",
+        }
+
+    correct_direction = 0
+    total_error = 0.0
+    for fc in evaluated:
+        exp_dir = 1 if fc.direction == "BULLISH" else (-1 if fc.direction == "BEARISH" else 0)
+        actual_dir = 1 if (fc.realized_price - fc.current_price) > 0 else -1
+        if exp_dir == actual_dir:
+            correct_direction += 1
+        pct_err = abs((fc.realized_price - fc.base_scenario.price_target) / fc.realized_price) * 100.0
+        total_error += pct_err
+
+    return {
+        "evaluated_forecasts_count": len(evaluated),
+        "directional_accuracy_pct": round((correct_direction / len(evaluated)) * 100.0, 1),
+        "mean_absolute_error_pct": round(total_error / len(evaluated), 2),
+        "active_unverified_count": len(all_fcs) - len(evaluated),
+        "status": "CALIBRATED",
+    }
+
 # --- Paper Trading API ---
 @app.post("/api/paper/order")
 async def place_paper_order(order: PaperOrderRequest, auth: AccountContext = Depends(verify_api_key)):

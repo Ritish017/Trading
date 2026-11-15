@@ -2,6 +2,7 @@ import React from 'react';
 import { MarketNarrativeBanner } from '../intelligence/MarketNarrativeBanner';
 import { IntelligenceTimeline } from '../intelligence/IntelligenceTimeline';
 import { SecurityIntelligencePanel } from '../intelligence/SecurityIntelligencePanel';
+import { GlobalCommodityForecastCard } from '../intelligence/GlobalCommodityForecastCard';
 import { MarketNarrative, MarketEvent, AICommentary } from '../../types/intelligence';
 import { NSEStock } from '../../types/indianMarket';
 
@@ -40,6 +41,9 @@ export const IntelligenceDeskPage: React.FC<IntelligenceDeskPageProps> = ({
           onRefresh={onRefreshNarrative}
         />
       )}
+
+      {/* APEX Chief Reasoner — Global Market Intelligence & Scenario Engine */}
+      <GlobalCommodityForecastCard />
 
       {/* Main Grid: Left Event Stream Timeline & Right Comprehensive Evidence Analysis */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 flex-1 min-h-[550px]">

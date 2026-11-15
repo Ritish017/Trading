@@ -29,6 +29,11 @@ class NormalizedTick(BaseModel):
     provider: str = "GENERIC"
     is_live: bool = False
     market_status: str = "UNKNOWN"
+    asset_class: str = "EQUITY"
+    price_unit: Optional[str] = None
+    multiplier: float = 1.0
+    lot_size: int = 1
+    tick_size: float = 0.05
 
     @property
     def instrument_id(self) -> Optional[str]:

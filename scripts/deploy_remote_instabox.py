@@ -46,7 +46,7 @@ amd_key = os.getenv("AMD_API_KEY", "")
 upstox_token = settings.get_upstox_token or ""
 
 print("[3/5] Provisioning .env configuration...")
-env_content = f"""ENVIRONMENT=production
+env_content = f"""ENVIRONMENT=cloud
 PORT=8001
 GEMINI_API_KEY={gemini_key}
 AMD_API_KEY={amd_key}

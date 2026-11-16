@@ -4,8 +4,10 @@ import logging
 import os
 import time
 from typing import Dict, Any, List, Optional, Set
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import pandas as pd
 
@@ -209,6 +211,116 @@ async def ensure_init_middleware(request, call_next):
     if not _initialized and not request.url.path.startswith("/assets"):
         await ensure_initialized()
     return await call_next(request)
+
+# --- Static Frontend Resolution ---
+frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
+dist_assets = os.path.join(frontend_dist, "assets")
+dist_index = os.path.join(frontend_dist, "index.html")
+
+if os.path.isdir(dist_assets):
+    app.mount("/assets", StaticFiles(directory=dist_assets), name="frontend_assets")
+
+@app.get("/", response_class=HTMLResponse)
+async def root_view(request: Request):
+    """
+    Root endpoint for APEX Trading Lab.
+    Serves the React Vite SPA if built, or a live Mission Control Dashboard.
+    """
+    if os.path.isfile(dist_index):
+        return FileResponse(dist_index)
+
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APEX Global Quant Engine — InstaBox Node</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#0c0e14] text-stone-200 font-sans min-h-screen flex flex-col justify-between">
+  <div class="max-w-4xl mx-auto px-6 py-12 w-full">
+    <div class="flex items-center justify-between border-b border-stone-800 pb-6 mb-8">
+      <div class="flex items-center space-x-3">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-orange-500/20">
+          ▲
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold text-white tracking-tight">APEX <span class="text-amber-400">Trading Lab</span></h1>
+          <p class="text-xs text-stone-400 font-mono">Autonomous Market Intelligence & Quant Execution Node</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-2">
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping mr-2"></span>
+          INSTABOX LIVE
+        </span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 font-mono">
+      <div class="bg-[#141622] border border-stone-800 rounded-xl p-4">
+        <div class="text-xs text-stone-400 mb-1">SYSTEM STATE</div>
+        <div class="text-lg font-bold text-emerald-400">ONLINE (PORT 8001)</div>
+        <div class="text-[11px] text-stone-500 mt-2">Uvicorn + FastAPI Kernel</div>
+      </div>
+      <div class="bg-[#141622] border border-stone-800 rounded-xl p-4">
+        <div class="text-xs text-stone-400 mb-1">CHIEF REASONER</div>
+        <div class="text-lg font-bold text-amber-400">DIALECTICAL AI ACTIVE</div>
+        <div class="text-[11px] text-stone-500 mt-2">Gold, Silver, Crude, Copper, Wheat</div>
+      </div>
+      <div class="bg-[#141622] border border-stone-800 rounded-xl p-4">
+        <div class="text-xs text-stone-400 mb-1">CIRCUIT BREAKER</div>
+        <div class="text-lg font-bold text-sky-400">ENGAGED (₹200/day)</div>
+        <div class="text-[11px] text-stone-500 mt-2">Zero-Runaway Capital Shield</div>
+      </div>
+    </div>
+
+    <div class="bg-[#141622] border border-stone-800 rounded-2xl p-6 mb-8">
+      <h2 class="text-base font-bold text-white mb-4">Quick Navigation & Controls</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <a href="https://frontend-three-iota-5bm212x50o.vercel.app" target="_blank" class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 font-bold text-sm hover:from-amber-400 hover:to-orange-400 transition-all shadow-lg shadow-orange-500/20">
+          <span>🚀 Launch Vercel Trading Web UI</span>
+          <span>&rarr;</span>
+        </a>
+        <a href="/docs" class="flex items-center justify-between p-3.5 rounded-xl bg-[#1b1e2c] border border-stone-700/60 text-white font-medium text-sm hover:border-amber-500/40 transition-all">
+          <span>📖 Swagger API Documentation</span>
+          <span class="text-stone-400 font-mono">/docs</span>
+        </a>
+        <a href="/api/nifty-bot/status" class="flex items-center justify-between p-3.5 rounded-xl bg-[#1b1e2c] border border-stone-700/60 text-white font-medium text-sm hover:border-sky-500/40 transition-all">
+          <span>⚡ NIFTY Bot Telemetry JSON</span>
+          <span class="text-stone-400 font-mono">/api/nifty-bot/status</span>
+        </a>
+        <a href="/api/market-intelligence/forecasts" class="flex items-center justify-between p-3.5 rounded-xl bg-[#1b1e2c] border border-stone-700/60 text-white font-medium text-sm hover:border-indigo-500/40 transition-all">
+          <span>🌐 Commodity Forecasts Ledger</span>
+          <span class="text-stone-400 font-mono">/api/market-intelligence/forecasts</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="bg-[#0f1118] border border-stone-800/80 rounded-2xl p-5">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-xs font-mono font-bold text-stone-400">LIVE INSTABOX HEARTBEAT</span>
+        <span class="text-[11px] font-mono text-emerald-400">HTTP 200 OK</span>
+      </div>
+      <pre class="bg-[#08090d] p-4 rounded-xl text-xs font-mono text-stone-300 overflow-x-auto border border-stone-900">{
+  "status": "ONLINE",
+  "environment": "instabox-cloud",
+  "machine_id": "m_agq54qfr6xew7zxz3munricwcy",
+  "port": 8001,
+  "real_trading_enabled": false,
+  "paper_trading_enabled": true,
+  "chief_market_analyst": "ACTIVE",
+  "nifty_strategic_bot": "ACTIVE_24_7"
+}</pre>
+    </div>
+  </div>
+
+  <footer class="border-t border-stone-800/60 py-4 text-center text-xs font-mono text-stone-500">
+    APEX Quantitative Systems &bull; Hosted securely on InstaBox MicroVM
+  </footer>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
 
 # --- Health Check Endpoints ---
 @app.get("/health")

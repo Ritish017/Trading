@@ -72,7 +72,7 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
     {
       id: 'intelligence' as PrimaryTabId,
       defaultPage: 'intelligence' as ActivePage,
-      label: 'Market Intelligence',
+      label: 'Intelligence & Commodities',
       icon: Brain,
       badge: eventCount > 0 ? `${eventCount} Events` : 'AI Core',
       badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',

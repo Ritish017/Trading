@@ -21,6 +21,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   onOpenAIIntelligence,
   onOpenPaperTrading,
   onOpenCloudDeploy,
+  onOpenCommodities,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
 

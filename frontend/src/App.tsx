@@ -841,6 +841,7 @@ export default function App() {
         onOpenAIIntelligence={() => setActivePage('intelligence')}
         onOpenPaperTrading={() => setActivePage('portfolio')}
         onOpenCloudDeploy={() => setActivePage('derivatives')}
+        onOpenCommodities={() => setActivePage('intelligence')}
       />
 
       {/* 3. Navigation Workspaces Tab Bar */}

@@ -34,6 +34,10 @@ from backend.app.market_data.candle_aggregator import (
     parse_upstox_candle,
     resample_1m_candles,
 )
+from backend.app.market_data.technical_engine import (
+    CommodityTechnicals,
+    technical_engine,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -397,8 +401,27 @@ class UniversalMarketDataFeed:
             if should_close:
                 await client.close()
 
+    async def get_technicals(
+        self,
+        commodity_input: str,
+        lookback_days: int = 30,
+        term: ContractTerm = ContractTerm.NEAR_MONTH,
+    ) -> CommodityTechnicals:
+        """
+        Fetch verified live quote and historical daily candles, then compute full technical profile.
+        """
+        quote = await self.get_live_quote(commodity_input, term=term)
+        candles = await self.get_historical_daily_candles(
+            commodity_input,
+            lookback_days=max(lookback_days, 30),
+            term=term,
+        )
+        return technical_engine.compute_technicals(quote, candles)
+
 
 UniversalFeedService = UniversalMarketDataFeed
+UniversalMarketDataService = UniversalMarketDataFeed
 universal_market_data_feed = UniversalMarketDataFeed()
 universal_feed_service = universal_market_data_feed
 universal_feed = universal_market_data_feed
+universal_market_data_service = universal_market_data_feed

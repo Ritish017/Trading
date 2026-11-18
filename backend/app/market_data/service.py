@@ -17,6 +17,7 @@ from backend.app.market_data.universal_feed import (
     MarketDataUnavailableError,
 )
 from backend.app.market_data.mcx.contract_resolver import active_contract_resolver
+from backend.app.market_data.technical_engine import CommodityTechnicals, technical_engine
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +370,20 @@ class MarketDataService:
         adjusted_candles = corporate_action_adjuster.adjust_candle_series(raw_candles, symbol, mode=mode)
         self._candle_cache[cache_key] = adjusted_candles
         return adjusted_candles
+
+    async def get_commodity_technicals(
+        self,
+        symbol: str,
+        lookback_days: int = 30,
+        term: Any = None,
+    ) -> CommodityTechnicals:
+        """
+        Retrieve authoritative CommodityTechnicals for any commodity instrument
+        via UniversalMarketDataFeed and TechnicalEngine.
+        """
+        from backend.app.market_data.mcx.contract_resolver import ContractTerm
+        contract_term = term if isinstance(term, ContractTerm) else ContractTerm.NEAR_MONTH
+        return await self.universal_feed.get_technicals(symbol, lookback_days=lookback_days, term=contract_term)
 
     async def get_option_chain(self, symbol: str, expiry: Optional[str] = None) -> Dict[str, Any]:
         if hasattr(self.active_provider, "get_option_chain"):

@@ -111,11 +111,12 @@ class ForecastStore:
             return max(fcs, key=lambda f: f.version) if allow_quarantined else None
         return max(valid_fcs, key=lambda f: f.version)
 
-    def get_forecast_history(self, instrument_id: str, allow_quarantined: bool = False) -> List[MarketForecast]:
+    def get_forecast_history(self, instrument_id: str, allow_quarantined: bool = False, limit: Optional[int] = None) -> List[MarketForecast]:
         fcs = self._forecasts.get(instrument_id, [])
         if not allow_quarantined:
             fcs = [f for f in fcs if not f.is_synthetic_legacy and f.status != "INVALID_LEGACY_SYNTHETIC"]
-        return sorted(fcs, key=lambda f: f.version, reverse=True)
+        sorted_fcs = sorted(fcs, key=lambda f: f.version, reverse=True)
+        return sorted_fcs[:limit] if limit else sorted_fcs
 
     def list_all_latest_forecasts(self, allow_quarantined: bool = False) -> List[MarketForecast]:
         latest = []
@@ -199,3 +200,4 @@ class ForecastStore:
 
 # Global forecast store instance
 forecast_store = ForecastStore()
+global_forecast_store = forecast_store

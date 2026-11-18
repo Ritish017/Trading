@@ -10,6 +10,13 @@ from backend.app.market_data.corporate_actions.models import PriceAdjustmentMode
 from backend.app.market_data.corporate_actions.adjuster import corporate_action_adjuster
 from backend.app.market_data.corporate_actions.integrity_guard import market_data_integrity_guard
 from backend.app.market_data.canonical_store import canonical_store, CanonicalQuote
+from backend.app.market_data.universal_feed import (
+    universal_feed,
+    UniversalMarketDataFeed,
+    UniversalQuote,
+    MarketDataUnavailableError,
+)
+from backend.app.market_data.mcx.contract_resolver import active_contract_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +42,7 @@ class MarketDataService:
         )
 
         self.active_provider: MarketDataProvider = self.mock_provider
+        self.universal_feed: UniversalMarketDataFeed = universal_feed
         self.is_live: bool = False
         self.status_code: str = "INITIALIZING"
         self.provider_mode: str = "UNAVAILABLE"  # AUTHENTIC_LIVE | SIMULATED | UNAVAILABLE
@@ -199,7 +207,80 @@ class MarketDataService:
         canonical_store.update_from_rest(validated)
         return validated
 
+    def _is_commodity_symbol(self, symbol: str) -> bool:
+        """Determines whether a symbol belongs to the MCX commodity universe."""
+        if not symbol:
+            return False
+        clean = str(symbol).strip().upper()
+        if clean.startswith("MCX_") or clean.endswith("_MCX") or "MCX" in clean:
+            return True
+        try:
+            if active_contract_resolver.normalize_commodity_code(clean) is not None:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _universal_quote_to_dict(self, quote: UniversalQuote) -> Dict[str, Any]:
+        """Convert a verified UniversalQuote into the dictionary format expected by MarketDataService callers."""
+        return {
+            "symbol": quote.symbol,
+            "instrument_id": quote.instrument_id,
+            "instrument_key": quote.instrument_key,
+            "trading_symbol": quote.trading_symbol,
+            "exchange": quote.exchange,
+            "currency": quote.currency,
+            "unit": quote.unit,
+            "ltp": quote.ltp,
+            "open": quote.open,
+            "high": quote.high,
+            "low": quote.low,
+            "close": quote.close,
+            "previous_close": quote.close,
+            "change": round(quote.ltp - quote.close, 2) if quote.close else 0.0,
+            "change_percent": round(((quote.ltp - quote.close) / quote.close) * 100, 2) if quote.close else 0.0,
+            "volume": quote.volume,
+            "open_interest": quote.open_interest,
+            "bid": quote.bid_price,
+            "ask": quote.ask_price,
+            "bid_price": quote.bid_price,
+            "ask_price": quote.ask_price,
+            "last_trade_time": quote.last_trade_time,
+            "timestamp": quote.last_trade_time / 1000.0,
+            "provider_timestamp": quote.last_trade_time / 1000.0,
+            "received_timestamp": quote.retrieved_at,
+            "market_status": quote.market_status,
+            "source": quote.source,
+            "provider": quote.source,
+            "provider_mode": "AUTHENTIC_LIVE",
+            "price_domain": quote.price_domain,
+            "retrieved_at": quote.retrieved_at,
+            "raw_data": quote.raw_data or quote.raw_response,
+            "raw_response": quote.raw_response or quote.raw_data,
+            "is_live": quote.market_status == "LIVE",
+            "provenance_status": "LIVE" if quote.market_status == "LIVE" else "CLOSED",
+            "display_label": f"{quote.trading_symbol} (UPSTOX)",
+            "data_age_seconds": round(time.time() - (quote.last_trade_time / 1000.0), 2),
+            "anomaly_classification": "VALID_AUTHENTIC_QUOTE",
+            "classification_reason": "Verified authentic MCX exchange quote from Upstox V2 API",
+        }
+
     async def get_quote(self, symbol: str) -> Dict[str, Any]:
+        if self._is_commodity_symbol(symbol):
+            # Strict MCX routing: Query UniversalMarketDataFeed.
+            # ZERO MOCK FALLBACK: Under no circumstances allow DevMockProvider or synthetic prices for commodities.
+            try:
+                quote = await self.universal_feed.get_live_quote(symbol)
+                quote_dict = self._universal_quote_to_dict(quote)
+                canonical_store.update_from_rest(quote_dict)
+                return quote_dict
+            except Exception as e:
+                logger.error(f"[MARKET DATA HUB] Commodity quote fetch failed for {symbol}: {e}. Mock fallback strictly prohibited.")
+                # Fail-closed: Never fall back to DevMockProvider for commodities
+                raise MarketDataUnavailableError(
+                    f"Commodity market data unavailable for '{symbol}'. Mock fallback strictly prohibited: {str(e)}"
+                ) from e
+
         try:
             raw_quote = await self.active_provider.get_quote(symbol)
             return self._enrich_and_canonicalize(raw_quote, symbol)
@@ -221,30 +302,52 @@ class MarketDataService:
             raise e
 
     async def get_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:
-        try:
-            raw_quotes = await self.active_provider.get_quotes(symbols)
-            results = []
-            for q in raw_quotes:
-                if q and q.get("symbol"):
-                    sym = q["symbol"]
-                    enriched = self._enrich_and_canonicalize(q, sym)
-                    results.append(enriched)
-            return results
-        except Exception as e:
-            logger.error(f"[MARKET DATA HUB] Failed to fetch quotes: {str(e)}")
-            # Return canonical store data (marked stale) rather than fabricating
-            fallback = []
-            for s in symbols:
-                canonical = canonical_store.get_canonical_quote(s)
-                if canonical:
-                    result = canonical.to_api_dict()
-                    result["stale"] = True
-                    result["is_live"] = False
-                    result["provenance_status"] = "STALE"
-                    fallback.append(result)
-                else:
-                    fallback.append({"symbol": s, "ltp": None, "is_live": False, "provenance_status": "UNAVAILABLE", "provider_mode": "UNAVAILABLE"})
-            return fallback
+        if not symbols:
+            return []
+
+        commodity_symbols = [s for s in symbols if self._is_commodity_symbol(s)]
+        other_symbols = [s for s in symbols if not self._is_commodity_symbol(s)]
+
+        results: List[Dict[str, Any]] = []
+
+        if commodity_symbols:
+            # Query batch quotes through universal_feed
+            # ZERO MOCK FALLBACK: Under no circumstances fall back to DevMockProvider for commodities
+            try:
+                quotes = await self.universal_feed.get_live_quotes(commodity_symbols)
+                for q in quotes:
+                    q_dict = self._universal_quote_to_dict(q)
+                    canonical_store.update_from_rest(q_dict)
+                    results.append(q_dict)
+            except Exception as e:
+                logger.error(f"[MARKET DATA HUB] Batch commodity quote fetch failed: {e}")
+                # Fail-closed for commodities
+                raise MarketDataUnavailableError(
+                    f"Batch commodity quote fetch failed. Mock fallback strictly prohibited: {str(e)}"
+                ) from e
+
+        if other_symbols:
+            try:
+                raw_quotes = await self.active_provider.get_quotes(other_symbols)
+                for q in raw_quotes:
+                    if q and q.get("symbol"):
+                        sym = q["symbol"]
+                        enriched = self._enrich_and_canonicalize(q, sym)
+                        results.append(enriched)
+            except Exception as e:
+                logger.error(f"[MARKET DATA HUB] Failed to fetch quotes: {str(e)}")
+                for s in other_symbols:
+                    canonical = canonical_store.get_canonical_quote(s)
+                    if canonical:
+                        result = canonical.to_api_dict()
+                        result["stale"] = True
+                        result["is_live"] = False
+                        result["provenance_status"] = "STALE"
+                        results.append(result)
+                    else:
+                        results.append({"symbol": s, "ltp": None, "is_live": False, "provenance_status": "UNAVAILABLE", "provider_mode": "UNAVAILABLE"})
+
+        return results
 
     async def get_candles(
         self,
@@ -253,6 +356,14 @@ class MarketDataService:
         count: int = 60,
         mode: PriceAdjustmentMode = PriceAdjustmentMode.CORPORATE_ACTION_ADJUSTED_PRICE
     ) -> List[Dict[str, Any]]:
+        if self._is_commodity_symbol(symbol):
+            # Route to UniversalMarketDataFeed. Zero mock fallback for commodities.
+            if interval.lower() in ("1d", "day", "1day"):
+                candles = await self.universal_feed.get_historical_daily_candles(symbol, lookback_days=count)
+            else:
+                candles = await self.universal_feed.get_intraday_candles(symbol, interval=interval)
+            return candles[-count:] if count and len(candles) > count else candles
+
         cache_key = f"{symbol}:{interval}:{mode.value}:{self.active_provider.provider_name}"
         raw_candles = await self.active_provider.get_historical_candles(symbol, interval, count=count)
         adjusted_candles = corporate_action_adjuster.adjust_candle_series(raw_candles, symbol, mode=mode)

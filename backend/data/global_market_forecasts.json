@@ -42,6 +42,11 @@
         "lower": 75312.0,
         "upper": 81588.0
       },
+      "realized_7d": null,
+      "forward_volatility_corridor": null,
+      "contract_expiry": null,
+      "market_status": "LIVE",
+      "is_synthetic_legacy": true,
       "expected_change_percent": 0.8,
       "volatility_assessment": "Standard historical volatility envelope",
       "horizons": [],
@@ -68,6 +73,471 @@
         }
       ],
       "reasoning_summary": "Balanced institutional outlook for GOLD. Physical central bank gold accumulation supports base value.",
+      "status": "INVALID_LEGACY_SYNTHETIC",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_gold_mcx_1795010597",
+      "version": 2,
+      "instrument_id": "GOLD_MCX",
+      "symbol": "GOLD",
+      "current_price": 131195.0,
+      "currency": "INR",
+      "unit": "\u20b9/10g",
+      "exchange": "MCX",
+      "market_timestamp": 1795010597.9510999,
+      "forecast_timestamp": 1795010597.9510999,
+      "valid_until": 1795615397.9510999,
+      "direction": "BULLISH",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 135171.61,
+        "probability": 0.45,
+        "expected_change_pct": 3.03,
+        "supporting_evidence": [
+          "Central Bank Net Gold Purchases: 387 tonnes YTD (RBI + People's Bank of China)",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 132122.87,
+        "probability": 0.4,
+        "expected_change_pct": 0.71,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 127218.4,
+        "probability": 0.15,
+        "expected_change_pct": -3.03,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 133469.0,
+        "upper": 141990.0
+      },
+      "realized_7d": {
+        "low": 133469.0,
+        "high": 141990.0,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 122303.04,
+        "upper": 140086.96
+      },
+      "contract_expiry": "GOLD FUT 04 DEC 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 0.71,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 131579.06,
+          "lower_bound": 130860.98,
+          "upper_bound": 131529.02,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 131746.07,
+          "lower_bound": 130513.18,
+          "upper_bound": 131876.82,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 131968.75,
+          "lower_bound": 129831.36,
+          "upper_bound": 132558.64,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 132293.2,
+          "lower_bound": 128467.71,
+          "upper_bound": 133922.29,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 132835.05,
+          "lower_bound": 125096.6,
+          "upper_bound": 137293.4,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 133542.27,
+          "lower_bound": 118697.0,
+          "upper_bound": 143693.0,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 134284.38,
+          "lower_bound": 109547.82,
+          "upper_bound": 152842.17,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 134869.35,
+          "lower_bound": 100581.27,
+          "upper_bound": 161808.73,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 127218.4",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "GOLD verified price is INR 131,195.00 (\u20b9/10g)",
+          "source": "UPSTOX",
+          "timestamp": 1795010529.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 133469.0 \u2013 141990.0; ATR-14: 2,651.07",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795010597.9510999
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Central Bank Net Gold Purchases: 387 tonnes YTD (RBI + People's Bank of China)",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795010597.9510999
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795010597.9510999
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_gold_mcx_1795010855",
+      "version": 3,
+      "instrument_id": "GOLD_MCX",
+      "symbol": "GOLD",
+      "current_price": 131311.0,
+      "currency": "INR",
+      "unit": "\u20b9/10g",
+      "exchange": "MCX",
+      "market_timestamp": 1795010855.0744812,
+      "forecast_timestamp": 1795010855.0744812,
+      "valid_until": 1795615655.0744812,
+      "direction": "BULLISH",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 135287.61,
+        "probability": 0.45,
+        "expected_change_pct": 3.03,
+        "supporting_evidence": [
+          "Central Bank Net Gold Purchases: 387 tonnes YTD (RBI + People's Bank of China)",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 132238.87,
+        "probability": 0.4,
+        "expected_change_pct": 0.71,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 127334.4,
+        "probability": 0.15,
+        "expected_change_pct": -3.03,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 133469.0,
+        "upper": 141990.0
+      },
+      "realized_7d": {
+        "low": 133469.0,
+        "high": 141990.0,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 122419.04,
+        "upper": 140202.96
+      },
+      "contract_expiry": "GOLD FUT 04 DEC 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 0.71,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 131695.4,
+          "lower_bound": 130976.68,
+          "upper_bound": 131645.32,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 131862.56,
+          "lower_bound": 130628.58,
+          "upper_bound": 131993.42,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 132085.43,
+          "lower_bound": 129946.15,
+          "upper_bound": 132675.85,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 132410.18,
+          "lower_bound": 128581.3,
+          "upper_bound": 134040.7,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 132952.5,
+          "lower_bound": 125207.21,
+          "upper_bound": 137414.79,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 133660.34,
+          "lower_bound": 118801.95,
+          "upper_bound": 143820.05,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 134403.12,
+          "lower_bound": 109644.68,
+          "upper_bound": 152977.32,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 134988.6,
+          "lower_bound": 100670.2,
+          "upper_bound": 161951.8,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 127334.4",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "GOLD verified price is INR 131,311.00 (\u20b9/10g)",
+          "source": "UPSTOX",
+          "timestamp": 1795010785.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 133469.0 \u2013 141990.0; ATR-14: 2,651.07",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795010855.0744812
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Central Bank Net Gold Purchases: 387 tonnes YTD (RBI + People's Bank of China)",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795010855.0744812
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795010855.0744812
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_gold_mcx_1795010916",
+      "version": 4,
+      "instrument_id": "GOLD_MCX",
+      "symbol": "GOLD",
+      "current_price": 131311.0,
+      "currency": "INR",
+      "unit": "\u20b9/10g",
+      "exchange": "MCX",
+      "market_timestamp": 1795010916.6673548,
+      "forecast_timestamp": 1795010916.6673548,
+      "valid_until": 1795615716.6673548,
+      "direction": "BULLISH",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 135287.61,
+        "probability": 0.45,
+        "expected_change_pct": 3.03,
+        "supporting_evidence": [
+          "Central Bank Net Gold Purchases: 387 tonnes YTD (RBI + People's Bank of China)",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 132238.87,
+        "probability": 0.4,
+        "expected_change_pct": 0.71,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 127334.4,
+        "probability": 0.15,
+        "expected_change_pct": -3.03,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 133469.0,
+        "upper": 141990.0
+      },
+      "realized_7d": {
+        "low": 133469.0,
+        "high": 141990.0,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 122401.04,
+        "upper": 140184.96
+      },
+      "contract_expiry": "GOLD FUT 04 DEC 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 0.71,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 131695.4,
+          "lower_bound": 130976.68,
+          "upper_bound": 131645.32,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 131862.56,
+          "lower_bound": 130628.58,
+          "upper_bound": 131993.42,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 132085.43,
+          "lower_bound": 129946.15,
+          "upper_bound": 132675.85,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 132410.18,
+          "lower_bound": 128581.3,
+          "upper_bound": 134040.7,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 132952.5,
+          "lower_bound": 125207.21,
+          "upper_bound": 137414.79,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 133660.34,
+          "lower_bound": 118801.95,
+          "upper_bound": 143820.05,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 134403.12,
+          "lower_bound": 109644.68,
+          "upper_bound": 152977.32,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 134988.6,
+          "lower_bound": 100670.2,
+          "upper_bound": 161951.8,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 127334.4",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "GOLD verified price is INR 131,311.00 (\u20b9/10g)",
+          "source": "UPSTOX",
+          "timestamp": 1795010893.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 133469.0 \u2013 141990.0; ATR-14: 2,651.07",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795010916.6673548
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Central Bank Net Gold Purchases: 387 tonnes YTD (RBI + People's Bank of China)",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795010916.6673548
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795010916.6673548
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
       "status": "VALIDATED",
       "realized_price": null,
       "realized_return_pct": null
@@ -116,6 +586,11 @@
         "lower": 88608.0,
         "upper": 95992.0
       },
+      "realized_7d": null,
+      "forward_volatility_corridor": null,
+      "contract_expiry": null,
+      "market_status": "LIVE",
+      "is_synthetic_legacy": true,
       "expected_change_percent": 0.9,
       "volatility_assessment": "Standard historical volatility envelope",
       "horizons": [],
@@ -142,6 +617,316 @@
         }
       ],
       "reasoning_summary": "Balanced institutional outlook for SILVER. Industrial photovoltaic demand combined with supply deficit.",
+      "status": "INVALID_LEGACY_SYNTHETIC",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_silver_mcx_1795010673",
+      "version": 2,
+      "instrument_id": "SILVER_MCX",
+      "symbol": "SILVER",
+      "current_price": 163104.0,
+      "currency": "INR",
+      "unit": "\u20b9/kg",
+      "exchange": "MCX",
+      "market_timestamp": 1795010673.2650223,
+      "forecast_timestamp": 1795010673.2650223,
+      "valid_until": 1795615473.2650223,
+      "direction": "NEUTRAL_CONSOLIDATION",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 172277.46,
+        "probability": 0.25,
+        "expected_change_pct": 5.62,
+        "supporting_evidence": [
+          "Global Exchange Tracked Stocks: Balanced supply-demand matrix",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 165244.47,
+        "probability": 0.4,
+        "expected_change_pct": 1.31,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 153930.54,
+        "probability": 0.35,
+        "expected_change_pct": -5.62,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 166650.0,
+        "upper": 187979.0
+      },
+      "realized_7d": {
+        "low": 166650.0,
+        "high": 187979.0,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 142622.52,
+        "upper": 183647.48
+      },
+      "contract_expiry": "SILVER FUT 04 DEC 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 1.31,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 163984.97,
+          "lower_bound": 162688.74,
+          "upper_bound": 163519.26,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 164368.07,
+          "lower_bound": 162256.35,
+          "upper_bound": 163951.65,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 164878.85,
+          "lower_bound": 161408.69,
+          "upper_bound": 164799.31,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 165623.09,
+          "lower_bound": 159713.39,
+          "upper_bound": 166494.61,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 166865.98,
+          "lower_bound": 155522.36,
+          "upper_bound": 170685.64,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 168488.22,
+          "lower_bound": 147566.26,
+          "upper_bound": 178641.74,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 170190.51,
+          "lower_bound": 136191.84,
+          "upper_bound": 190016.16,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 171532.31,
+          "lower_bound": 125044.46,
+          "upper_bound": 201163.54,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 153930.54",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "SILVER verified price is INR 163,104.00 (\u20b9/kg)",
+          "source": "UPSTOX",
+          "timestamp": 1795010616.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 166650.0 \u2013 187979.0; ATR-14: 6,115.64",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795010673.2650223
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Global Exchange Tracked Stocks: Balanced supply-demand matrix",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795010673.2650223
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795010673.2650223
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_silver_mcx_1795010942",
+      "version": 3,
+      "instrument_id": "SILVER_MCX",
+      "symbol": "SILVER",
+      "current_price": 163058.0,
+      "currency": "INR",
+      "unit": "\u20b9/kg",
+      "exchange": "MCX",
+      "market_timestamp": 1795010942.2272434,
+      "forecast_timestamp": 1795010942.2272434,
+      "valid_until": 1795615742.2272434,
+      "direction": "NEUTRAL_CONSOLIDATION",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 172231.46,
+        "probability": 0.25,
+        "expected_change_pct": 5.63,
+        "supporting_evidence": [
+          "Global Exchange Tracked Stocks: Balanced supply-demand matrix",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 165198.47,
+        "probability": 0.4,
+        "expected_change_pct": 1.31,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 153884.54,
+        "probability": 0.35,
+        "expected_change_pct": -5.63,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 166650.0,
+        "upper": 187979.0
+      },
+      "realized_7d": {
+        "low": 166650.0,
+        "high": 187979.0,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 142545.52,
+        "upper": 183570.48
+      },
+      "contract_expiry": "SILVER FUT 04 DEC 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 1.31,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 163938.72,
+          "lower_bound": 162642.85,
+          "upper_bound": 163473.15,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 164321.71,
+          "lower_bound": 162210.59,
+          "upper_bound": 163905.41,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 164832.34,
+          "lower_bound": 161363.17,
+          "upper_bound": 164752.83,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 165576.38,
+          "lower_bound": 159668.34,
+          "upper_bound": 166447.66,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 166818.92,
+          "lower_bound": 155478.5,
+          "upper_bound": 170637.5,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 168440.7,
+          "lower_bound": 147524.64,
+          "upper_bound": 178591.36,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 170142.51,
+          "lower_bound": 136153.43,
+          "upper_bound": 189962.57,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 171483.94,
+          "lower_bound": 125009.19,
+          "upper_bound": 201106.81,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 153884.54",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "SILVER verified price is INR 163,058.00 (\u20b9/kg)",
+          "source": "UPSTOX",
+          "timestamp": 1795010914.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 166650.0 \u2013 187979.0; ATR-14: 6,115.64",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795010942.2272434
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "Global Exchange Tracked Stocks: Balanced supply-demand matrix",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795010942.2272434
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795010942.2272434
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
       "status": "VALIDATED",
       "realized_price": null,
       "realized_return_pct": null
@@ -190,6 +975,11 @@
         "lower": 5875.2,
         "upper": 6364.8
       },
+      "realized_7d": null,
+      "forward_volatility_corridor": null,
+      "contract_expiry": null,
+      "market_status": "LIVE",
+      "is_synthetic_legacy": true,
       "expected_change_percent": 0.7,
       "volatility_assessment": "Standard historical volatility envelope",
       "horizons": [],
@@ -216,6 +1006,316 @@
         }
       ],
       "reasoning_summary": "Balanced institutional outlook for CRUDEOIL. EIA commercial inventory draw and geopolitical shipping alert.",
+      "status": "INVALID_LEGACY_SYNTHETIC",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_crudeoil_mcx_1795010736",
+      "version": 2,
+      "instrument_id": "CRUDEOIL_MCX",
+      "symbol": "CRUDEOIL",
+      "current_price": 7943.0,
+      "currency": "INR",
+      "unit": "\u20b9/bbl",
+      "exchange": "MCX",
+      "market_timestamp": 1795010736.8131316,
+      "forecast_timestamp": 1795010736.8131316,
+      "valid_until": 1795615536.8131316,
+      "direction": "BULLISH",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 8565.6,
+        "probability": 0.45,
+        "expected_change_pct": 7.84,
+        "supporting_evidence": [
+          "EIA US Crude Inventory: 423.8M bbls (-1.8M bbls draw vs expected +0.5M)",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 8088.27,
+        "probability": 0.4,
+        "expected_change_pct": 1.83,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 7320.4,
+        "probability": 0.15,
+        "expected_change_pct": -7.84,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 7927.0,
+        "upper": 8455.0
+      },
+      "realized_7d": {
+        "low": 7927.0,
+        "high": 8455.0,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 6550.81,
+        "upper": 9335.19
+      },
+      "contract_expiry": "CRUDEOIL FUT 19 NOV 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 1.83,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 8002.93,
+          "lower_bound": 7922.78,
+          "upper_bound": 7963.22,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 8028.99,
+          "lower_bound": 7901.72,
+          "upper_bound": 7984.28,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 8063.74,
+          "lower_bound": 7860.44,
+          "upper_bound": 8025.56,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 8114.37,
+          "lower_bound": 7777.88,
+          "upper_bound": 8108.12,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 8198.93,
+          "lower_bound": 7573.78,
+          "upper_bound": 8312.22,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 8309.29,
+          "lower_bound": 7186.33,
+          "upper_bound": 8699.67,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 8425.09,
+          "lower_bound": 6632.4,
+          "upper_bound": 9253.59,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 8516.38,
+          "lower_bound": 6089.54,
+          "upper_bound": 9796.46,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 7320.4",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "CRUDEOIL verified price is INR 7,943.00 (\u20b9/bbl)",
+          "source": "UPSTOX",
+          "timestamp": 1795010677.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 7927.0 \u2013 8455.0; ATR-14: 415.07",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795010736.8131316
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "EIA US Crude Inventory: 423.8M bbls (-1.8M bbls draw vs expected +0.5M)",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795010736.8131316
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795010736.8131316
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
+      "status": "VALIDATED",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_crudeoil_mcx_1795010969",
+      "version": 3,
+      "instrument_id": "CRUDEOIL_MCX",
+      "symbol": "CRUDEOIL",
+      "current_price": 7984.0,
+      "currency": "INR",
+      "unit": "\u20b9/bbl",
+      "exchange": "MCX",
+      "market_timestamp": 1795010969.0390842,
+      "forecast_timestamp": 1795010969.0390842,
+      "valid_until": 1795615769.0390842,
+      "direction": "BULLISH",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 8606.6,
+        "probability": 0.45,
+        "expected_change_pct": 7.8,
+        "supporting_evidence": [
+          "EIA US Crude Inventory: 423.8M bbls (-1.8M bbls draw vs expected +0.5M)",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 8129.27,
+        "probability": 0.4,
+        "expected_change_pct": 1.82,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 7361.4,
+        "probability": 0.15,
+        "expected_change_pct": -7.8,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 7927.0,
+        "upper": 8455.0
+      },
+      "realized_7d": {
+        "low": 7927.0,
+        "high": 8455.0,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 6591.81,
+        "upper": 9376.19
+      },
+      "contract_expiry": "CRUDEOIL FUT 19 NOV 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 1.82,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 8043.91,
+          "lower_bound": 7963.67,
+          "upper_bound": 8004.33,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 8069.97,
+          "lower_bound": 7942.51,
+          "upper_bound": 8025.49,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 8104.7,
+          "lower_bound": 7901.01,
+          "upper_bound": 8066.99,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 8155.32,
+          "lower_bound": 7818.03,
+          "upper_bound": 8149.97,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 8239.84,
+          "lower_bound": 7612.88,
+          "upper_bound": 8355.12,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 8350.17,
+          "lower_bound": 7223.42,
+          "upper_bound": 8744.58,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 8465.93,
+          "lower_bound": 6666.64,
+          "upper_bound": 9301.36,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 8557.19,
+          "lower_bound": 6120.97,
+          "upper_bound": 9847.03,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 7361.4",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "CRUDEOIL verified price is INR 7,984.00 (\u20b9/bbl)",
+          "source": "UPSTOX",
+          "timestamp": 1795010941.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 7927.0 \u2013 8455.0; ATR-14: 415.07",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795010969.0390842
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "EIA US Crude Inventory: 423.8M bbls (-1.8M bbls draw vs expected +0.5M)",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795010969.0390842
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795010969.0390842
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
       "status": "VALIDATED",
       "realized_price": null,
       "realized_return_pct": null
@@ -264,6 +1364,11 @@
         "lower": 235.97,
         "upper": 255.63
       },
+      "realized_7d": null,
+      "forward_volatility_corridor": null,
+      "contract_expiry": null,
+      "market_status": "LIVE",
+      "is_synthetic_legacy": true,
       "expected_change_percent": 0.9,
       "volatility_assessment": "Standard historical volatility envelope",
       "horizons": [],
@@ -290,6 +1395,161 @@
         }
       ],
       "reasoning_summary": "Balanced institutional outlook for NATURALGAS. Ample storage offsets weather forecasts in shoulder season.",
+      "status": "INVALID_LEGACY_SYNTHETIC",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_natgas_mcx_1795010996",
+      "version": 2,
+      "instrument_id": "NATGAS_MCX",
+      "symbol": "NATURALGAS",
+      "current_price": 305.1,
+      "currency": "INR",
+      "unit": "\u20b9/mmBtu",
+      "exchange": "MCX",
+      "market_timestamp": 1795010996.3326433,
+      "forecast_timestamp": 1795010996.3326433,
+      "valid_until": 1795615796.3326433,
+      "direction": "NEUTRAL_CONSOLIDATION",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 322.88,
+        "probability": 0.25,
+        "expected_change_pct": 5.83,
+        "supporting_evidence": [
+          "EIA Working Natural Gas in Underground Storage: 3,210 Bcf (+45 Bcf vs 5yr average)",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 309.25,
+        "probability": 0.4,
+        "expected_change_pct": 1.36,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 287.33,
+        "probability": 0.35,
+        "expected_change_pct": -5.83,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 286.3,
+        "upper": 319.2
+      },
+      "realized_7d": {
+        "low": 286.3,
+        "high": 319.2,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 265.25,
+        "upper": 344.75
+      },
+      "contract_expiry": "NATURALGAS FUT 24 NOV 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 1.36,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 306.81,
+          "lower_bound": 304.32,
+          "upper_bound": 305.88,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 307.55,
+          "lower_bound": 303.51,
+          "upper_bound": 306.69,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 308.55,
+          "lower_bound": 301.93,
+          "upper_bound": 308.27,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 309.99,
+          "lower_bound": 298.76,
+          "upper_bound": 311.44,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 312.41,
+          "lower_bound": 290.92,
+          "upper_bound": 319.28,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 315.56,
+          "lower_bound": 276.04,
+          "upper_bound": 334.16,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 318.86,
+          "lower_bound": 254.76,
+          "upper_bound": 355.44,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 321.47,
+          "lower_bound": 233.91,
+          "upper_bound": 376.29,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 287.33",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "NATURALGAS verified price is INR 305.10 (\u20b9/mmBtu)",
+          "source": "UPSTOX",
+          "timestamp": 1795010973.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 286.3 \u2013 319.2; ATR-14: 11.85",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795010996.3326433
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "EIA Working Natural Gas in Underground Storage: 3,210 Bcf (+45 Bcf vs 5yr average)",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795010996.3326433
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795010996.3326433
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
       "status": "VALIDATED",
       "realized_price": null,
       "realized_return_pct": null
@@ -338,6 +1598,11 @@
         "lower": 808.8,
         "upper": 876.2
       },
+      "realized_7d": null,
+      "forward_volatility_corridor": null,
+      "contract_expiry": null,
+      "market_status": "LIVE",
+      "is_synthetic_legacy": true,
       "expected_change_percent": 0.7,
       "volatility_assessment": "Standard historical volatility envelope",
       "horizons": [],
@@ -364,6 +1629,161 @@
         }
       ],
       "reasoning_summary": "Balanced institutional outlook for COPPER. Smelter concentrate bottlenecks maintaining backwardation.",
+      "status": "INVALID_LEGACY_SYNTHETIC",
+      "realized_price": null,
+      "realized_return_pct": null
+    },
+    {
+      "forecast_id": "fc_copper_mcx_1795011021",
+      "version": 2,
+      "instrument_id": "COPPER_MCX",
+      "symbol": "COPPER",
+      "current_price": 1215.15,
+      "currency": "INR",
+      "unit": "\u20b9/kg",
+      "exchange": "MCX",
+      "market_timestamp": 1795011021.1175194,
+      "forecast_timestamp": 1795011021.1175194,
+      "valid_until": 1795615821.1175194,
+      "direction": "BULLISH",
+      "confidence": 0.82,
+      "bullish_scenario": {
+        "price_target": 1248.38,
+        "probability": 0.45,
+        "expected_change_pct": 2.73,
+        "supporting_evidence": [
+          "LME Warehouse Stocks: 112,400 tonnes (-15% over 60 days)",
+          "RSI momentum holding above neutral 50 threshold"
+        ]
+      },
+      "base_scenario": {
+        "price_target": 1222.9,
+        "probability": 0.4,
+        "expected_change_pct": 0.64,
+        "supporting_evidence": [
+          "Orderly technical consolidation within dynamic moving average bands"
+        ]
+      },
+      "bearish_scenario": {
+        "price_target": 1181.93,
+        "probability": 0.15,
+        "expected_change_pct": -2.73,
+        "supporting_evidence": [
+          "Macro dollar index strength and potential demand moderation"
+        ]
+      },
+      "price_range": {
+        "lower": 1273.0,
+        "upper": 1349.75
+      },
+      "realized_7d": {
+        "low": 1273.0,
+        "high": 1349.75,
+        "span_pct": 0.0
+      },
+      "forward_volatility_corridor": {
+        "lower": 1140.86,
+        "upper": 1289.44
+      },
+      "contract_expiry": "COPPER FUT 30 NOV 26",
+      "market_status": "LIVE",
+      "is_synthetic_legacy": false,
+      "expected_change_percent": 0.64,
+      "volatility_assessment": "Realized 7D Span: 0.0% | Forward 1.5\u03c3 Corridor",
+      "horizons": [
+        {
+          "horizon": "15m",
+          "expected_price": 1218.36,
+          "lower_bound": 1212.06,
+          "upper_bound": 1218.24,
+          "volatility_assessment": "0.17% volatility envelope"
+        },
+        {
+          "horizon": "1h",
+          "expected_price": 1219.75,
+          "lower_bound": 1208.83,
+          "upper_bound": 1221.47,
+          "volatility_assessment": "0.35% volatility envelope"
+        },
+        {
+          "horizon": "4h",
+          "expected_price": 1221.61,
+          "lower_bound": 1202.52,
+          "upper_bound": 1227.78,
+          "volatility_assessment": "0.69% volatility envelope"
+        },
+        {
+          "horizon": "1d",
+          "expected_price": 1224.32,
+          "lower_bound": 1189.89,
+          "upper_bound": 1240.41,
+          "volatility_assessment": "1.39% volatility envelope"
+        },
+        {
+          "horizon": "7d",
+          "expected_price": 1228.84,
+          "lower_bound": 1158.67,
+          "upper_bound": 1271.63,
+          "volatility_assessment": "3.1% volatility envelope"
+        },
+        {
+          "horizon": "30d",
+          "expected_price": 1234.75,
+          "lower_bound": 1099.39,
+          "upper_bound": 1330.91,
+          "volatility_assessment": "6.35% volatility envelope"
+        },
+        {
+          "horizon": "90d",
+          "expected_price": 1240.94,
+          "lower_bound": 1014.65,
+          "upper_bound": 1415.65,
+          "volatility_assessment": "11.0% volatility envelope"
+        },
+        {
+          "horizon": "180d",
+          "expected_price": 1245.83,
+          "lower_bound": 931.6,
+          "upper_bound": 1498.7,
+          "volatility_assessment": "15.56% volatility envelope"
+        }
+      ],
+      "self_challenge_critique": "Self-Challenge Dialectic: The bullish thesis relies heavily on inventory deficits. However, if broader liquidity tightens or dollar strength resumes, physical scarcity alone may be insufficient to drive immediate upside expansion.",
+      "invalidation_conditions": [
+        "Sustained breach below primary support at 1181.93",
+        "EIA or warehouse report showing abrupt shift into surplus"
+      ],
+      "key_risks": [
+        "Unexpected central bank monetary policy shifts",
+        "Foreign exchange volatility"
+      ],
+      "evidence_references": [
+        {
+          "type": "MARKET_QUOTE",
+          "statement": "COPPER verified price is INR 1,215.15 (\u20b9/kg)",
+          "source": "UPSTOX",
+          "timestamp": 1795010996.0
+        },
+        {
+          "type": "TECHNICAL_RANGE",
+          "statement": "7-day realized range: 1273.0 \u2013 1349.75; ATR-14: 22.15",
+          "source": "UPSTOX_EXCHANGE_OHLCV",
+          "timestamp": 1795011021.1175194
+        },
+        {
+          "type": "FUNDAMENTALS",
+          "statement": "LME Warehouse Stocks: 112,400 tonnes (-15% over 60 days)",
+          "source": "EIA / Official Inventories",
+          "timestamp": 1795011021.1175194
+        },
+        {
+          "type": "NEWS_CATALYST",
+          "statement": "Middle East Tensions Spur Safe Haven Bids in Precious Metals",
+          "source": "Kitco Metals News",
+          "timestamp": 1795011021.1175194
+        }
+      ],
+      "reasoning_summary": "Market dynamics present an asymmetric risk-reward setup. Physical inventory constraints support base price levels, while macro dollar conditions cap runaway upside.",
       "status": "VALIDATED",
       "realized_price": null,
       "realized_return_pct": null
@@ -412,6 +1832,11 @@
         "lower": 23376.0,
         "upper": 25324.0
       },
+      "realized_7d": null,
+      "forward_volatility_corridor": null,
+      "contract_expiry": null,
+      "market_status": "LIVE",
+      "is_synthetic_legacy": true,
       "expected_change_percent": 0.4,
       "volatility_assessment": "Standard historical volatility envelope",
       "horizons": [],
@@ -438,7 +1863,7 @@
         }
       ],
       "reasoning_summary": "Balanced institutional outlook for NIFTY 50. Domestic institutional inflows offset foreign institutional profit booking.",
-      "status": "VALIDATED",
+      "status": "INVALID_LEGACY_SYNTHETIC",
       "realized_price": null,
       "realized_return_pct": null
     }
@@ -486,6 +1911,11 @@
         "lower": 81.04,
         "upper": 87.8
       },
+      "realized_7d": null,
+      "forward_volatility_corridor": null,
+      "contract_expiry": null,
+      "market_status": "LIVE",
+      "is_synthetic_legacy": true,
       "expected_change_percent": 0.0,
       "volatility_assessment": "Standard historical volatility envelope",
       "horizons": [],
@@ -512,7 +1942,7 @@
         }
       ],
       "reasoning_summary": "Balanced institutional outlook for USDINR. RBI active currency intervention stabilizing volatility.",
-      "status": "VALIDATED",
+      "status": "INVALID_LEGACY_SYNTHETIC",
       "realized_price": null,
       "realized_return_pct": null
     }
@@ -560,6 +1990,11 @@
         "lower": 87552.0,
         "upper": 94848.0
       },
+      "realized_7d": null,
+      "forward_volatility_corridor": null,
+      "contract_expiry": null,
+      "market_status": "LIVE",
+      "is_synthetic_legacy": true,
       "expected_change_percent": 1.0,
       "volatility_assessment": "Standard historical volatility envelope",
       "horizons": [],
@@ -586,7 +2021,7 @@
         }
       ],
       "reasoning_summary": "Balanced institutional outlook for BTC-USD. Institutional spot ETF inflows supporting momentum.",
-      "status": "VALIDATED",
+      "status": "INVALID_LEGACY_SYNTHETIC",
       "realized_price": null,
       "realized_return_pct": null
     }

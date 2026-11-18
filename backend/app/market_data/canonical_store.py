@@ -52,6 +52,9 @@ class CanonicalQuote:
 
     @property
     def market_session_open(self) -> bool:
+        if self.exchange == "MCX":
+            from backend.app.market_data.mcx_session_engine import mcx_session_engine
+            return mcx_session_engine.is_mcx_trading_session()
         return _nse_cash_market_open()
 
     @property

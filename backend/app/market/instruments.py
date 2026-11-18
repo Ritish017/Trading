@@ -451,6 +451,13 @@ INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
     }
 }
 
+def register_instrument(symbol: str, metadata: Dict[str, Any]) -> None:
+    """Dynamically register or update an instrument entry in INSTRUMENT_MAP."""
+    if not symbol or not metadata:
+        return
+    clean_sym = symbol.strip().upper()
+    INSTRUMENT_MAP[clean_sym] = metadata
+
 def normalize_symbol_alias(symbol: str) -> str:
     """Normalize symbol to standard uppercase canonical alias format."""
     clean = symbol.strip().upper()
@@ -462,6 +469,7 @@ def normalize_symbol_alias(symbol: str) -> str:
 def get_instrument_key(symbol: str) -> Optional[str]:
     """
     Resolve symbol string to official Upstox instrument key.
+    Supports equities, indices, and MCX commodities (e.g. 'GOLD', 'CRUDEOIL', 'MCX_FO|...').
     Returns None if instrument is unknown rather than inventing a fake key.
     """
     if not symbol:
@@ -479,9 +487,18 @@ def get_instrument_key(symbol: str) -> Optional[str]:
         if base_sym in INSTRUMENT_MAP:
             return INSTRUMENT_MAP[base_sym]["instrument_key"]
 
-    # If raw instrument key format is already passed directly (e.g. NSE_EQ|INE...)
-    if "|" in symbol and (symbol.startswith("NSE_") or symbol.startswith("BSE_")):
+    # If raw instrument key format is already passed directly (e.g. NSE_EQ|INE..., MCX_FO|495213)
+    if "|" in symbol and (symbol.startswith("NSE_") or symbol.startswith("BSE_") or symbol.startswith("MCX_")):
         return symbol
+
+    # Fallback to dynamic contract resolver for MCX commodities
+    try:
+        from backend.app.market_data.mcx.contract_resolver import active_contract_resolver
+        resolved_key = active_contract_resolver.get_instrument_key(clean_sym)
+        if resolved_key:
+            return resolved_key
+    except Exception as e:
+        logger.debug(f"[INSTRUMENTS] Resolver fallback error for '{symbol}': {e}")
 
     # Unknown instrument
     return None
@@ -499,16 +516,20 @@ def get_instrument_metadata(symbol: str) -> Optional[Dict[str, Any]]:
 
 def get_symbol_from_key(instrument_key: str) -> str:
     """
-    Deterministically reverse map instrument_key to canonical primary UI symbol (.NS preferred for equities).
+    Deterministically reverse map instrument_key to canonical primary UI symbol (.NS preferred for equities, canonical code for commodities).
     """
     if not instrument_key:
         return ""
-    # Look for .NS primary alias first
+    # Look for .NS primary alias first for equities
     for sym, meta in INSTRUMENT_MAP.items():
-        if meta["instrument_key"] == instrument_key and sym.endswith(".NS"):
+        if meta.get("instrument_key") == instrument_key and sym.endswith(".NS"):
+            return sym
+    # Look for canonical commodity code (e.g. "GOLD", "CRUDEOIL")
+    for sym, meta in INSTRUMENT_MAP.items():
+        if meta.get("instrument_key") == instrument_key and meta.get("commodity_code") == sym:
             return sym
     # Look for any matching alias
     for sym, meta in INSTRUMENT_MAP.items():
-        if meta["instrument_key"] == instrument_key:
+        if meta.get("instrument_key") == instrument_key:
             return sym
     return instrument_key

@@ -130,20 +130,20 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         {/* Paper Order Terminal Button */}
         <button
           onClick={onOpenPaperTrading}
-          className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-[#1c1e27] border border-stone-800/80 hover:border-amber-500/40 text-stone-200 hover:text-white font-bold text-xs transition-all cursor-pointer"
+          className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-[#1c1e27] border border-stone-800/80 hover:border-amber-500/40 text-stone-200 hover:text-white font-bold text-xs transition-all cursor-pointer"
         >
           <BarChart2 className="w-4 h-4 text-amber-400 shrink-0" />
-          <span className="hidden sm:inline">Paper Order Terminal</span>
+          <span className="inline">Paper Order Terminal</span>
         </button>
 
         {/* Global Commodities Desk Button (Directly beside Paper Order Terminal) */}
         <button
           onClick={onOpenCommodities || onOpenAIIntelligence}
-          className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-yellow-500/20 border border-amber-500/50 hover:border-amber-400 text-amber-300 hover:text-white font-bold text-xs transition-all cursor-pointer shadow-lg shadow-amber-500/10 active:scale-95"
+          className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-yellow-500/20 border border-amber-500/50 hover:border-amber-400 text-amber-300 hover:text-white font-bold text-xs transition-all cursor-pointer shadow-lg shadow-amber-500/10 active:scale-95"
           title="Open Global Commodities Intelligence (Gold, Silver, Crude Oil, Copper, Gas)"
         >
           <Coins className="w-4 h-4 text-amber-400 shrink-0" />
-          <span className="hidden sm:inline">Commodities Desk</span>
+          <span className="inline">Commodities Desk</span>
           <span className="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/25 text-amber-300 font-mono font-black border border-amber-500/40">MCX</span>
         </button>
 

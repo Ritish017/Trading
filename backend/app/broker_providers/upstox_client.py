@@ -8,6 +8,28 @@ from backend.app.market.instruments import get_instrument_key, get_instrument_me
 logger = logging.getLogger(__name__)
 
 
+def is_mcx_instrument(symbol: str) -> bool:
+    """Detect whether symbol corresponds to an MCX commodity instrument."""
+    if not symbol:
+        return False
+    clean = str(symbol).strip().upper()
+    if clean.startswith("MCX_") or clean.endswith("_MCX") or "MCX" in clean:
+        return True
+    try:
+        from backend.app.market_data.mcx.contract_resolver import active_contract_resolver
+        if active_contract_resolver.normalize_commodity_code(clean) is not None:
+            return True
+    except Exception:
+        pass
+    try:
+        k = get_instrument_key(symbol)
+        if k and "MCX" in k.upper():
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def parse_upstox_timestamp(ts_val: Any) -> float:
     if not ts_val:
         return time.time()
@@ -306,7 +328,12 @@ class UpstoxRESTClient:
                     return self._normalize_quote(quote_body, symbol, inst_key)
             except Exception as e:
                 logger.info("[UPSTOX REST] Direct quote fetch for %s deferred to fallback: %s", symbol, e)
-        
+                if is_mcx_instrument(symbol):
+                    raise ValueError(f"MCX market quote unavailable for {symbol}; Yahoo fallback strictly prohibited: {e}") from e
+
+        if is_mcx_instrument(symbol):
+            raise ValueError(f"MCX market quote unavailable for {symbol}; Yahoo fallback strictly prohibited.")
+
         quotes = await self._fetch_yahoo_batch_quotes([symbol])
         if quotes:
             return quotes[0]
@@ -344,7 +371,7 @@ class UpstoxRESTClient:
                 except Exception as e:
                     logger.warning(f"[UPSTOX REST] Chunk quotes failed ({e})")
 
-        missing_symbols = [s for s in symbols if s not in found_symbols]
+        missing_symbols = [s for s in symbols if s not in found_symbols and not is_mcx_instrument(s)]
         if missing_symbols:
             try:
                 yf_quotes = await self._fetch_yahoo_batch_quotes(missing_symbols)
@@ -385,6 +412,7 @@ class UpstoxRESTClient:
                             "low": float(c[3]),
                             "close": float(c[4]),
                             "volume": int(c[5]) if len(c) > 5 else 0,
+                            "open_interest": int(c[6]) if len(c) > 6 else 0,
                             "source": "UPSTOX",
                             "provider": "UPSTOX",
                             "is_live": False,
@@ -418,6 +446,7 @@ class UpstoxRESTClient:
                                     "low": min(x["low"] for x in chunk),
                                     "close": chunk[-1]["close"],
                                     "volume": sum(x["volume"] for x in chunk),
+                                    "open_interest": int(chunk[-1].get("open_interest", 0)),
                                     "source": "UPSTOX",
                                     "provider": "UPSTOX",
                                     "is_live": False,
@@ -437,6 +466,7 @@ class UpstoxRESTClient:
                             "low": min(x["low"] for x in chunk),
                             "close": chunk[-1]["close"],
                             "volume": sum(x["volume"] for x in chunk),
+                            "open_interest": int(chunk[-1].get("open_interest", 0)),
                             "source": "UPSTOX",
                             "provider": "UPSTOX",
                             "is_live": False,
@@ -451,7 +481,18 @@ class UpstoxRESTClient:
                 logger.info("[UPSTOX REST] Intraday candle query for %s failed/skipped: %s", symbol, e)
 
         # 2. Historical Date-Range Query (for past dates)
-        upstox_supported_map = {"1m": "1minute", "30m": "30minute", "1D": "day"}
+        upstox_supported_map = {
+            "1m": "1minute",
+            "1min": "1minute",
+            "1minute": "1minute",
+            "30m": "30minute",
+            "30min": "30minute",
+            "30minute": "30minute",
+            "1D": "day",
+            "1d": "day",
+            "day": "day",
+            "DAY": "day",
+        }
         mapped_interval = upstox_supported_map.get(interval)
         if mapped_interval and inst_key and to_date:
             try:
@@ -468,12 +509,32 @@ class UpstoxRESTClient:
                             ts = int(dt.timestamp())
                         except Exception:
                             ts = int(c[0]) if isinstance(c[0], (int, float)) else 0
-                        normalized.append({"timestamp": ts, "time": ts, "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": int(c[5]) if len(c) > 5 else 0, "source": "UPSTOX", "is_live": False, "provider": "UPSTOX", "symbol": symbol, "instrument_key": inst_key, "price_domain": "RAW_EXCHANGE_PRICE", "adjustment_status": "RAW_EXCHANGE_PRICE"})
+                        normalized.append({
+                            "timestamp": ts,
+                            "time": ts,
+                            "open": float(c[1]),
+                            "high": float(c[2]),
+                            "low": float(c[3]),
+                            "close": float(c[4]),
+                            "volume": int(c[5]) if len(c) > 5 else 0,
+                            "open_interest": int(c[6]) if len(c) > 6 else 0,
+                            "source": "UPSTOX",
+                            "is_live": False,
+                            "provider": "UPSTOX",
+                            "symbol": symbol,
+                            "instrument_key": inst_key,
+                            "price_domain": "RAW_EXCHANGE_PRICE",
+                            "adjustment_status": "RAW_EXCHANGE_PRICE"
+                        })
                     normalized.reverse()
                     if normalized:
                         return normalized
             except Exception as e:
                 logger.info("[UPSTOX REST] Native candle query for %s failed/skipped: %s", symbol, e)
+
+        if is_mcx_instrument(symbol):
+            logger.warning("[UPSTOX REST] Historical candle fetch for MCX symbol %s failed; Yahoo fallback strictly prohibited.", symbol)
+            return []
         try:
             ticker_map = {"NIFTY 50": "^NSEI", "NIFTY50": "^NSEI", "NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "BANK NIFTY": "^NSEBANK", "FINNIFTY": "NIFTY_FIN_SERVICE.NS", "SENSEX": "^BSESN", "INDIA VIX": "^INDIAVIX"}
             clean_sym = symbol.strip()

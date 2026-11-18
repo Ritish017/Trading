@@ -12,7 +12,10 @@ import {
   Target,
   Compass,
   Layers,
-  HelpCircle
+  HelpCircle,
+  Radio,
+  CheckCircle2,
+  Calendar
 } from 'lucide-react';
 
 interface ScenarioDetail {
@@ -47,6 +50,11 @@ interface MarketForecast {
   base_scenario: ScenarioDetail;
   bearish_scenario: ScenarioDetail;
   price_range: { lower: number; upper: number };
+  realized_7d?: { low: number; high: number; span_pct?: number };
+  forward_volatility_corridor?: { lower: number; upper: number };
+  contract_expiry?: string;
+  market_status?: string;
+  is_synthetic_legacy?: boolean;
   expected_change_percent: number;
   volatility_assessment: string;
   horizons: HorizonForecast[];
@@ -60,10 +68,16 @@ interface MarketForecast {
 
 const FEATURED_COMMODITIES = [
   { id: 'GOLD_MCX', label: 'Gold (MCX)', icon: '🟡', unit: '₹/10g' },
+  { id: 'GOLDM_MCX', label: 'Gold Mini (MCX)', icon: '🪙', unit: '₹/10g' },
   { id: 'SILVER_MCX', label: 'Silver (MCX)', icon: '⚪', unit: '₹/kg' },
+  { id: 'SILVERM_MCX', label: 'Silver Mini (MCX)', icon: '🥈', unit: '₹/kg' },
   { id: 'CRUDEOIL_MCX', label: 'Crude Oil (MCX)', icon: '🛢️', unit: '₹/bbl' },
   { id: 'NATGAS_MCX', label: 'Natural Gas (MCX)', icon: '🔥', unit: '₹/mmBtu' },
   { id: 'COPPER_MCX', label: 'Copper (MCX)', icon: '🧱', unit: '₹/kg' },
+  { id: 'ALUMINIUM_MCX', label: 'Aluminium (MCX)', icon: '🥫', unit: '₹/kg' },
+  { id: 'ZINC_MCX', label: 'Zinc (MCX)', icon: '⚙️', unit: '₹/kg' },
+  { id: 'LEAD_MCX', label: 'Lead (MCX)', icon: '🔋', unit: '₹/kg' },
+  { id: 'NICKEL_MCX', label: 'Nickel (MCX)', icon: '🔩', unit: '₹/kg' },
   { id: 'NIFTY50_NSE', label: 'NIFTY 50 (NSE)', icon: '🇮🇳', unit: 'pts' },
   { id: 'USDINR_NSE', label: 'USD/INR (NSE)', icon: '💵', unit: '₹/USD' },
   { id: 'BTCUSD', label: 'Bitcoin (Global)', icon: '₿', unit: '$/BTC' },
@@ -105,7 +119,8 @@ export const GlobalCommodityForecastCard: React.FC = () => {
         const data = await res.json();
         setForecast(data);
       } else {
-        setError('Failed to trigger APEX Chief Reasoner.');
+        const errJson = await res.json().catch(() => ({}));
+        setError(errJson.detail || 'Failed to trigger APEX Chief Reasoner.');
       }
     } catch (e: any) {
       setError(e.message || 'Error executing forecast pipeline.');
@@ -152,14 +167,17 @@ export const GlobalCommodityForecastCard: React.FC = () => {
             <Compass className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-stone-100 flex items-center gap-2">
-              APEX Chief Reasoner — Global Market Intelligence
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
-                Single-LLM Protocol
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-stone-100">
+                APEX Chief Reasoner — Commodity & Macro Intelligence
+              </h3>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                ZERO-MOCK VERIFIED
               </span>
-            </h3>
+            </div>
             <p className="text-xs text-stone-400">
-              10-step dialectical reasoning across spot, futures curve, inventories & macro evidence
+              Live MCX exchange quotes & historical daily OHLCV candles via Upstox REST API v2
             </p>
           </div>
         </div>
@@ -167,10 +185,10 @@ export const GlobalCommodityForecastCard: React.FC = () => {
         <button
           onClick={handleGenerateForecast}
           disabled={isGenerating}
-          className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-medium transition shadow disabled:opacity-50"
+          className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-medium transition shadow disabled:opacity-50 cursor-pointer"
         >
           <Sparkles className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
-          <span>{isGenerating ? 'Executing 10-Step AI Protocol...' : 'Run Single-LLM Forecast'}</span>
+          <span>{isGenerating ? 'Querying Live Feed & Reasoning...' : 'Run Live Reasoner'}</span>
         </button>
       </div>
 
@@ -180,9 +198,9 @@ export const GlobalCommodityForecastCard: React.FC = () => {
           <button
             key={c.id}
             onClick={() => setSelectedInst(c.id)}
-            className={`flex items-center space-x-1 px-2.5 py-1 rounded-xl text-xs whitespace-nowrap transition border ${
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-xl text-xs whitespace-nowrap transition border cursor-pointer ${
               selectedInst === c.id
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold'
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-bold shadow-sm'
                 : 'bg-stone-900/60 text-stone-400 border-stone-800 hover:text-stone-200'
             }`}
           >
@@ -195,40 +213,88 @@ export const GlobalCommodityForecastCard: React.FC = () => {
       {isLoading && (
         <div className="py-12 flex flex-col items-center justify-center space-y-2 text-stone-400">
           <RefreshCw className="w-5 h-5 animate-spin text-amber-400" />
-          <p className="text-xs">Loading factual market intelligence & price scenarios...</p>
+          <p className="text-xs">Connecting to exchange data engine and verifying price integrity...</p>
         </div>
       )}
 
       {error && !isLoading && !forecast && (
-        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between">
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center space-x-2 text-amber-300 text-xs">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-400" />
             <span>{error}</span>
           </div>
           <button
             onClick={handleGenerateForecast}
-            className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs rounded-lg font-medium border border-amber-500/30"
+            disabled={isGenerating}
+            className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs rounded-lg font-bold border border-amber-500/30 cursor-pointer"
           >
-            Generate Now
+            {isGenerating ? 'Generating...' : 'Generate Live Forecast'}
           </button>
         </div>
       )}
 
       {forecast && !isLoading && (
         <div className="space-y-4">
+          {/* Legacy Quarantine Alert if applicable */}
+          {forecast.is_synthetic_legacy && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center justify-between text-xs text-rose-300">
+              <div className="flex items-center space-x-2">
+                <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>
+                  <strong>Quarantined Legacy Record:</strong> This forecast was generated with previous static mock data. Click 'Run Live Reasoner' to re-anchor with authentic live exchange quotes.
+                </span>
+              </div>
+              <button
+                onClick={handleGenerateForecast}
+                className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/30 rounded border border-rose-500/40 text-rose-200 font-bold ml-2 shrink-0"
+              >
+                Refresh Now
+              </button>
+            </div>
+          )}
+
           {/* Snapshot Header */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-stone-900/60 border border-stone-800/80 rounded-xl p-3">
             <div>
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Instrument & Unit</span>
+              <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Instrument & Expiry</span>
               <span className="text-sm font-bold text-stone-100">{forecast.symbol} ({forecast.exchange})</span>
-              <span className="text-[11px] text-stone-400 block font-mono">{forecast.unit}</span>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[11px] text-amber-400/90 font-mono font-bold">{forecast.unit}</span>
+                {forecast.contract_expiry && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-stone-800 text-stone-300 border border-stone-700/60 flex items-center gap-1">
+                    <Calendar className="w-2.5 h-2.5 text-stone-400" />
+                    {forecast.contract_expiry}
+                  </span>
+                )}
+              </div>
             </div>
             <div>
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Current Price</span>
-              <span className="text-sm font-bold text-stone-100 font-mono">
-                {forecast.currency} {forecast.current_price.toLocaleString()}
-              </span>
-              <span className="text-[11px] text-stone-400 block">7D Range: {forecast.price_range.lower.toLocaleString()} – {forecast.price_range.upper.toLocaleString()}</span>
+              <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Current Verified Price</span>
+              <div className="flex items-center gap-2">
+                <span className="text-base font-extrabold text-stone-100 font-mono">
+                  {forecast.currency} {forecast.current_price.toLocaleString()}
+                </span>
+                {forecast.market_status && (
+                  <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                    forecast.market_status === 'LIVE'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-stone-800 text-stone-400 border border-stone-700'
+                  }`}>
+                    <Radio className={`w-2.5 h-2.5 ${forecast.market_status === 'LIVE' ? 'animate-pulse text-emerald-400' : ''}`} />
+                    MCX {forecast.market_status}
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-stone-400 mt-0.5 flex flex-col gap-0.5">
+                <span>
+                  7D Realized Range: <strong className="text-stone-300 font-mono">{forecast.currency} {(forecast.realized_7d?.low || forecast.price_range.lower).toLocaleString()} – {(forecast.realized_7d?.high || forecast.price_range.upper).toLocaleString()}</strong>
+                </span>
+                {forecast.forward_volatility_corridor && (
+                  <span>
+                    Forward 1.5σ Corridor: <strong className="text-indigo-300 font-mono">{forecast.currency} {forecast.forward_volatility_corridor.lower.toLocaleString()} – {forecast.forward_volatility_corridor.upper.toLocaleString()}</strong>
+                  </span>
+                )}
+              </div>
             </div>
             <div>
               <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Reasoning Stance</span>
@@ -236,7 +302,7 @@ export const GlobalCommodityForecastCard: React.FC = () => {
               <span className="text-[11px] text-stone-400 block mt-0.5">Confidence: {Math.round(forecast.confidence * 100)}%</span>
             </div>
             <div>
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Version & Status</span>
+              <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Version & Integrity</span>
               <span className="text-xs font-mono text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
                 v{forecast.version} • {forecast.status}
               </span>

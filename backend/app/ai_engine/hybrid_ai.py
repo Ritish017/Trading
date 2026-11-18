@@ -165,7 +165,7 @@ class HybridAIEngine:
                 prompt=prompt,
                 system_prompt=system_prompt,
                 model=self.amd_preferred_model,
-                timeout=max(25.0, timeout),
+                timeout=min(6.0, timeout),
             )
             if amd_res.status == "SUCCESS":
                 return HybridAIResponse(

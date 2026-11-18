@@ -1157,20 +1157,55 @@ async def get_universal_instruments():
 async def get_latest_market_forecasts():
     """Returns all latest active forecasts published by the APEX Chief Reasoner."""
     from backend.app.ai_engine.forecast_store import forecast_store
-    return [fc.model_dump() for fc in forecast_store.list_all_latest_forecasts()]
+    return [fc.model_dump() for fc in forecast_store.list_all_latest_forecasts(allow_quarantined=False)]
 
 
 @app.get("/api/market-intelligence/forecast/{instrument_id}")
-async def get_instrument_forecast(instrument_id: str):
-    """Returns the latest forecast and complete historical version history for an instrument."""
+async def get_instrument_forecast(instrument_id: str, auto_generate: bool = True):
+    """Returns the latest verified forecast and complete historical version history for an instrument."""
     from backend.app.ai_engine.forecast_store import forecast_store
-    latest = forecast_store.get_latest_forecast(instrument_id)
-    history = forecast_store.get_forecast_history(instrument_id)
+    latest = forecast_store.get_latest_forecast(instrument_id, allow_quarantined=False)
+    if not latest and auto_generate:
+        try:
+            from backend.app.ai_engine.apex_chief_reasoner import apex_chief_reasoner
+            latest = await apex_chief_reasoner.execute_forecast_pipeline(
+                instrument_id=instrument_id,
+                trigger_reason="ON_DEMAND_READ",
+            )
+            forecast_store.save_forecast(latest)
+        except Exception as e:
+            logger.warning(f"Could not auto-generate live forecast for {instrument_id}: {e}")
+
+    history = forecast_store.get_forecast_history(instrument_id, allow_quarantined=False)
     return {
         "latest": latest.model_dump() if latest else None,
         "history": [fc.model_dump() for fc in history],
         "total_versions": len(history),
     }
+
+
+@app.get("/api/commodities/quotes")
+async def get_commodity_quotes():
+    """Returns verified live quotes across the entire target commodity universe."""
+    from backend.app.market_data.universal_feed import universal_feed_service
+    from backend.app.market_data.price_integrity_gateway import price_integrity_gateway
+    from backend.app.market_data.mcx.contract_resolver import active_contract_resolver
+    
+    results = {}
+    for code in active_contract_resolver.TARGET_COMMODITIES:
+        try:
+            q = await universal_feed_service.get_live_quote(code)
+            val = price_integrity_gateway.validate_quote(q)
+            results[code] = {
+                "quote": q.model_dump(),
+                "integrity": val.model_dump(),
+            }
+        except Exception as e:
+            results[code] = {
+                "error": str(e),
+                "is_available": False,
+            }
+    return results
 
 
 @app.post("/api/market-intelligence/forecast/generate/{instrument_id}")

@@ -21,4 +21,5 @@ scratch/
 *.png
 
 .scratch/
+backend/data/cache/
 

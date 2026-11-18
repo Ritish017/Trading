@@ -18,6 +18,36 @@ def _nse_cash_market_open(now: Optional[dt.datetime] = None) -> bool:
     return dt.time(9, 15) <= now.time() <= dt.time(15, 30)
 
 
+def is_market_session_open(target: Any = "NSE", now: Optional[dt.datetime] = None) -> bool:
+    """
+    Evaluates whether the market trading session is open.
+    Properly recognizes MCX commodity instruments during evening trading hours (09:00 to 23:30/23:55 IST)
+    without getting blocked by NSE/BSE equity 15:30 closing time.
+    """
+    exchange = "NSE"
+    if hasattr(target, "exchange"):
+        exchange = getattr(target, "exchange") or "NSE"
+    elif isinstance(target, dict):
+        exchange = target.get("exchange") or target.get("source_exchange") or "NSE"
+    elif isinstance(target, str):
+        target_str = target.upper().strip()
+        if (
+            target_str == "MCX"
+            or target_str.startswith("MCX_FO|")
+            or target_str.endswith("_MCX")
+            or ".MCX" in target_str
+        ):
+            exchange = "MCX"
+        else:
+            exchange = target_str
+
+    if str(exchange).upper() == "MCX":
+        from backend.app.market_data.mcx_session_engine import is_mcx_trading_session_open
+        return is_mcx_trading_session_open(now)
+
+    return _nse_cash_market_open(now)
+
+
 @dataclass
 class CanonicalQuote:
     symbol: str
@@ -52,10 +82,7 @@ class CanonicalQuote:
 
     @property
     def market_session_open(self) -> bool:
-        if self.exchange == "MCX":
-            from backend.app.market_data.mcx_session_engine import mcx_session_engine
-            return mcx_session_engine.is_mcx_trading_session()
-        return _nse_cash_market_open()
+        return is_market_session_open(self)
 
     @property
     def is_live(self) -> bool:

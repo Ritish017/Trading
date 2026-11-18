@@ -15,7 +15,8 @@ import {
   HelpCircle,
   Radio,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Activity
 } from 'lucide-react';
 
 interface ScenarioDetail {
@@ -66,6 +67,20 @@ interface MarketForecast {
   status: string;
 }
 
+interface LiveQuote {
+  ltp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  open_interest: number;
+  last_trade_time: number;
+  market_status: string;
+  contract_expiry?: string;
+  trading_symbol?: string;
+}
+
 const FEATURED_COMMODITIES = [
   { id: 'GOLD_MCX', label: 'Gold (MCX)', icon: '🟡', unit: '₹/10g' },
   { id: 'GOLDM_MCX', label: 'Gold Mini (MCX)', icon: '🪙', unit: '₹/10g' },
@@ -86,25 +101,42 @@ const FEATURED_COMMODITIES = [
 export const GlobalCommodityForecastCard: React.FC = () => {
   const [selectedInst, setSelectedInst] = useState('GOLD_MCX');
   const [forecast, setForecast] = useState<MarketForecast | null>(null);
+  const [liveQuote, setLiveQuote] = useState<LiveQuote | null>(null);
+  const [prevPrice, setPrevPrice] = useState<number | null>(null);
+  const [priceFlash, setPriceFlash] = useState<'up' | 'down' | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAutoSync, setIsAutoSync] = useState(true);
+  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
 
-  const fetchForecast = async (id: string) => {
-    setIsLoading(true);
+  const fetchForecast = async (id: string, silent = false) => {
+    if (!silent) setIsLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/market-intelligence/forecast/${id}`);
       if (res.ok) {
         const data = await res.json();
         setForecast(data.latest);
+        if (data.live_quote) {
+          const newLtp = data.live_quote.ltp;
+          setPrevPrice((old) => {
+            if (old !== null && newLtp !== old) {
+              setPriceFlash(newLtp > old ? 'up' : 'down');
+              setTimeout(() => setPriceFlash(null), 1500);
+            }
+            return newLtp;
+          });
+          setLiveQuote(data.live_quote);
+        }
+        setLastSyncTime(new Date());
       } else {
-        setError('Forecast not yet generated for this instrument.');
+        if (!silent) setError('Forecast not yet generated for this instrument.');
       }
     } catch (e: any) {
-      setError(e.message || 'Network error fetching forecast');
+      if (!silent) setError(e.message || 'Network error fetching forecast');
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
@@ -129,9 +161,18 @@ export const GlobalCommodityForecastCard: React.FC = () => {
     }
   };
 
+  // Real-time automatic polling every 5 seconds
   useEffect(() => {
-    fetchForecast(selectedInst);
-  }, [selectedInst]);
+    fetchForecast(selectedInst, false);
+
+    if (!isAutoSync) return;
+
+    const interval = setInterval(() => {
+      fetchForecast(selectedInst, true);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [selectedInst, isAutoSync]);
 
   const getDirectionBadge = (dir: string) => {
     if (dir === 'BULLISH') {
@@ -158,9 +199,13 @@ export const GlobalCommodityForecastCard: React.FC = () => {
     );
   };
 
+  const displayPrice = liveQuote?.ltp ?? forecast?.current_price ?? 0;
+  const displayStatus = liveQuote?.market_status ?? forecast?.market_status ?? 'LIVE';
+  const displayContract = liveQuote?.trading_symbol ?? forecast?.contract_expiry;
+
   return (
     <div className="bg-[#1c1e27] border border-stone-800/80 rounded-2xl p-4 shadow-sm space-y-4">
-      {/* Top Header: Selector & Run AI Pipeline */}
+      {/* Top Header: Selector & Live Telemetry Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-800/80 pb-3">
         <div className="flex items-center space-x-2">
           <div className="p-1.5 rounded-xl bg-gradient-to-br from-indigo-500/20 to-amber-500/20 border border-indigo-500/30 text-indigo-400">
@@ -182,14 +227,30 @@ export const GlobalCommodityForecastCard: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={handleGenerateForecast}
-          disabled={isGenerating}
-          className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-medium transition shadow disabled:opacity-50 cursor-pointer"
-        >
-          <Sparkles className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
-          <span>{isGenerating ? 'Querying Live Feed & Reasoning...' : 'Run Live Reasoner'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Real-Time Auto-Sync Toggle Beacon */}
+          <button
+            onClick={() => setIsAutoSync(!isAutoSync)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-mono font-bold border transition cursor-pointer ${
+              isAutoSync
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
+                : 'bg-stone-800 text-stone-400 border-stone-700 hover:text-stone-300'
+            }`}
+            title="Real-time automatic polling every 5 seconds"
+          >
+            <Radio className={`w-3.5 h-3.5 ${isAutoSync ? 'text-emerald-400 animate-pulse' : 'text-stone-500'}`} />
+            <span>{isAutoSync ? 'Real-Time Auto-Sync (5s)' : 'Auto-Sync Paused'}</span>
+          </button>
+
+          <button
+            onClick={handleGenerateForecast}
+            disabled={isGenerating}
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-medium transition shadow disabled:opacity-50 cursor-pointer"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
+            <span>{isGenerating ? 'Querying Live Feed...' : 'Run Live Reasoner'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Asset Switcher Chips */}
@@ -260,10 +321,10 @@ export const GlobalCommodityForecastCard: React.FC = () => {
               <span className="text-sm font-bold text-stone-100">{forecast.symbol} ({forecast.exchange})</span>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-[11px] text-amber-400/90 font-mono font-bold">{forecast.unit}</span>
-                {forecast.contract_expiry && (
+                {displayContract && (
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-stone-800 text-stone-300 border border-stone-700/60 flex items-center gap-1">
                     <Calendar className="w-2.5 h-2.5 text-stone-400" />
-                    {forecast.contract_expiry}
+                    {displayContract}
                   </span>
                 )}
               </div>
@@ -271,17 +332,23 @@ export const GlobalCommodityForecastCard: React.FC = () => {
             <div>
               <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Current Verified Price</span>
               <div className="flex items-center gap-2">
-                <span className="text-base font-extrabold text-stone-100 font-mono">
-                  {forecast.currency} {forecast.current_price.toLocaleString()}
+                <span className={`text-base font-extrabold font-mono transition-all duration-300 ${
+                  priceFlash === 'up'
+                    ? 'text-emerald-400 scale-105'
+                    : priceFlash === 'down'
+                    ? 'text-rose-400 scale-105'
+                    : 'text-stone-100'
+                }`}>
+                  {forecast.currency} {displayPrice.toLocaleString()}
                 </span>
-                {forecast.market_status && (
+                {displayStatus && (
                   <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded flex items-center gap-1 ${
-                    forecast.market_status === 'LIVE'
+                    displayStatus === 'LIVE'
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                       : 'bg-stone-800 text-stone-400 border border-stone-700'
                   }`}>
-                    <Radio className={`w-2.5 h-2.5 ${forecast.market_status === 'LIVE' ? 'animate-pulse text-emerald-400' : ''}`} />
-                    MCX {forecast.market_status}
+                    <Radio className={`w-2.5 h-2.5 ${displayStatus === 'LIVE' ? 'animate-pulse text-emerald-400' : ''}`} />
+                    MCX {displayStatus}
                   </span>
                 )}
               </div>
@@ -302,13 +369,21 @@ export const GlobalCommodityForecastCard: React.FC = () => {
               <span className="text-[11px] text-stone-400 block mt-0.5">Confidence: {Math.round(forecast.confidence * 100)}%</span>
             </div>
             <div>
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Version & Integrity</span>
-              <span className="text-xs font-mono text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
-                v{forecast.version} • {forecast.status}
-              </span>
+              <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-semibold">Version & Real-Time Sync</span>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-xs font-mono text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                  v{forecast.version} • {forecast.status}
+                </span>
+                {liveQuote && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 flex items-center gap-1">
+                    <Activity className="w-2.5 h-2.5 text-emerald-400" />
+                    OI: {liveQuote.open_interest.toLocaleString()}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px] text-stone-500 block mt-1 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                Updated {new Date(forecast.forecast_timestamp * 1000).toLocaleTimeString()}
+                Live Sync: {lastSyncTime.toLocaleTimeString()}
               </span>
             </div>
           </div>

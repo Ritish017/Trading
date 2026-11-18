@@ -1162,8 +1162,11 @@ async def get_latest_market_forecasts():
 
 @app.get("/api/market-intelligence/forecast/{instrument_id}")
 async def get_instrument_forecast(instrument_id: str, auto_generate: bool = True):
-    """Returns the latest verified forecast and complete historical version history for an instrument."""
+    """Returns the latest verified forecast and instantaneous live exchange quote for an instrument."""
     from backend.app.ai_engine.forecast_store import forecast_store
+    from backend.app.market_data.universal_feed import universal_feed_service
+    from backend.app.market_data.mcx.contract_resolver import active_contract_resolver
+
     latest = forecast_store.get_latest_forecast(instrument_id, allow_quarantined=False)
     if not latest and auto_generate:
         try:
@@ -1176,9 +1179,32 @@ async def get_instrument_forecast(instrument_id: str, auto_generate: bool = True
         except Exception as e:
             logger.warning(f"Could not auto-generate live forecast for {instrument_id}: {e}")
 
+    # Instantaneous live exchange tick for real-time streaming
+    live_quote = None
+    clean_code = instrument_id.upper().replace("_MCX", "").replace(".MCX", "").strip()
+    if active_contract_resolver.is_target_commodity(clean_code):
+        try:
+            q = await universal_feed_service.get_live_quote(clean_code)
+            live_quote = {
+                "ltp": q.ltp,
+                "open": q.open,
+                "high": q.high,
+                "low": q.low,
+                "close": q.close,
+                "volume": q.volume,
+                "open_interest": q.open_interest,
+                "last_trade_time": q.last_trade_time,
+                "market_status": q.market_status,
+                "contract_expiry": q.contract_expiry,
+                "trading_symbol": q.trading_symbol,
+            }
+        except Exception as e:
+            logger.debug(f"Live quote lookup for {instrument_id}: {e}")
+
     history = forecast_store.get_forecast_history(instrument_id, allow_quarantined=False)
     return {
         "latest": latest.model_dump() if latest else None,
+        "live_quote": live_quote,
         "history": [fc.model_dump() for fc in history],
         "total_versions": len(history),
     }

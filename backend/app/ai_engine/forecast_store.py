@@ -101,6 +101,52 @@ class ForecastStore:
         logger.info(f"[FORECAST STORE] Published immutable forecast {forecast.forecast_id} (Version {forecast.version}) for {inst_id}.")
         return forecast
 
+    @staticmethod
+    def is_forecast_stale(forecast: Optional[MarketForecast], as_of_ts: Optional[float] = None) -> bool:
+        """
+        Determines whether a forecast is session-stale.
+        Invariants:
+        - Quarantined / synthetic legacy forecasts are always stale.
+        - A forecast generated in a prior calendar session is stale if today's session has commenced (past 09:00 IST).
+        - Any forecast older than 14 hours during active trading days is evaluated as stale.
+        """
+        if forecast is None:
+            return True
+        if forecast.is_synthetic_legacy or forecast.status == "INVALID_LEGACY_SYNTHETIC":
+            return True
+
+        now_sec = as_of_ts or time.time()
+        fc_sec = forecast.forecast_timestamp or forecast.market_timestamp
+        if not fc_sec or fc_sec <= 0:
+            return True
+
+        age_seconds = now_sec - fc_sec
+        if age_seconds < 0:
+            return False  # Future timestamp (test mock)
+        if age_seconds > (14 * 3600):  # Exceeds full trading session length
+            return True
+
+        # Session boundary check in Asia/Kolkata
+        try:
+            import datetime
+            from zoneinfo import ZoneInfo
+            ist = ZoneInfo("Asia/Kolkata")
+            fc_dt = datetime.datetime.fromtimestamp(fc_sec, tz=ist)
+            now_dt = datetime.datetime.fromtimestamp(now_sec, tz=ist)
+
+            # Different date: if current time is past 09:00 IST, prior day's forecast is stale
+            if now_dt.date() > fc_dt.date():
+                if now_dt.hour >= 9:
+                    return True
+                if (now_sec - fc_sec) > (8 * 3600):
+                    return True
+        except Exception as e:
+            logger.warning(f"[FORECAST STORE] Session staleness check error: {e}")
+            if age_seconds > (12 * 3600):
+                return True
+
+        return False
+
     def get_latest_forecast(self, instrument_id: str, allow_quarantined: bool = False) -> Optional[MarketForecast]:
         fcs = self._forecasts.get(instrument_id, [])
         if not fcs:

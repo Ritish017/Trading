@@ -23,12 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 class RealizedPriceRange(BaseModel):
-    """Empirical past price range over a specified lookback window."""
+    """Empirical past price range over a specified lookback window with separate completed and session datasets."""
     period_days: int = Field(..., description="Lookback window in days (7, 14, 30)")
-    high: float = Field(..., description="Highest traded price in window")
-    low: float = Field(..., description="Lowest traded price in window")
+    high: float = Field(..., description="Highest traded price in window (composite rolling high)")
+    low: float = Field(..., description="Lowest traded price in window (composite rolling low)")
     range_span: float = Field(..., description="High - Low absolute span")
     range_span_pct: float = Field(..., description="(High - Low) / Low * 100 percentage range")
+    completed_high: Optional[float] = Field(None, description="Highest price strictly across completed daily sessions")
+    completed_low: Optional[float] = Field(None, description="Lowest price strictly across completed daily sessions")
+    current_session_high: Optional[float] = Field(None, description="Current trading session high")
+    current_session_low: Optional[float] = Field(None, description="Current trading session low")
+    current_session_included: bool = Field(False, description="Whether current session extremes are included in composite high/low")
 
 
 class CommodityTechnicals(BaseModel):
@@ -54,12 +59,17 @@ class CommodityTechnicals(BaseModel):
     forward_corridor_upper: float
 
 
-def compute_realized_range(candles: List[Dict[str, Any]], days: int, fallback_price: float = 0.0) -> RealizedPriceRange:
+def compute_realized_range(
+    candles: List[Dict[str, Any]],
+    days: int,
+    current_session: Optional[Dict[str, Any]] = None,
+    fallback_price: float = 0.0,
+) -> RealizedPriceRange:
     """
-    Computes exact realized high, low, span, and span pct over the last N daily bars.
-    Handles empty, single-candle, and extreme series gracefully.
+    Computes empirical high, low, span, and span pct over completed sessions and live current session.
+    Maintains separate completed-session and current-session datasets, explicitly labeling rolling calculations.
     """
-    if not candles:
+    if not candles and not current_session:
         fb = round(float(fallback_price), 2)
         return RealizedPriceRange(
             period_days=days,
@@ -67,11 +77,17 @@ def compute_realized_range(candles: List[Dict[str, Any]], days: int, fallback_pr
             low=fb,
             range_span=0.0,
             range_span_pct=0.0,
+            completed_high=fb,
+            completed_low=fb,
+            current_session_high=None,
+            current_session_low=None,
+            current_session_included=False,
         )
 
+    # 1. Evaluate completed sessions strictly from finalized daily bars
     slice_bars = candles[-days:] if len(candles) >= days else candles
-    highs: List[float] = []
-    lows: List[float] = []
+    comp_highs: List[float] = []
+    comp_lows: List[float] = []
 
     for b in slice_bars:
         h = b.get("high")
@@ -79,39 +95,70 @@ def compute_realized_range(candles: List[Dict[str, Any]], days: int, fallback_pr
         if h is not None:
             try:
                 hf = float(h)
-                if not (math.isnan(hf) or math.isinf(hf)):
-                    highs.append(hf)
+                if not (math.isnan(hf) or math.isinf(hf)) and hf > 0:
+                    comp_highs.append(hf)
             except (ValueError, TypeError):
                 pass
         if l is not None:
             try:
                 lf = float(l)
-                if not (math.isnan(lf) or math.isinf(lf)):
-                    lows.append(lf)
+                if not (math.isnan(lf) or math.isinf(lf)) and lf > 0:
+                    comp_lows.append(lf)
             except (ValueError, TypeError):
                 pass
 
-    if not highs:
-        fb = round(float(fallback_price), 2)
-        return RealizedPriceRange(
-            period_days=days,
-            high=fb,
-            low=fb,
-            range_span=0.0,
-            range_span_pct=0.0,
-        )
+    comp_h = max(comp_highs) if comp_highs else fallback_price
+    comp_l = min(comp_lows) if comp_lows else comp_h
 
-    max_h = max(highs)
-    min_l = min(lows) if lows else max_h
-    span = max_h - min_l
-    span_pct = (span / min_l * 100.0) if min_l > 0 else 0.0
+    # 2. Extract current-session extremes if available
+    sess_h: Optional[float] = None
+    sess_l: Optional[float] = None
+    sess_included = False
+
+    if current_session:
+        try:
+            sh = current_session.get("high")
+            sl = current_session.get("low")
+            if sh is not None:
+                shf = float(sh)
+                if not (math.isnan(shf) or math.isinf(shf)) and shf > 0:
+                    sess_h = shf
+            if sl is not None:
+                slf = float(sl)
+                if not (math.isnan(slf) or math.isinf(slf)) and slf > 0:
+                    sess_l = slf
+        except (ValueError, TypeError):
+            pass
+
+    # 3. Composite rolling range incorporating completed bars and live session
+    final_h = comp_h
+    final_l = comp_l
+
+    if sess_h is not None and sess_l is not None:
+        final_h = max(comp_h, sess_h)
+        final_l = min(comp_l, sess_l)
+        sess_included = True
+    elif sess_h is not None:
+        final_h = max(comp_h, sess_h)
+        sess_included = True
+    elif sess_l is not None:
+        final_l = min(comp_l, sess_l)
+        sess_included = True
+
+    span = final_h - final_l
+    span_pct = (span / final_l * 100.0) if final_l > 0 else 0.0
 
     return RealizedPriceRange(
         period_days=days,
-        high=round(max_h, 2),
-        low=round(min_l, 2),
+        high=round(final_h, 2),
+        low=round(final_l, 2),
         range_span=round(span, 2),
         range_span_pct=round(span_pct, 4),
+        completed_high=round(comp_h, 2) if comp_highs else None,
+        completed_low=round(comp_l, 2) if comp_lows else None,
+        current_session_high=round(sess_h, 2) if sess_h is not None else None,
+        current_session_low=round(sess_l, 2) if sess_l is not None else None,
+        current_session_included=sess_included,
     )
 
 
@@ -328,10 +375,29 @@ class TechnicalEngine:
         if not instrument_id:
             instrument_id = "UNKNOWN_COMMODITY"
 
-        # 1. Empirical realized ranges (7D, 14D, 30D)
-        r7 = compute_realized_range(candles, days=7, fallback_price=current_price)
-        r14 = compute_realized_range(candles, days=14, fallback_price=current_price)
-        r30 = compute_realized_range(candles, days=30, fallback_price=current_price)
+        # Build current_session structure if quote is available
+        current_session = None
+        if quote is not None:
+            q_high = getattr(quote, "high", None)
+            q_low = getattr(quote, "low", None)
+            q_ltp = getattr(quote, "ltp", None)
+            if q_high is not None and q_low is not None:
+                try:
+                    q_hf = float(q_high)
+                    q_lf = float(q_low)
+                    if q_hf > 0 and q_lf > 0:
+                        current_session = {
+                            "high": q_hf,
+                            "low": q_lf,
+                            "ltp": float(q_ltp) if q_ltp is not None else current_price,
+                        }
+                except (ValueError, TypeError):
+                    pass
+
+        # 1. Empirical realized ranges (7D, 14D, 30D) with separate completed and live session datasets
+        r7 = compute_realized_range(candles, days=7, current_session=current_session, fallback_price=current_price)
+        r14 = compute_realized_range(candles, days=14, current_session=current_session, fallback_price=current_price)
+        r30 = compute_realized_range(candles, days=30, current_session=current_session, fallback_price=current_price)
 
         # 2. Vector technical indicators
         indicators = compute_technical_indicators(candles)

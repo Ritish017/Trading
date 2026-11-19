@@ -51,7 +51,16 @@ interface MarketForecast {
   base_scenario: ScenarioDetail;
   bearish_scenario: ScenarioDetail;
   price_range: { lower: number; upper: number };
-  realized_7d?: { low: number; high: number; span_pct?: number };
+  realized_7d?: {
+    low: number;
+    high: number;
+    span_pct?: number;
+    completed_high?: number;
+    completed_low?: number;
+    current_session_high?: number;
+    current_session_low?: number;
+    current_session_included?: boolean;
+  };
   forward_volatility_corridor?: { lower: number; upper: number };
   contract_expiry?: string;
   market_status?: string;
@@ -69,6 +78,8 @@ interface MarketForecast {
 
 interface LiveQuote {
   ltp: number;
+  bid?: number;
+  ask?: number;
   open: number;
   high: number;
   low: number;
@@ -76,6 +87,7 @@ interface LiveQuote {
   volume: number;
   open_interest: number;
   last_trade_time: number;
+  retrieved_at?: number;
   market_status: string;
   contract_expiry?: string;
   trading_symbol?: string;
@@ -352,10 +364,28 @@ export const GlobalCommodityForecastCard: React.FC = () => {
                   </span>
                 )}
               </div>
-              <div className="text-[10px] text-stone-400 mt-0.5 flex flex-col gap-0.5">
+              {liveQuote && liveQuote.bid !== undefined && liveQuote.ask !== undefined && liveQuote.bid > 0 && (
+                <div className="flex items-center gap-2 mt-0.5 text-[10px] font-mono text-stone-400">
+                  <span>Bid: <strong className="text-stone-300">{forecast.currency} {liveQuote.bid.toLocaleString()}</strong></span>
+                  <span>•</span>
+                  <span>Ask: <strong className="text-stone-300">{forecast.currency} {liveQuote.ask.toLocaleString()}</strong></span>
+                </div>
+              )}
+              <div className="text-[10px] text-stone-400 mt-1 flex flex-col gap-0.5">
                 <span>
-                  7D Realized Range: <strong className="text-stone-300 font-mono">{forecast.currency} {(forecast.realized_7d?.low || forecast.price_range.lower).toLocaleString()} – {(forecast.realized_7d?.high || forecast.price_range.upper).toLocaleString()}</strong>
+                  7D Rolling Range: <strong className="text-stone-300 font-mono">{forecast.currency} {(forecast.realized_7d?.low || forecast.price_range.lower).toLocaleString()} – {(forecast.realized_7d?.high || forecast.price_range.upper).toLocaleString()}</strong>
+                  {forecast.realized_7d?.span_pct !== undefined && forecast.realized_7d.span_pct > 0 && (
+                    <span className="ml-1 text-[9px] text-amber-400 font-mono">({forecast.realized_7d.span_pct}%)</span>
+                  )}
                 </span>
+                {forecast.realized_7d?.completed_high !== undefined && forecast.realized_7d?.completed_low !== undefined && (
+                  <span className="text-[9px] text-stone-500 font-mono">
+                    Completed 7D: {forecast.currency} {forecast.realized_7d.completed_low.toLocaleString()} – {forecast.realized_7d.completed_high.toLocaleString()}
+                    {forecast.realized_7d.current_session_included && forecast.realized_7d.current_session_low !== undefined && (
+                      <span className="text-emerald-400/90 ml-1">| Session Low: {forecast.currency} {forecast.realized_7d.current_session_low.toLocaleString()}</span>
+                    )}
+                  </span>
+                )}
                 {forecast.forward_volatility_corridor && (
                   <span>
                     Forward 1.5σ Corridor: <strong className="text-indigo-300 font-mono">{forecast.currency} {forecast.forward_volatility_corridor.lower.toLocaleString()} – {forecast.forward_volatility_corridor.upper.toLocaleString()}</strong>
@@ -381,10 +411,17 @@ export const GlobalCommodityForecastCard: React.FC = () => {
                   </span>
                 )}
               </div>
-              <span className="text-[10px] text-stone-500 block mt-1 flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                Live Sync: {lastSyncTime.toLocaleTimeString()}
-              </span>
+              <div className="text-[10px] text-stone-500 mt-1 flex flex-col gap-0.5">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-stone-400" />
+                  Local Sync: {lastSyncTime.toLocaleTimeString()}
+                </span>
+                {liveQuote?.last_trade_time && (
+                  <span className="text-[9px] font-mono text-emerald-400/80">
+                    Exch Trade: {new Date(liveQuote.last_trade_time > 1e11 ? liveQuote.last_trade_time : liveQuote.last_trade_time * 1000).toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 

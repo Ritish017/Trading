@@ -321,7 +321,7 @@ class UniversalMarketDataFeed:
     async def get_historical_daily_candles(
         self,
         commodity_input: str,
-        lookback_days: int = 30,
+        lookback_days: int = 180,
         term: ContractTerm = ContractTerm.NEAR_MONTH,
     ) -> List[Dict[str, Any]]:
         """
@@ -339,8 +339,10 @@ class UniversalMarketDataFeed:
         should_close = (self._client is None)
         try:
             import datetime
-            now = datetime.datetime.now()
-            from_dt = now - datetime.timedelta(days=lookback_days + 15)
+            from zoneinfo import ZoneInfo
+            ist = ZoneInfo("Asia/Kolkata")
+            now = datetime.datetime.now(ist)
+            from_dt = now - datetime.timedelta(days=lookback_days + 30)
             to_str = now.strftime("%Y-%m-%d")
             from_str = from_dt.strftime("%Y-%m-%d")
 
@@ -413,7 +415,7 @@ class UniversalMarketDataFeed:
         quote = await self.get_live_quote(commodity_input, term=term)
         candles = await self.get_historical_daily_candles(
             commodity_input,
-            lookback_days=max(lookback_days, 30),
+            lookback_days=max(lookback_days, 180),
             term=term,
         )
         return technical_engine.compute_technicals(quote, candles)

@@ -34,13 +34,15 @@ class HistoricalAnalogy(BaseModel):
 
 class CommodityFundamentals(BaseModel):
     commodity_id: str
-    inventory_level_metric: str  # e.g. "EIA Commercial Crude: 425M bbls (-2.1M bbls vs 5yr avg)"
-    inventory_status: str  # DEFICIT, BALANCED, SURPLUS
-    seasonal_regime: str  # SUMMER_DRIVING_DEMAND, WINTER_HEATING_DEMAND, MONSOON_PLANTING, HARVEST_PRESSURE
+    inventory_level_metric: str = "DATA_UNAVAILABLE"
+    inventory_status: str = "UNKNOWN"  # UNKNOWN, DEFICIT, BALANCED, SURPLUS
+    seasonal_regime: str = "UNKNOWN"
     supply_disruption_detected: bool = False
     disruption_description: str = ""
-    futures_term_structure: str = "CONTANGO"  # CONTANGO or BACKWARDATION
+    futures_term_structure: str = "UNKNOWN"  # UNKNOWN, CONTANGO, BACKWARDATION
     basis_spread: float = 0.0
+    provenance: str = "DATA_UNAVAILABLE"
+    is_verified: bool = False
 
 
 # Authoritative Historical Analogy Reference Library (Real historical market regimes)
@@ -161,64 +163,22 @@ class DeterministicHistoricalEngine:
 
     def get_commodity_fundamentals(self, commodity_id: str) -> CommodityFundamentals:
         """
-        Returns structured deterministic fundamental data for commodities.
+        Returns structured fundamental data for commodities.
+        Zero mock values: If verified external API feed (WGC/EIA/LME) is not connected,
+        strictly returns UNKNOWN / DATA_UNAVAILABLE. Never invents purchase or inventory statistics.
         """
-        cid = commodity_id.upper()
-        if "CRUDE" in cid or "OIL" in cid:
-            return CommodityFundamentals(
-                commodity_id=commodity_id,
-                inventory_level_metric="EIA US Crude Inventory: 423.8M bbls (-1.8M bbls draw vs expected +0.5M)",
-                inventory_status="DEFICIT",
-                seasonal_regime="SUMMER_DRIVING_DEMAND",
-                supply_disruption_detected=True,
-                disruption_description="Middle Eastern tanker shipping route avoidance and Strait of Hormuz alert status.",
-                futures_term_structure="BACKWARDATION",
-                basis_spread=1.45,
-            )
-        elif "GOLD" in cid or "XAU" in cid:
-            return CommodityFundamentals(
-                commodity_id=commodity_id,
-                inventory_level_metric="Central Bank Net Gold Purchases: 387 tonnes YTD (RBI + People's Bank of China)",
-                inventory_status="DEFICIT",
-                seasonal_regime="INDIAN_FESTIVE_WEDDING_ACCUMULATION",
-                supply_disruption_detected=False,
-                disruption_description="Geopolitical de-dollarization flows accelerating sovereign reserves allocation.",
-                futures_term_structure="CONTANGO",
-                basis_spread=-0.80,
-            )
-        elif "NATGAS" in cid:
-            return CommodityFundamentals(
-                commodity_id=commodity_id,
-                inventory_level_metric="EIA Working Natural Gas in Underground Storage: 3,210 Bcf (+45 Bcf vs 5yr average)",
-                inventory_status="SURPLUS",
-                seasonal_regime="PRE_WINTER_STORAGE_INJECTION",
-                supply_disruption_detected=False,
-                disruption_description="Permian associated gas production at record highs maintaining robust supply.",
-                futures_term_structure="CONTANGO",
-                basis_spread=-0.35,
-            )
-        elif "COPPER" in cid:
-            return CommodityFundamentals(
-                commodity_id=commodity_id,
-                inventory_level_metric="LME Warehouse Stocks: 112,400 tonnes (-15% over 60 days)",
-                inventory_status="DEFICIT",
-                seasonal_regime="INDUSTRIAL_MANUFACTURING_CYCLE",
-                supply_disruption_detected=True,
-                disruption_description="Panama Cobre mine shutdown and Chilean grade decline.",
-                futures_term_structure="BACKWARDATION",
-                basis_spread=0.85,
-            )
-        else:
-            return CommodityFundamentals(
-                commodity_id=commodity_id,
-                inventory_level_metric="Global Exchange Tracked Stocks: Balanced supply-demand matrix",
-                inventory_status="BALANCED",
-                seasonal_regime="STANDARD_CYCLE",
-                supply_disruption_detected=False,
-                disruption_description="No acute physical bottlenecks reported across terminal warehouses.",
-                futures_term_structure="CONTANGO",
-                basis_spread=0.0,
-            )
+        return CommodityFundamentals(
+            commodity_id=commodity_id,
+            inventory_level_metric="DATA_UNAVAILABLE",
+            inventory_status="UNKNOWN",
+            seasonal_regime="UNKNOWN",
+            supply_disruption_detected=False,
+            disruption_description="No verified physical supply disruption feed connected.",
+            futures_term_structure="UNKNOWN",
+            basis_spread=0.0,
+            provenance="DATA_UNAVAILABLE",
+            is_verified=False,
+        )
 
 
 # Global deterministic historical engine instance

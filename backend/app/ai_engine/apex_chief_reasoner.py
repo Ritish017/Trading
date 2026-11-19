@@ -536,7 +536,8 @@ Output STRICTLY valid JSON with no markdown wrapping:
             )
 
         # Build evidence references with exact provenance
-        evidence_refs = [
+        # Collect only verified evidence references (zero fabricated attributions)
+        evidence_refs: List[Dict[str, Any]] = [
             {
                 "type": "MARKET_QUOTE",
                 "statement": f"{sym} verified price is {curr_currency} {curr_price:,.2f} ({curr_unit})",
@@ -549,19 +550,33 @@ Output STRICTLY valid JSON with no markdown wrapping:
                 "source": "UPSTOX_EXCHANGE_OHLCV",
                 "timestamp": now,
             },
-            {
-                "type": "FUNDAMENTALS",
-                "statement": fundamentals.get("inventory_level_metric", ""),
-                "source": "EIA / Official Inventories",
-                "timestamp": now,
-            },
-            {
-                "type": "NEWS_CATALYST",
-                "statement": news[0]["title"] if news else "Routine market consolidation",
-                "source": news[0].get("source", "RESEARCH_FEED") if news else "APEX Feed",
-                "timestamp": now,
-            },
         ]
+        if fundamentals and fundamentals.get("is_verified", False):
+            evidence_refs.append(
+                {
+                    "type": "FUNDAMENTALS",
+                    "statement": fundamentals.get("inventory_level_metric", ""),
+                    "source": fundamentals.get("provenance", "Official Inventories"),
+                    "timestamp": now,
+                }
+            )
+        if news and len(news) > 0 and news[0].get("title"):
+            evidence_refs.append(
+                {
+                    "type": "NEWS_CATALYST",
+                    "statement": news[0]["title"],
+                    "source": news[0].get("source", "RESEARCH_FEED"),
+                    "timestamp": now,
+                }
+            )
+
+        r7_low = round(float(realized_7d.get("low", curr_price * 0.95)), 2)
+        r7_high = round(float(realized_7d.get("high", curr_price * 1.05)), 2)
+        raw_r7_span = realized_7d.get("range_span_pct")
+        if raw_r7_span is not None and float(raw_r7_span) > 0:
+            r7_span_pct = round(float(raw_r7_span), 2)
+        else:
+            r7_span_pct = round(((r7_high - r7_low) / r7_low * 100.0) if r7_low > 0 else 0.0, 2)
 
         # STEP 10: PERSIST
         forecast = MarketForecast(
@@ -577,18 +592,23 @@ Output STRICTLY valid JSON with no markdown wrapping:
             forecast_timestamp=now,
             valid_until=now + 86400 * 7,  # 7 days baseline validity
             direction=parsed.get("direction", "NEUTRAL_CONSOLIDATION"),
-            confidence=float(parsed.get("confidence", 0.85)),
+            confidence=float(parsed.get("confidence", 0.65)),
             bullish_scenario=ScenarioDetail(**parsed["bullish_scenario"]),
             base_scenario=ScenarioDetail(**parsed["base_scenario"]),
             bearish_scenario=ScenarioDetail(**parsed["bearish_scenario"]),
             price_range={
-                "lower": round(float(realized_7d.get("low", envelope.get("7d", {}).get("lower_bound", curr_price * 0.95))), 2),
-                "upper": round(float(realized_7d.get("high", envelope.get("7d", {}).get("upper_bound", curr_price * 1.05))), 2),
+                "lower": r7_low,
+                "upper": r7_high,
             },
             realized_7d={
-                "low": round(float(realized_7d.get("low", curr_price * 0.95)), 2),
-                "high": round(float(realized_7d.get("high", curr_price * 1.05)), 2),
-                "span_pct": round(float(realized_7d.get("range_span_pct", realized_7d.get("span_pct", 0.0))), 2),
+                "low": r7_low,
+                "high": r7_high,
+                "span_pct": r7_span_pct,
+                "completed_high": realized_7d.get("completed_high"),
+                "completed_low": realized_7d.get("completed_low"),
+                "current_session_high": realized_7d.get("current_session_high"),
+                "current_session_low": realized_7d.get("current_session_low"),
+                "current_session_included": realized_7d.get("current_session_included", False),
             },
             realized_14d={
                 "low": round(float(realized_14d.get("low", curr_price * 0.93)), 2),
@@ -608,7 +628,7 @@ Output STRICTLY valid JSON with no markdown wrapping:
             market_status=market_status,
             is_synthetic_legacy=False,
             expected_change_percent=float(parsed["base_scenario"].get("expected_change_pct", 0.0)),
-            volatility_assessment=f"Realized 7D Span: {realized_7d.get('range_span_pct', realized_7d.get('span_pct', 0.0))}% | Forward 1.5σ Corridor",
+            volatility_assessment=f"Realized 7D Span: {r7_span_pct}% | Forward 1.5σ Corridor",
             horizons=horizons,
             self_challenge_critique=parsed.get(
                 "self_challenge_critique",
@@ -651,22 +671,30 @@ Output STRICTLY valid JSON with no markdown wrapping:
         base_delta_pct = round(((base_target - curr_price) / curr_price) * 100.0, 2)
         bear_delta_pct = round(((bear_target - curr_price) / curr_price) * 100.0, 2)
 
-        is_deficit = fundamentals.get("inventory_status") == "DEFICIT"
-        is_bull_oi = oi_trend in ("LONG_BUILDUP", "SHORT_COVERING")
-        if is_deficit or is_bull_oi:
-            p_bull, p_base, p_bear = 0.45, 0.35, 0.20
+        # Requirement 9: Never let missing fundamentals automatically generate a bullish or bearish bias.
+        is_verified_fund = fundamentals.get("is_verified", False)
+        inv_status = fundamentals.get("inventory_status", "UNKNOWN")
+        is_deficit = (inv_status == "DEFICIT") if is_verified_fund else False
+        is_surplus = (inv_status == "SURPLUS") if is_verified_fund else False
+
+        # Direction strictly driven by verified price action and open interest
+        if is_deficit or oi_trend == "LONG_BUILDUP":
+            p_bull, p_base, p_bear = 0.40, 0.35, 0.25
             direction = "BULLISH"
-        elif oi_trend in ("SHORT_BUILDUP", "LONG_UNWINDING"):
+        elif is_surplus or oi_trend == "SHORT_BUILDUP":
             p_bull, p_base, p_bear = 0.20, 0.35, 0.45
             direction = "BEARISH"
+        elif oi_trend in ("LONG_UNWINDING", "SHORT_COVERING"):
+            p_bull, p_base, p_bear = 0.25, 0.45, 0.30
+            direction = "NEUTRAL_CONSOLIDATION"
         else:
             p_bull, p_base, p_bear = 0.30, 0.45, 0.25
             direction = "NEUTRAL_CONSOLIDATION"
 
-        # Explicit dialectical evidence points
+        # Explicit dialectical evidence points (Zero fabricated inventory claims)
         rsi_val = getattr(technicals, "rsi_14", None) if technicals else 50.0
-        rsi_str = f"RSI 14 at {rsi_val}" if rsi_val is not None else "Momentum neutral"
-        inv_metric = fundamentals.get("inventory_level_metric") or "Physical demand steady"
+        rsi_str = f"RSI 14 at {rsi_val:.1f}" if rsi_val is not None else "Momentum neutral"
+        inv_metric = fundamentals.get("inventory_level_metric") if is_verified_fund else "Physical inventory feed unverified (Neutral fundamental baseline)"
         r7 = realized_7d or {}
 
         bullish_evidence = [
@@ -685,9 +713,16 @@ Output STRICTLY valid JSON with no markdown wrapping:
             "Risk of physical demand moderation under higher terminal interest rates",
         ]
 
+        # Calibrated model confidence based on verified data completeness
+        calibrated_conf = 0.65
+        if is_verified_fund:
+            calibrated_conf += 0.10
+        if technicals and technicals.sma_20 is not None:
+            calibrated_conf += 0.05
+
         return {
             "direction": direction,
-            "confidence": 0.82,
+            "confidence": round(calibrated_conf, 2),
             "bullish_scenario": {
                 "price_target": bull_target,
                 "probability": p_bull,

@@ -186,7 +186,7 @@ class ToolsService:
                     f"Price Integrity Gateway rejected {symbol} quote: {val_res.error_message} ({val_res.verdict.value})"
                 )
 
-            candles = await feed.get_historical_daily_candles(clean_code, lookback_days=lookback_bars)
+            candles = await feed.get_historical_daily_candles(clean_code, lookback_days=max(lookback_bars, 180))
             tech = technical_engine.compute_technicals(quote, candles)
 
             # Ensure SMAs/EMAs provide verified price when historical candle span is shorter than lookback window
@@ -283,95 +283,38 @@ class ToolsService:
         ]
 
     def search_recent_financial_news(self, query: str = "", hours_back: int = 24) -> List[Dict[str, Any]]:
-        """Tool 4: Search recent financial news with sentiment and credibility."""
+        """Tool 4: Search recent financial news with sentiment and credibility (Zero fabricated articles)."""
         articles = global_research_engine.search_articles(query=query if query else None, limit=6)
         if not articles:
-            return [
-                {
-                    "title": "Physical Precious Metals Witness Steady Institutional Accumulation",
-                    "source": "Kitco Metals News",
-                    "published_at": time.strftime("%Y-%m-%d %H:%M"),
-                    "credibility": 8.5,
-                    "summary": "Gold and silver witness steady physical accumulation as bond yields consolidate.",
-                    "url": "https://www.kitco.com/news/safe-haven-gold-bids",
-                },
-                {
-                    "title": "Commercial Petroleum Inventory Draws Spark Oil Complex Activity",
-                    "source": "OilPrice Energy News",
-                    "published_at": time.strftime("%Y-%m-%d %H:%M"),
-                    "credibility": 8.0,
-                    "summary": "Commercial crude inventories fell 1.8 million barrels exceeding consensus expectations.",
-                    "url": "https://oilprice.com/energy/eia-crude-draw",
-                },
-            ]
+            return []
         return [a.model_dump() for a in articles]
 
     def search_commodity_specific_news(self, commodity: str, category: str = "ALL") -> List[Dict[str, Any]]:
-        """Tool 5: Search news targeted at specific commodities."""
+        """Tool 5: Search news targeted at specific commodities (Zero fabricated articles)."""
         articles = global_research_engine.search_articles(instrument_id=commodity, query=commodity, limit=5)
-        return [a.model_dump() for a in articles] or self.search_recent_financial_news(query=commodity)
+        return [a.model_dump() for a in articles]
 
     def search_official_announcements(self, authority: str = "ALL") -> List[Dict[str, Any]]:
         """Tool 6: Search official central bank (RBI, Fed) and regulatory announcements."""
-        return [
-            {
-                "authority": "Reserve Bank of India (RBI)",
-                "type": "MONETARY_POLICY",
-                "title": "RBI MPC Maintains Repo Rate at 6.50% with Neutral Stance",
-                "credibility_score": 10.0,
-                "timestamp": time.time() - 86400,
-                "official_url": "https://www.rbi.org.in/press-releases/mpc-neutral",
-                "key_takeaway": "Inflation path projected toward 4.0% durable target; growth supported.",
-            },
-            {
-                "authority": "US Federal Reserve",
-                "type": "FOMC_MINUTES",
-                "title": "FOMC Emphasizes Balanced Employment and Inflation Risk Mandate",
-                "credibility_score": 10.0,
-                "timestamp": time.time() - 172800,
-                "official_url": "https://www.federalreserve.gov/press-releases/fomc-minutes",
-                "key_takeaway": "Balance sheet runoff continues according to planned taper parameters.",
-            },
-        ]
+        # Returns verified announcements only; zero placeholder URLs
+        return []
 
     def get_economic_indicators(self, country: str = "INDIA") -> Dict[str, Any]:
-        """Tool 7: Key macro economic indicators."""
-        if country.upper() in ("INDIA", "IN"):
-            return {
-                "country": "India",
-                "cpi_inflation_pct": 4.65,
-                "gdp_growth_pct": 6.8,
-                "repo_rate_pct": 6.50,
-                "forex_reserves_billion_usd": 692.5,
-                "fiscal_deficit_gdp_pct": 4.9,
-                "current_account_deficit_pct": 1.1,
-            }
+        """Tool 7: Key macro economic indicators (Returns DATA_UNAVAILABLE if feed not connected)."""
         return {
-            "country": "United States",
-            "cpi_inflation_pct": 2.6,
-            "core_pce_pct": 2.7,
-            "fed_funds_rate_pct": 4.75,
-            "us_10y_yield_pct": 4.38,
-            "us_2y_yield_pct": 4.22,
-            "unemployment_rate_pct": 4.1,
+            "country": country,
+            "status": "DATA_UNAVAILABLE",
+            "provenance": "UNVERIFIED",
+            "message": "Live macroeconomic database integration pending. Zero-mock policy enforced.",
         }
 
     def get_currency_data(self, pair: str = "USDINR") -> Dict[str, Any]:
-        """Tool 8: Currency exchange rates and foreign exchange dynamics."""
-        rates = {
-            "USDINR": 84.42,
-            "EURUSD": 1.082,
-            "GBPUSD": 1.295,
-            "USDJPY": 152.4,
-            "DXY": 104.25,
-        }
-        val = rates.get(pair.upper(), 84.42)
+        """Tool 8: Currency exchange rates (Returns DATA_UNAVAILABLE if direct feed not connected)."""
         return {
             "pair": pair.upper(),
-            "exchange_rate": val,
-            "dxy_index": 104.25,
-            "daily_change_pct": -0.12,
-            "rbi_reference_rate": 84.40,
+            "status": "DATA_UNAVAILABLE",
+            "provenance": "UNVERIFIED",
+            "message": "Direct currency spot API feed not configured. Zero-mock policy enforced.",
         }
 
     def get_commodity_fundamentals(self, commodity: str) -> Dict[str, Any]:

@@ -1168,16 +1168,19 @@ async def get_instrument_forecast(instrument_id: str, auto_generate: bool = True
     from backend.app.market_data.mcx.contract_resolver import active_contract_resolver
 
     latest = forecast_store.get_latest_forecast(instrument_id, allow_quarantined=False)
-    if not latest and auto_generate:
+    is_stale = forecast_store.is_forecast_stale(latest) if latest else True
+
+    if (not latest or is_stale) and auto_generate:
         try:
             from backend.app.ai_engine.apex_chief_reasoner import apex_chief_reasoner
             latest = await apex_chief_reasoner.execute_forecast_pipeline(
                 instrument_id=instrument_id,
-                trigger_reason="ON_DEMAND_READ",
+                trigger_reason="SESSION_ROLLOVER" if (latest and is_stale) else "ON_DEMAND_READ",
             )
             forecast_store.save_forecast(latest)
+            is_stale = False
         except Exception as e:
-            logger.warning(f"Could not auto-generate live forecast for {instrument_id}: {e}")
+            logger.warning(f"Could not auto-generate fresh forecast for {instrument_id}: {e}")
 
     # Instantaneous live exchange tick for real-time streaming
     live_quote = None
@@ -1187,6 +1190,8 @@ async def get_instrument_forecast(instrument_id: str, auto_generate: bool = True
             q = await universal_feed_service.get_live_quote(clean_code)
             live_quote = {
                 "ltp": q.ltp,
+                "bid": q.bid_price,
+                "ask": q.ask_price,
                 "open": q.open,
                 "high": q.high,
                 "low": q.low,
@@ -1194,6 +1199,7 @@ async def get_instrument_forecast(instrument_id: str, auto_generate: bool = True
                 "volume": q.volume,
                 "open_interest": q.open_interest,
                 "last_trade_time": q.last_trade_time,
+                "retrieved_at": q.retrieved_at,
                 "market_status": q.market_status,
                 "contract_expiry": q.contract_expiry,
                 "trading_symbol": q.trading_symbol,
@@ -1205,6 +1211,7 @@ async def get_instrument_forecast(instrument_id: str, auto_generate: bool = True
     return {
         "latest": latest.model_dump() if latest else None,
         "live_quote": live_quote,
+        "is_stale": is_stale,
         "history": [fc.model_dump() for fc in history],
         "total_versions": len(history),
     }

@@ -15,7 +15,8 @@ CRITICAL ZERO-TRUST INVARIANTS:
 import time
 import math
 import logging
-from typing import Dict, Any, List, Optional
+import asyncio
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import asdict
 import pandas as pd
 import numpy as np
@@ -57,29 +58,73 @@ TOP_WATCHLIST_SYMBOLS = [
 ]
 
 
-def generate_canonical_candles(symbol: str, count: int = 120, base_price: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Generates canonical historical candle sequence obeying financial invariants."""
-    p0 = base_price or (canonical_store.get_canonical_quote(symbol).ltp if canonical_store.get_canonical_quote(symbol) else _symbol_basis(symbol))
+def get_authentic_candles_sync(symbol: str, count: int = 120) -> Tuple[List[Dict[str, Any]], bool]:
+    """
+    Retrieves authentic historical candles for symbol.
+    Returns (candles, is_authentic: bool).
+    Zero synthetic sine waves permitted.
+    """
+    try:
+        from backend.app.config import settings
+        from backend.app.broker_providers.upstox_client import UpstoxRESTClient
+        tok = settings.get_upstox_token
+        if tok:
+            client = UpstoxRESTClient(token=tok)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    bars = executor.submit(lambda: asyncio.run(client.get_historical_candles(symbol, interval="1d"))).result(timeout=6.0)
+            else:
+                bars = asyncio.run(client.get_historical_candles(symbol, interval="1d"))
+
+            if bars and len(bars) >= 2:
+                return (bars[-count:], True)
+    except Exception as e:
+        logger.debug(f"[COMMAND CENTER] Upstox candle fetch for {symbol}: {e}")
+
+    try:
+        from backend.app.ai_engine.tools_service import ToolsService
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                bars = executor.submit(lambda: asyncio.run(ToolsService._fetch_macro_yahoo_candles(symbol, days=count))).result(timeout=6.0)
+        else:
+            bars = asyncio.run(ToolsService._fetch_macro_yahoo_candles(symbol, days=count))
+        if bars and len(bars) >= 2:
+            return (bars[-count:], True)
+    except Exception as e:
+        logger.debug(f"[COMMAND CENTER] Yahoo candle fetch for {symbol}: {e}")
+
+    # Fallback: strictly labeled as SYNTHETIC / SIMULATED with zero sine-wave distortion
+    cq = canonical_store.get_canonical_quote(symbol)
+    p0 = cq.ltp if cq and cq.ltp > 0 else _symbol_basis(symbol)
     now = int(time.time())
     candles: List[Dict[str, Any]] = []
-
-    curr_p = p0 * 0.90
     for i in range(count):
         ts = now - ((count - i) * 86400)
-        ret = 0.0012 + (0.0035 * math.sin(i / 8.0))
-        curr_p = round(curr_p * (1.0 + ret), 2)
-        h = round(curr_p * 1.012, 2)
-        l = round(curr_p * 0.989, 2)
-        o = round((curr_p + l) / 2.0, 2)
-        v = int(100000 + 50000 * abs(math.sin(i / 5.0)))
         candles.append({
             "timestamp": ts,
-            "open": o,
-            "high": h,
-            "low": l,
-            "close": curr_p,
-            "volume": v,
+            "open": p0,
+            "high": p0,
+            "low": p0,
+            "close": p0,
+            "volume": 0,
         })
+    return (candles, False)
+
+
+def generate_canonical_candles(symbol: str, count: int = 120, base_price: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Generates authentic historical candle sequence or deterministic baseline bars (Zero sine waves)."""
+    candles, _ = get_authentic_candles_sync(symbol, count=count)
     return candles
 
 
@@ -94,17 +139,18 @@ class ResearchCommandCenterOrchestrator:
         Gathers and structures evidence from all underlying engines with zero-trust provenance.
         """
         now = int(time.time())
-        candles = input_candles if input_candles else generate_canonical_candles(symbol, count=120)
+        if input_candles:
+            candles = input_candles
+            is_authentic_data = True
+        else:
+            candles, is_authentic_data = get_authentic_candles_sync(symbol, count=120)
+
         prov_map: Dict[str, EvidenceProvenance] = {}
 
         # Zero-trust verification against canonical quote store
         canonical_quote = canonical_store.get_canonical_quote(symbol)
-        is_authentic_live = bool(canonical_quote and canonical_quote.is_live)
-        raw_provider_name = canonical_quote.provider if canonical_quote else "UPSTOX"
-        # A market snapshot identifies the broker/data provider, not the
-        # transport used to receive a quote.  Transport-specific provenance
-        # remains on CanonicalQuote; exposing it here made one broker appear as
-        # several providers (for example, UPSTOX vs UPSTOX_WS_PROTOBUF).
+        is_authentic_live = bool(canonical_quote and canonical_quote.is_live and is_authentic_data)
+        raw_provider_name = canonical_quote.provider if canonical_quote else ("UPSTOX" if is_authentic_data else "SIMULATED")
         provider_name = "UPSTOX" if raw_provider_name.startswith("UPSTOX_") else raw_provider_name
 
         # 1. Evaluate all 20 strategies dynamically from STRATEGY_REGISTRY
@@ -117,7 +163,7 @@ class ResearchCommandCenterOrchestrator:
         regime_evidence = regime_info.get("evidence", f"Market regime: {regime}") if isinstance(regime_info, dict) else str(regime_info)
 
         last_c = candles[-1]
-        prev_c = candles[-2]
+        prev_c = candles[-2] if len(candles) >= 2 else last_c
         curr_price = float(canonical_quote.ltp) if (canonical_quote and canonical_quote.ltp) else float(last_c.get("close", 2500.0))
         prev_close = float(canonical_quote.previous_close) if (canonical_quote and canonical_quote.previous_close) else float(prev_c.get("close", curr_price))
         change_pct = round(((curr_price - prev_close) / max(0.01, prev_close)) * 100.0, 2)
@@ -125,23 +171,16 @@ class ResearchCommandCenterOrchestrator:
 
         # Compute data age & freshness strictly from source timestamp
         data_age_sec = max(0, now - candle_ts)
-        classification = EvidenceClassification.RAW_AUTHENTIC_DATA
-        if is_authentic_live:
-            freshness = "LIVE"
-            confidence_basis = "Direct verified market feed observation"
+        if is_authentic_data:
+            classification = EvidenceClassification.RAW_AUTHENTIC_DATA
             data_status = ProvenanceDataStatus.AVAILABLE
-        elif data_age_sec <= 300:
-            freshness = "RECENT"
-            confidence_basis = "Recent market observation"
-            data_status = ProvenanceDataStatus.AVAILABLE
-        elif data_age_sec <= 86400:
-            freshness = "RECENT_HISTORICAL"
-            confidence_basis = "Historical session observation"
-            data_status = ProvenanceDataStatus.AVAILABLE
+            confidence_basis = "Direct verified market feed observation" if is_authentic_live else "Historical exchange candle series"
+            freshness = "LIVE" if is_authentic_live else ("RECENT" if data_age_sec <= 300 else "HISTORICAL")
         else:
-            freshness = "HISTORICAL"
-            confidence_basis = "Historical dataset sequence"
-            data_status = ProvenanceDataStatus.AVAILABLE
+            classification = EvidenceClassification.SYNTHETIC
+            data_status = ProvenanceDataStatus.SIMULATED
+            confidence_basis = "Simulated baseline — authentic exchange candles unavailable"
+            freshness = "SIMULATED"
 
         market_snap = MarketSnapshot(
             symbol=symbol,
@@ -159,23 +198,42 @@ class ResearchCommandCenterOrchestrator:
             market_status="OPEN" if (canonical_quote and canonical_quote.market_session_open) else "CLOSED",
         )
 
-        prov_map["current_price"] = EvidenceProvenance(
-            metric_key="current_price",
-            value=curr_price,
-            unit="INR",
-            classification=EvidenceClassification.RAW_AUTHENTIC_DATA,
-            source="UPSTOX_TICK_STREAM" if is_authentic_live else "CANONICAL_STORE",
+        prov_map["market_data"] = EvidenceProvenance(
+            metric_key="market_data",
+            value=f"{len(candles)} bars",
+            unit="BARS",
+            classification=classification,
+            source="UPSTOX_CANDLE_STREAM" if is_authentic_live else ("YAHOO_CHART_API" if is_authentic_data else "SYNTHETIC_GENERATOR"),
             provider=provider_name,
             source_timestamp=candle_ts,
             calculation_timestamp=now,
             market_timestamp=candle_ts,
             data_status=data_status,
             freshness=freshness,
-            calculation_method="LTP_FROM_EXCHANGE",
+            calculation_method="DIRECT_BAR_RETRIEVAL" if is_authentic_data else "FLAT_BASELINE_FALLBACK",
+            dependencies=["EXCHANGE_OHLCV_SERIES"],
+            is_derived=False,
+            is_point_in_time_valid=True,
+            confidence_basis=confidence_basis,
+        )
+
+        prov_map["current_price"] = EvidenceProvenance(
+            metric_key="current_price",
+            value=curr_price,
+            unit="INR",
+            classification=classification,
+            source="UPSTOX_TICK_STREAM" if is_authentic_live else ("EXCHANGE_LAST_CLOSE" if is_authentic_data else "CANONICAL_STORE"),
+            provider=provider_name,
+            source_timestamp=candle_ts,
+            calculation_timestamp=now,
+            market_timestamp=candle_ts,
+            data_status=data_status,
+            freshness=freshness,
+            calculation_method="LTP_FROM_EXCHANGE" if is_authentic_data else "FALLBACK_PRICE",
             dependencies=["EXCHANGE_LTP_FEED"],
             is_derived=False,
             is_point_in_time_valid=True,
-            confidence_basis="Direct verified market feed observation" if is_authentic_live else "Canonical exchange store observation",
+            confidence_basis=confidence_basis,
         )
 
         prov_map["market_regime"] = EvidenceProvenance(

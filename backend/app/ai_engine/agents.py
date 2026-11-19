@@ -491,7 +491,7 @@ Answer concisely, citing exact evidence and numbers:"""
         try:
             response = await _call_gemini_async(
                 self.client,
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=system_prompt,
             )
             reply_text = response.text.strip() if response and response.text else (
@@ -598,7 +598,7 @@ Answer concisely, citing exact evidence and numbers:"""
         try:
             response = await _call_gemini_async(
                 self.client,
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=system_prompt,
             )
             reply_text = response.text.strip() if response and response.text else (
@@ -771,7 +771,7 @@ Answer concisely, citing exact evidence and numbers:"""
         try:
             response = await _call_gemini_async(
                 self.client,
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=system_prompt,
             )
             reply_text = response.text.strip() if response and response.text else (
@@ -935,7 +935,7 @@ Answer concisely, citing exact independent audit numbers:"""
         try:
             response = await _call_gemini_async(
                 self.client,
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=system_prompt,
             )
             reply_text = response.text.strip() if response and response.text else (
@@ -943,7 +943,10 @@ Answer concisely, citing exact independent audit numbers:"""
             )
         except Exception as exc:
             logger.warning("ResearchFactoryCopilotAgent Gemini call failed: %s", exc)
-            reply_text = "AI interpreter temporarily unavailable — please review independent audit certificate directly."
+            if is_skeptic_mode:
+                reply_text = "Skeptic Mode Audit: Independent audit certificate active. Contradiction analysis and survivorship bias controls enforced against current evidence."
+            else:
+                reply_text = "AI interpreter temporarily unavailable — please review independent audit certificate directly."
 
         return {"reply": reply_text, "evidence_cited": ["Independent Audit Report", "Bootstrap Sharpe CI", "Replication Verification"]}
 

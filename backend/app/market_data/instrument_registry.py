@@ -612,6 +612,8 @@ UNIVERSAL_INSTRUMENTS: List[InstrumentDefinition] = [
         data_source="UPSTOX",
         trading_calendar="INDIAN_NSE",
         description="Flagship Indian benchmark index of 50 bluechip equities.",
+        instrument_key="NSE_INDEX|Nifty 50",
+        fallback_spot_symbol="^NSEI",
     ),
     InstrumentDefinition(
         instrument_id="BANKNIFTY_NSE",
@@ -629,6 +631,8 @@ UNIVERSAL_INSTRUMENTS: List[InstrumentDefinition] = [
         data_source="UPSTOX",
         trading_calendar="INDIAN_NSE",
         description="Top 12 banking institutions in India.",
+        instrument_key="NSE_INDEX|Nifty Bank",
+        fallback_spot_symbol="^NSEBANK",
     ),
 
     # --- CURRENCIES & MACRO ---
@@ -648,6 +652,8 @@ UNIVERSAL_INSTRUMENTS: List[InstrumentDefinition] = [
         data_source="UPSTOX",
         trading_calendar="INDIAN_NSE",
         description="US Dollar vs Indian Rupee currency futures.",
+        instrument_key="NSE_FO|USDINR",
+        fallback_spot_symbol="USDINR=X",
     ),
     InstrumentDefinition(
         instrument_id="DXY_INDEX",

@@ -6,6 +6,13 @@ logger = logging.getLogger(__name__)
 # Master dictionary mapping symbol aliases to official Upstox Instrument Keys & metadata
 INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
     # Benchmark Indices
+    "NIFTY50_NSE": {
+        "instrument_key": "NSE_INDEX|Nifty 50",
+        "exchange": "NSE",
+        "segment": "NSE_INDEX",
+        "instrument_type": "INDEX",
+        "display_name": "NIFTY 50 Benchmark"
+    },
     "NIFTY 50": {
         "instrument_key": "NSE_INDEX|Nifty 50",
         "exchange": "NSE",
@@ -20,6 +27,13 @@ INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
         "instrument_type": "INDEX",
         "display_name": "NIFTY 50 Benchmark"
     },
+    "BANKNIFTY_NSE": {
+        "instrument_key": "NSE_INDEX|Nifty Bank",
+        "exchange": "NSE",
+        "segment": "NSE_INDEX",
+        "instrument_type": "INDEX",
+        "display_name": "NIFTY Bank Index"
+    },
     "BANKNIFTY": {
         "instrument_key": "NSE_INDEX|Nifty Bank",
         "exchange": "NSE",
@@ -33,6 +47,27 @@ INSTRUMENT_MAP: Dict[str, Dict[str, Any]] = {
         "segment": "NSE_INDEX",
         "instrument_type": "INDEX",
         "display_name": "NIFTY Bank Index"
+    },
+    "USDINR_NSE": {
+        "instrument_key": "NSE_FO|USDINR",
+        "exchange": "NSE",
+        "segment": "NSE_FO",
+        "instrument_type": "CURRENCY",
+        "display_name": "USD/INR Currency Pair"
+    },
+    "USDINR": {
+        "instrument_key": "NSE_FO|USDINR",
+        "exchange": "NSE",
+        "segment": "NSE_FO",
+        "instrument_type": "CURRENCY",
+        "display_name": "USD/INR Currency Pair"
+    },
+    "BTCUSD": {
+        "instrument_key": "GLOBAL_INDEX|BTCUSD",
+        "exchange": "GLOBAL_INDEX",
+        "segment": "CRYPTO",
+        "instrument_type": "CRYPTO",
+        "display_name": "Bitcoin / USD"
     },
     "FINNIFTY": {
         "instrument_key": "NSE_INDEX|Nifty Fin Service",

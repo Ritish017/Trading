@@ -68,6 +68,33 @@ class FactorPortfolioEngine:
     """
 
     @classmethod
+    async def _fetch_universe_price_history(cls, symbols: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch real historical daily candles for universe symbols with fallback to Yahoo chart bars."""
+        from backend.app.config import settings
+        from backend.app.broker_providers.upstox_client import UpstoxRESTClient
+        from backend.app.ai_engine.tools_service import ToolsService
+
+        price_map: Dict[str, List[Dict[str, Any]]] = {}
+        tok = settings.get_upstox_token
+        client = UpstoxRESTClient(token=tok) if tok else None
+
+        for sym in symbols:
+            candles = []
+            if client:
+                try:
+                    candles = await client.get_historical_candles(sym, interval="1d")
+                except Exception:
+                    pass
+            if not candles:
+                try:
+                    candles = await ToolsService._fetch_macro_yahoo_candles(sym, days=365)
+                except Exception:
+                    pass
+            if candles:
+                price_map[sym] = candles
+        return price_map
+
+    @classmethod
     async def simulate_factor_portfolio(
         cls,
         universe_symbols: List[str],
@@ -78,7 +105,7 @@ class FactorPortfolioEngine:
         initial_capital: float = 1000000.0,
     ) -> FactorPortfolioSimulationResult:
         """
-        Executes point-in-time cross-sectional factor ranking and periodic rebalancing.
+        Executes point-in-time cross-sectional factor ranking and periodic rebalancing with authentic historical returns.
         """
         defn = FACTOR_REGISTRY.get(factor_id)
         if not defn:
@@ -94,6 +121,9 @@ class FactorPortfolioEngine:
             ("2024-09-01", 1725148800),
             ("2024-12-01", 1733011200),
         ]
+
+        if not price_history_map:
+            price_history_map = await cls._fetch_universe_price_history(universe_symbols)
 
         current_holdings: Dict[str, float] = {}
         capital = initial_capital
@@ -136,8 +166,28 @@ class FactorPortfolioEngine:
             top_sec_wt = (max(sector_counts.values()) / max(1, n_sel)) * 100.0 if sector_counts else 0.0
             hhi = sum((cnt / max(1, n_sel)) ** 2 for cnt in sector_counts.values()) * 10000.0 if sector_counts else 0.0
 
-            # Period Return Simulation (Synthetic or historical price change)
-            ret_pct = float(np.random.normal(3.5, 4.0)) if idx > 0 else 0.0
+            # Period Return Calculation from genuine historical prices (Zero synthetic/random numbers)
+            ret_pct = 0.0
+            if idx > 0 and current_holdings:
+                prev_ts = rebalance_dates[idx - 1][1]
+                weighted_rets = []
+                for sym, wt in current_holdings.items():
+                    candles = price_history_map.get(sym, [])
+                    sym_ret = 0.0
+                    if candles:
+                        p_start = None
+                        p_end = None
+                        for c in candles:
+                            c_ts = c.get("timestamp", 0)
+                            if c_ts <= prev_ts:
+                                p_start = c.get("close")
+                            if c_ts <= reb_ts:
+                                p_end = c.get("close")
+                        if p_start and p_end and p_start > 0:
+                            sym_ret = ((float(p_end) - float(p_start)) / float(p_start)) * 100.0
+                    weighted_rets.append(wt * sym_ret)
+                ret_pct = round(sum(weighted_rets), 2)
+
             period_returns.append(ret_pct)
             capital = capital * (1.0 + (ret_pct / 100.0))
             equity_curve.append(round(capital, 2))
@@ -157,10 +207,26 @@ class FactorPortfolioEngine:
             rebalance_events.append(event)
             current_holdings = target_weights
 
-        tot_ret = ((capital - initial_capital) / initial_capital) * 100.0
-        cagr = ((capital / initial_capital) ** (1.0 / 2.0) - 1.0) * 100.0
-        sharpe = round(float(np.mean(period_returns) / (np.std(period_returns) + 1e-6) * np.sqrt(4)), 2)
-        max_dd = 8.5  # Bounded max drawdown
+        tot_ret = round(((capital - initial_capital) / initial_capital) * 100.0, 2)
+        years = max(0.25, (len(rebalance_events) - 1) / 4.0)
+        cagr = round((((capital / initial_capital) ** (1.0 / years)) - 1.0) * 100.0, 2) if capital > 0 else 0.0
+
+        nonzero_rets = [r for r in period_returns[1:]] if len(period_returns) > 1 else [0.0]
+        std_ret = float(np.std(nonzero_rets))
+        mean_ret = float(np.mean(nonzero_rets))
+        sharpe = round(float((mean_ret / (std_ret + 1e-6)) * np.sqrt(4)), 2) if std_ret > 0 else 0.0
+
+        # Dynamic empirical max drawdown calculation
+        peak = equity_curve[0]
+        max_dd = 0.0
+        for val in equity_curve:
+            if val > peak:
+                peak = val
+            dd = ((peak - val) / peak) * 100.0 if peak > 0 else 0.0
+            if dd > max_dd:
+                max_dd = dd
+        max_dd = round(max_dd, 2)
+
         avg_turn = float(np.mean([e.turnover_pct for e in rebalance_events]))
         avg_hhi = float(np.mean([e.sector_hhi for e in rebalance_events]))
 
@@ -170,8 +236,8 @@ class FactorPortfolioEngine:
             rebalance_frequency=rebalance_frequency,
             universe_size=len(universe_symbols),
             total_rebalances=len(rebalance_events),
-            cagr_pct=round(cagr, 2),
-            total_return_pct=round(tot_ret, 2),
+            cagr_pct=cagr,
+            total_return_pct=tot_ret,
             sharpe_ratio=sharpe,
             max_drawdown_pct=max_dd,
             annual_turnover_pct=round(avg_turn * 4.0, 1),

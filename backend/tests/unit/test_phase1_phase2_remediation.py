@@ -339,11 +339,18 @@ def test_no_fabricated_news_urls():
     announcements = tools.search_official_announcements()
     assert announcements == [], "Unverified official announcements must return empty list"
 
-    macro = tools.get_economic_indicators("INDIA")
+    macro = tools.get_economic_indicators("UNKNOWN_COUNTRY")
     assert macro.get("status") == "DATA_UNAVAILABLE"
 
-    fx = tools.get_currency_data("USDINR")
+    fx = tools.get_currency_data("UNKNOWN_PAIR")
     assert fx.get("status") == "DATA_UNAVAILABLE"
+
+    # For supported country INDIA and pair USDINR, verify strict provenance
+    india_macro = tools.get_economic_indicators("INDIA")
+    assert india_macro.get("provenance") == "RESERVE_BANK_OF_INDIA_OFFICIAL"
+
+    usdinr_fx = tools.get_currency_data("USDINR")
+    assert usdinr_fx.get("provenance") == "YAHOO_FINANCE_VERIFIED"
 
 
 # ---------------------------------------------------------------------------

@@ -3,8 +3,8 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/*.py": {
-      "includeFiles": "{docs/**,backend/**}",
-      "excludeFiles": "{frontend/**,scripts/**,.agents/**,backend/tests/**,logs/**,*.db,*.png}"
+      "includeFiles": "backend/**",
+      "excludeFiles": "{frontend/**,docs/**,scripts/**,.agents/**,backend/tests/**,backend/data/cache/**,logs/**,*.db,*.png,*.jpg,*.jpeg}"
     }
   },
   "rewrites": [
